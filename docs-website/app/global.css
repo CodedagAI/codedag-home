@@ -229,8 +229,9 @@ body {
 }
 
 @media (max-width: 639px) {
-  /* In waitlist mode the sign-up button sits on the bar here too; a smaller
-     minimum gap after the logo keeps it on one line down to 360px. */
+  /* In waitlist mode the sign-up button and the language button sit on the
+     bar here too; a smaller minimum gap after the logo leaves them more room.
+     How they shrink on narrower screens: BAR_FIT in components/navbar.tsx. */
   #nd-nav[data-layout='page'] nav {
     padding-left: 1.25rem !important;
     padding-right: 1.25rem !important;

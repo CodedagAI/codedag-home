@@ -67,7 +67,7 @@ interface CustomHeaderProps extends BaseLayoutProps {
   /**
    * 右侧登录区插槽（AuthArea）。
    * ≥sm 显示在控件区最右；<sm 时默认不显示，由调用方通过 on:'menu' 的 custom 项
-   * 放进移动端下拉菜单；entryOnBar 为真且是 page 布局时留在栏上，搜索和语言改由下拉菜单提供。
+   * 放进移动端下拉菜单；entryOnBar 为真且是 page 布局时留在栏上，与语言按钮并排，搜索改由下拉菜单提供。
    */
   authSlot?: React.ReactNode;
   /**
@@ -249,7 +249,7 @@ function ThemeToggle({
   );
 }
 
-// 栏上的语言图标与下拉菜单里的语言项共用这套切换逻辑
+// 语言按钮的切换逻辑
 function useLanguageSwitch() {
   const context = useI18n();
   const pathname = usePathname();
@@ -402,14 +402,14 @@ export function CustomHeader({
     return { navItems, menuItems };
   }, [links, githubUrl]);
 
-  // waitlist 模式下首页、定价页等在 <sm 把入口按钮放在栏上，搜索和语言收进下拉菜单；
-  // 文档页，以及 beta、live 模式，保持栏上放这两个图标、入口收进菜单
+  // waitlist 模式下首页、定价页等在 <sm 把入口按钮放在栏上，与语言按钮并排，搜索收进下拉菜单；
+  // 文档页，以及 beta、live 模式，保持栏上放搜索和语言两个图标、入口收进菜单
   const barEntry = layout === 'page' && entryOnBar;
 
   return (
     <HeaderNavigationMenu data-layout={layout}>
-      {/* 左侧区域: Logo 和标题 (左对齐)。375 以下间距收到 9，配合标题字号回到 16，
-          日文最长的报名按钮在 360 宽时仍和标题排在一行 */}
+      {/* 左侧区域: Logo 和标题 (左对齐)。375 以下间距收到 9，配合标题字号回到 16；
+          更窄时标题和入口按钮怎么按语言收缩见 navbar.tsx 的 BAR_FIT */}
       <Link
         href={nav.url ?? '/'}
         className="inline-flex items-center gap-2.75 font-semibold max-[374px]:gap-2.25"
@@ -428,8 +428,14 @@ export function CustomHeader({
           ))}
       </ul>
 
-      {/* 右侧区域: 控件 (右对齐) */}
-      <div className="flex items-center justify-end gap-1.5 ml-auto max-sm:min-w-0">
+      {/* 右侧区域: 控件 (右对齐)。page 在 <sm 栏上并排语言、入口和菜单三个按钮，间距收到 4，
+          图标按钮自带内边距，看上去仍隔得开 */}
+      <div
+        className={cn(
+          'flex items-center justify-end gap-1.5 ml-auto max-sm:min-w-0',
+          barEntry && 'max-sm:gap-1',
+        )}
+      >
         {/* Desktop: lg 以上显示搜索框 */}
         {searchToggle.enabled !== false && (
           <LargeSearchToggle className="w-full max-w-60 max-lg:hidden" />
@@ -455,13 +461,14 @@ export function CustomHeader({
           ))}
         </ul>
 
-        {/* Mobile: lg 以下显示搜索按钮（page 在 <sm 改由菜单里的搜索项提供） */}
+        {/* Mobile: lg 以下显示搜索按钮（page 在 <sm 改由菜单里的搜索项提供，栏上的位置留给语言和入口） */}
         {searchToggle.enabled !== false && (
           <SearchToggle className={cn('p-2 lg:hidden', barEntry && 'max-sm:hidden')} />
         )}
-        {/* Mobile: lg 以下显示多语言（page 在 <sm 改由菜单里的语言项提供） */}
+        {/* Mobile: lg 以下显示多语言。page 在 <sm 也留在栏上，紧挨入口按钮，
+            不熟悉英文的访客一眼能看到；内边距收一点，给入口按钮让出位置 */}
         {i18n && (
-          <LanguageToggle className={cn('p-2 lg:hidden', barEntry && 'max-sm:hidden')}>
+          <LanguageToggle className={cn('p-2 lg:hidden', barEntry && 'max-sm:p-1.5')}>
             <Languages className="size-5" />
           </LanguageToggle>
         )}
@@ -502,11 +509,10 @@ export function CustomHeader({
               .map((item, i) => (
                 <MobileNavigationMenuLinkItem key={i} item={item} />
               ))}
-            {/* page 在 <sm 不在栏上放搜索和语言图标，改放在菜单里 */}
-            {barEntry && (
+            {/* page 在 <sm 不在栏上放搜索图标，改放在菜单里 */}
+            {barEntry && searchToggle.enabled !== false && (
               <div className="flex flex-col sm:hidden">
-                {searchToggle.enabled !== false && <MobileSearchItem />}
-                {i18n && <MobileLanguageItem />}
+                <MobileSearchItem />
               </div>
             )}
           </NavigationMenuContent>
@@ -635,7 +641,7 @@ function NavigationMenuLinkItem({
   );
 }
 
-// 下拉菜单里一行一项的样式：导航链接、搜索项、语言项共用
+// 下拉菜单里一行一项的样式：导航链接、搜索项共用
 const mobileMenuItem =
   'inline-flex items-center gap-2 py-1.5 transition-colors hover:text-fd-popover-foreground/50 data-[active=true]:font-medium data-[active=true]:text-home-accent [&_svg]:size-4';
 
@@ -657,45 +663,6 @@ function MobileSearchItem() {
         {text.search}
       </button>
     </NavigationMenuLink>
-  );
-}
-
-// 菜单里的语言项：首页、定价页等 <sm 不在栏上放语言图标，几种语言在这里排成一行
-function MobileLanguageItem() {
-  const { context, handleLanguageChange } = useLanguageSwitch();
-
-  if (!context.locales || context.locales.length <= 1) return null;
-
-  return (
-    <div
-      role="group"
-      aria-label={context.text.chooseLanguage}
-      className="flex items-center gap-2 [&_svg]:size-4"
-    >
-      <Languages />
-      <div className="flex">
-        {context.locales.map((locale: LocaleItem) => (
-          <NavigationMenuLink
-            key={locale.locale}
-            asChild
-            active={locale.locale === context.locale}
-          >
-            <button
-              type="button"
-              lang={locale.locale}
-              className={cn(
-                mobileMenuItem,
-                'px-2 first:ps-0',
-                locale.locale === context.locale && 'font-medium text-home-accent',
-              )}
-              onClick={() => handleLanguageChange(locale.locale)}
-            >
-              {locale.name}
-            </button>
-          </NavigationMenuLink>
-        ))}
-      </div>
-    </div>
   );
 }
 

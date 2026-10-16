@@ -23,30 +23,68 @@ import { cn } from '@/lib/cn';
 
 /**
  * 导航栏主按钮的样式：与首屏、收尾的主按钮同一套扁平品牌色（home.css 的 --home-cta*），
- * 三种模式共用，waitlist 的单个按钮和 beta、live 未登录时的第二个按钮都是它。
- * 窄于 360 时左右内边距收一点，英文文案在 320 宽的栏上也能排成一行
+ * 三种模式共用，waitlist 的单个按钮和 beta、live 未登录时的第二个按钮都是它
  */
 const NAV_CTA_CLASS =
-  'inline-flex h-8 items-center whitespace-nowrap rounded-lg bg-home-cta px-3.5 text-sm font-medium text-white antialiased transition-colors hover:bg-home-cta-hover active:bg-home-cta-active focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand max-[359px]:px-3';
+  'inline-flex h-8 items-center whitespace-nowrap rounded-lg bg-home-cta px-3.5 text-sm font-medium text-white antialiased transition-colors hover:bg-home-cta-hover active:bg-home-cta-active focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand';
+
+/**
+ * 窄于 640 时，waitlist 模式的首页、定价页等在栏上并排放标题、语言按钮、主按钮和菜单按钮。
+ * 主按钮的文案长短随语言差得多，栏宽不够时按语言分档收缩：先缩主按钮的字号和内边距，
+ * 再缩标题，标题与语言按钮之间至少留出 global.css 给的 8px。
+ * 日文最长，390 以下把主按钮拆成两行，firstLine 是第一行，文案不以它开头时仍排一行
+ */
+const BAR_FIT: Record<string, { title?: string; cta?: string; firstLine?: string }> = {
+  en: {
+    title: 'max-[339px]:text-sm',
+    cta: 'max-[359px]:px-2.5 max-[359px]:text-xs max-[339px]:px-2',
+  },
+  zh: {
+    cta: 'max-[339px]:px-2.5 max-[339px]:text-[13px]',
+  },
+  ja: {
+    title: 'max-[339px]:text-[15px]',
+    cta: 'max-[411px]:px-3 max-[411px]:text-[13px] max-[389px]:h-9 max-[389px]:flex-col max-[389px]:justify-center max-[389px]:leading-[1.15] max-[339px]:px-2 max-[339px]:text-xs',
+    firstLine: 'ウェイトリスト',
+  },
+};
 
 /**
  * 导航栏右侧入口，随主页模式变化（见 lib/site-mode.ts）：
  * waitlist 模式只有一个进入 /waitlist 的按钮，不挂载 AuthArea，也就不向 App 站发请求，点击时上报 cta 事件；
  * beta 与 live 模式挂载 AuthArea，未登录时第二个按钮的目标与文案由入口模块给出，这两个模式的按钮不上报；
  * 已登录时头像带悬浮菜单（控制台、账号设置、退出登录），退出经 App 的 /logout 页再回到当前页。
+ * onBar 表示栏上的那一份，waitlist 模式窄屏时按 BAR_FIT 收缩；菜单里的那一份不收缩
  */
-function NavEntry({ locale, source }: { locale: string; source: EntrySource }) {
+function NavEntry({
+  locale,
+  source,
+  onBar = false,
+}: {
+  locale: string;
+  source: EntrySource;
+  onBar?: boolean;
+}) {
   const start = getStartEntry(locale, source);
 
   if (siteMode === 'waitlist') {
+    const fit = onBar ? BAR_FIT[locale] : undefined;
+    const firstLine = fit?.firstLine;
     return (
       <TrackedAnchor
         href={start.href}
-        className={NAV_CTA_CLASS}
+        className={cn(NAV_CTA_CLASS, fit?.cta)}
         event="cta"
         source={start.source}
       >
-        {start.label}
+        {firstLine && start.label.startsWith(firstLine) ? (
+          <>
+            <span>{firstLine}</span>
+            <span>{start.label.slice(firstLine.length)}</span>
+          </>
+        ) : (
+          start.label
+        )}
       </TrackedAnchor>
     );
   }
@@ -199,7 +237,14 @@ export function Navbar() {
         title: (
           <>
             {logo}
-            <span className="text-lg font-medium max-[374px]:text-base">CodeDAG</span>
+            <span
+              className={cn(
+                'text-lg font-medium max-[374px]:text-base',
+                entryOnBar && !isDocsActive && BAR_FIT[currentLang]?.title,
+              )}
+            >
+              CodeDAG
+            </span>
           </>
         ),
       }}
@@ -207,7 +252,7 @@ export function Navbar() {
       entryOnBar={entryOnBar}
       i18n={true}
       themeSwitch={{ enabled: false }}
-      authSlot={<NavEntry locale={currentLang} source="nav" />}
+      authSlot={<NavEntry locale={currentLang} source="nav" onBar />}
       links={[
         // Features, Pricing
         ...mainLinks,
