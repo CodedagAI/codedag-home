@@ -188,7 +188,7 @@ const translations: Record<SupportedLocale, HomepageTranslations> = {
     meta: {
       title: 'CodeDAG：编程 Agent 的编排引擎',
       description:
-        'CodeDAG 是编程 Agent 的编排引擎，在你自己的电脑上运行。把一批开发任务和它们之间的依赖写成一个工作流文件，CodeDAG 按依赖调度：每个任务一个全新的 Agent 会话、一条自己的分支，结果自动合并到集成分支，由你决定何时合入主分支。',
+        '把一批开发任务和它们之间的依赖写成一个工作流文件，CodeDAG 在你自己的电脑上按依赖调度：每个任务一个全新的 Agent 会话、一条自己的分支，结果自动合并到集成分支，由你决定何时合入主分支。',
     },
     tasks: ['写方案', '写测试', '做接口', '做页面', '跑通测试', '审查改动'],
     hero: {
@@ -377,7 +377,7 @@ const translations: Record<SupportedLocale, HomepageTranslations> = {
     meta: {
       title: 'CodeDAG — The orchestration engine for coding agents',
       description:
-        'CodeDAG is the orchestration engine for coding agents. Declare a batch of development tasks and their dependencies in one workflow file; it schedules them on your machine, each task in a fresh agent session on its own branch, and merges the results into one integration branch for you to land.',
+        'Declare a batch of development tasks and their dependencies in one workflow file. CodeDAG schedules them on your machine, runs each task in a fresh agent session on its own branch, and merges the results into one integration branch for you to land.',
     },
     tasks: [
       'Write the spec',
@@ -584,7 +584,7 @@ const translations: Record<SupportedLocale, HomepageTranslations> = {
     meta: {
       title: 'CodeDAG — コーディングエージェントのオーケストレーションエンジン',
       description:
-        'CodeDAG は、コーディングエージェントのためのオーケストレーションエンジンです。開発タスクとその依存関係を 1 つのワークフローファイルに書くと、手元のマシンで依存関係に従ってスケジュールします。各タスクは新しいエージェントセッションと専用のブランチで進み、結果は統合ブランチに自動でマージされます。メインブランチにマージするかどうかは自分で決められます。',
+        '開発タスクとその依存関係を 1 つのワークフローファイルに書くと、CodeDAG が手元のマシンで依存関係に従ってスケジュールします。各タスクは新しいエージェントセッションと専用のブランチで進み、結果は統合ブランチに自動でマージされます。メインブランチにマージするかどうかは自分で決められます。',
     },
     tasks: [
       '仕様を書く',
