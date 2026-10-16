@@ -206,18 +206,20 @@ export async function generateMetadata({
 
   // Remove language prefix from URL for hreflang alternates
   const pathWithoutLang = removeLanguagePrefix(page.url);
+  // 规范地址和分享地址都指向本语言的这一页，中文、日文页不指向英文页
+  const alternates = generateAlternates(pathWithoutLang, lang);
 
   return createMetadata({
     title: page.data.title,
     description,
     openGraph: {
-      url: pathWithoutLang,
+      url: alternates.canonical,
       images: [image],
     },
     twitter: {
       images: [image],
     },
-    alternates: generateAlternates(pathWithoutLang),
+    alternates,
   });
 }
 
