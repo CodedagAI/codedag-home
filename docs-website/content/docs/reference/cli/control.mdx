@@ -1,0 +1,179 @@
+---
+title: Control and Intervene
+description: The syntax, scope, and requirements of the pause, unpause, kill, and recover commands, cdg task view, and cdg branch release.
+icon: CirclePause
+---
+
+After you submit a workflow, you control its execution with `pause`, `unpause`, `kill`, and `recover`, and you enter a task's agent session with `cdg task view{:sh}`. For when to use each one and how to talk to the agent once you're in a session, see [Intervene and Control](/docs/guides/intervene-and-control). The last two sections cover things you'll rarely need: two confirmation options for when a recovery can't go ahead, and `cdg branch release{:sh}`, which releases a branch name that's being held.
+
+## Control command syntax and applicable states [#syntax]
+
+Each of the four commands (pause, unpause, kill, and recover) has a workflow-level form and a task-level form. The workflow-level form applies the operation to every task in the workflow, and the task-level form handles only the tasks you specify. Each command changes only tasks in particular states and leaves the rest as they are.
+
+| Operation | Workflow level | Task level | Tasks affected |
+|---|---|---|---|
+| Pause | `cdg dag pause [workflow...]{:sh}` | `cdg task pause <task> [-w <workflow>]{:sh}` | Running tasks (`working`) aren't interrupted. Each shows `draining` until its agent stops, then becomes `paused`. Tasks waiting for upstream (`blocked`) and `on-hold` tasks become `paused` right away and don't start |
+| Unpause | `cdg dag unpause [workflow...]{:sh}` | `cdg task unpause <task> [-w <workflow>]{:sh}` | Tasks paused before they started go back to waiting and start as usual once their conditions are met. Tasks that were running when paused and have since finished their current turn and stopped at `paused` are treated as complete: they become `done` and go to review. Tasks still `draining` go back to `working` and finish as usual. `on-hold` tasks aren't affected, and a task paused after it was put on hold returns to its original hold. `killed` tasks aren't resumed. Use `recover` for them |
+| Kill | `cdg dag kill [workflow...]{:sh}` | `cdg task kill <task> [-w <workflow>]{:sh}` | `working`, `draining`, and `on-hold` tasks are killed immediately and become `killed`. `blocked` tasks, which haven't started, become `paused` |
+| Recover | `cdg dag recover [workflow...]{:sh}` | `cdg task recover <task> [-w <workflow>]{:sh}` | `killed` agent tasks resume in their original session, and those with no session to resume are prepared again and started. For `paused` and `draining` tasks, the effect is the same as `unpause`. `on-hold` tasks continue once you've dealt with the reason for the hold |
+
+`<task>` is one or more task IDs, or task selectors. For what a command targets when you omit the workflow or the task, see [Scope and batch control](#control-scope). Workflow-level commands take no arguments other than the workflows. `cdg task kill{:sh}` and `cdg task recover{:sh}` each have one option for handling an abnormal situation. See [Options for when a recovery can't go ahead](#recovery-options).
+
+Control commands act only on workflows that have been submitted and are still in the queue, that is, workflows in the `submitted` phase. They don't run on a workflow that hasn't been submitted, or on one that has finished review and left the queue. To run a workflow again after its review is finished, clear the review and then submit it. See [Clear the review and resubmit](/docs/reference/cli/review#clear-and-resubmit). Within a queued workflow, these commands also don't affect `done` tasks, which have finished running and are waiting for review, or tasks that have already been reviewed individually. Handle `done` tasks with the [review commands](/docs/reference/cli/review).
+
+In isolated-branches mode, a task that has started keeps its workspace and one concurrency slot until it's reviewed, and pausing or killing it doesn't free them. After a command handles such a task, it prints a line noting what the task still holds. To let other independent tasks run first, let this task finish and review it, or end it with `cdg task review cancel{:sh}` or `defer`.
+
+### When a task or workflow is on hold or killed [#held-or-killed]
+
+- **`killed` tasks don't accept `unpause`:** These tasks stay as they are. The command prints `Not unpaused`, tells you to use `cdg task recover{:sh}` instead, and exits with code 1. When the command handles several tasks at once, these tasks are marked `killed (not unpaused, use recover)` in the result list.
+- **Tasks stopped during startup preparation:** When a task stops at `on-hold` during the preparation before it starts, or when you run `kill` on it after it stops there, deal with the cause and then run `cdg task recover{:sh}`. CodeDAG prepares the task again and starts a new agent session. If you no longer want to run the task, end it directly with `cdg task review cancel{:sh}` or `defer`. A task whose agent had already launched but was killed while sitting at a startup screen, such as the full-access warning or the sign-in screen, can be restarted the same way.
+- **Pausing an `on-hold` task whose session is still running:** When a Codex task is stopped at `on-hold` because of a problem with its agent session and the session is still running, `pause` moves it to `paused` and keeps the hold reason as it was. While it's paused, the task stays at `paused` no matter what happens in the session. `unpause` returns it to its original hold, and releasing the hold still takes `cdg task recover{:sh}`.
+- **The workflow itself is on hold:** A workflow-level hold is released with `cdg dag recover{:sh}`. The reason is shown on the workflow's `Reason:` line in `cdg dag status{:sh}`. For example, it's `startup-gate-blocked` when the workflow can't start because you don't have enough CodeDAG credits or need to sign in. While the reason is `startup-gate-blocked`, `cdg task recover{:sh}` and both `unpause` commands refuse to run until the hold is released. Deal with the cause, then run `cdg dag recover{:sh}`. The workflow tries to start again, and credits aren't deducted a second time. For the steps for each hold reason, see [A task or workflow is on hold](/docs/troubleshooting/troubleshooting#on-hold).
+
+## Scope and batch control [#control-scope]
+
+A workflow-level control command can handle several workflows at once, and a task-level control command handles one or more tasks in a single workflow. When you omit the target, both act on the workflow at the head of the queue.
+
+In a workflow-level command, `[workflow...]` can be omitted, or it can be one or more workflows separated by spaces. For the syntax, see [Specify a workflow](/docs/reference/cli#specify-workflow). You can name any workflow in the queue, including one that's still waiting and hasn't started. On such a workflow, `pause` and `kill` have the same effect: all of its tasks become `paused`. When its turn comes, it doesn't start. It stays at the head of the queue, and the workflows behind it wait too, until you recover it or end it with a review command.
+
+If some of the workflows you name can't be found, haven't been submitted, or are in a state the command can't change, the others aren't affected. The command prints an error for each such workflow, handles the rest as usual, and exits with code 1. The success summary gives the number that succeeded and the total number of targets, for example `Paused successfully for 1 of 2 workflows:`, and lists only the workflows that succeeded. When all of them succeed, it reads `Paused successfully for all 2 workflows:`, and the exit code is 0. The summaries for `unpause` and `kill` take the same form.
+
+A task-level command handles tasks in only one workflow at a time. Specify that workflow with `-w`. When `-w` is omitted, the command uses the workflow at the head of the queue. The task itself has no default and must be given: write one or more task IDs, or use task selectors to pick a group of tasks by their dependencies. In these four commands, every selector can take several task IDs, and the result is the union. For the syntax, see [Specify one or more tasks](/docs/reference/cli#task-ids) and [Task selectors](/docs/reference/cli#task-selectors).
+
+Selectors pick tasks by their dependencies alone and don't look at their current state. Each selected task is handled according to its own state: the command changes the tasks it applies to and leaves the others as they are, and a task it doesn't apply to never stops the rest from being handled. The two recovery-related options have further limits: `--acknowledge-unconfirmed` can be used on only one task at a time, and `--force-owner-release` handles only tasks stopped for a specific reason. See [Options for when a recovery can't go ahead](#recovery-options).
+
+In the examples below, the `feature` workflow is at the head of the queue: tasks 2 and 3 depend on task 1, task 4 depends on tasks 2 and 3, and task 5 depends on task 4. The `docs` workflow is behind it and hasn't started.
+
+| What you want to do | Command | Scope and result |
+|---|---|---|
+| Pause the workflow at the head of the queue | `cdg dag pause{:sh}` | In `feature`, running tasks pause once their agents stop, and tasks that haven't started don't start |
+| Keep a later workflow from starting when its turn comes | `cdg dag pause docs{:sh}` | All tasks in `docs` become `paused` |
+| Kill task 3 immediately and keep the tasks after it from starting | `cdg task kill --downfrom 3 -w feature{:sh}` | Tasks 3, 4, and 5: task 3, which is running, becomes `killed`, and tasks 4 and 5, which haven't started, become `paused` |
+| Unpause the downstream tasks you paused earlier with `--below 2` | `cdg task unpause --below 2 -w feature{:sh}` | Tasks 4 and 5 go back to waiting and start as usual once their conditions are met |
+| Recover the stopped tasks in two workflows at once | `cdg dag recover feature docs{:sh}` | Every task in `feature` and `docs` that can be recovered |
+
+## cdg task view [#task-view]
+
+`cdg task view{:sh}` attaches the current terminal to a task agent's native session. It can locate the session by task or directly by session ID. For how to send prompts and how to exit once you're in a session, see [Enter a session, make changes, and exit](/docs/guides/intervene-and-control#task-view).
+
+### Syntax and session lookup
+
+```bash title="Terminal"
+cdg task view <task-id> [-w <workflow>] [--session-id <session-id>] [--recover]
+cdg task view --session-id <session-id>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<task-id>` | The task to enter. Only one task ID is allowed, and task selectors aren't supported. When omitted, `--session-id` is required. |
+| `-w <workflow>` | The workflow the task belongs to. When omitted, it defaults to the workflow at the head of the queue. You can also name a workflow that has finished review and left the queue, to reopen the session of one of its tasks. |
+| `--session-id <session-id>` | A Claude Code or Codex session ID. With a task ID, the command uses it, in place of the session ID CodeDAG recorded, to reopen a session that has ended. On its own, the command uses it to find the task the session belongs to. |
+| `--recover` | When the task has been interrupted and its agent session isn't running, recovers the task without confirmation and enters the resumed session. When the task hasn't started, its session is still running, or the task has finished, it doesn't change the command's behavior. |
+
+Which session the command enters depends on the state of the task. If the task is running, or has stopped with its session still open, the command connects to that running session. If the task has finished or its review is finished, and the session has ended too, the command uses the agent's own resume feature to reopen the session in the task's original working directory, with the earlier conversation intact. If the task is still in the queue but its session is no longer running, the task has to be recovered before you can enter. For the rules, see "Requirements" below.
+
+Reopening a session that has ended requires its session ID. CodeDAG usually records the ID automatically. When it hasn't, the command asks you to add `--session-id`, and a Codex task's log also contains a warning that the session ID couldn't be extracted automatically. You can find the session ID in the agent's own records, for example in the `codex resume <session-id>` hint that Codex prints when it exits.
+
+```bash title="Terminal"
+# When task 3's session ID wasn't recorded, supply it yourself
+cdg task view 3 -w feature --session-id <session-id>
+```
+
+When you know only the session ID and not which workflow it belongs to, you can omit the task ID and `-w`:
+
+```bash title="Terminal"
+cdg task view --session-id <session-id>
+```
+
+CodeDAG then searches the queue and the reviewed workflows for the task that uses this session. If it finds a task that has left the queue, it opens the session in that task's original working directory. If it finds an active task in the queue, it follows the same rules as when you give a task ID, and it likewise asks first when the task needs to be recovered. If it finds more than one task, the command asks you to add the task ID and `-w`. If it finds none, it opens the session by that ID directly in the current directory.
+
+### Requirements
+
+`cdg task view{:sh}` needs a real interactive terminal. It passes your keystrokes unchanged to the agent's native interface, so it doesn't work properly in environments without an interactive terminal, such as scripts, CI, or an agent's shell tool. For what to use instead, see [Choose how to observe and make changes](/docs/guides/intervene-and-control#choose-intervention).
+
+The task must already have started running. A task that hasn't started has no session, so the command prints `Task has not started yet.` and exits. It doesn't enter a session, and it doesn't ask you to add `--session-id`. This covers tasks still waiting for upstream, tasks stopped during startup preparation, and tasks that were paused or killed before they ever started.
+
+When a task has stopped and its agent session isn't running either, entering the session requires recovering the task, and recovering makes it resume execution, so the command asks you first. This applies to `killed`, `paused`, and `on-hold` tasks, and to tasks that still show `working` or `draining` but whose worker process has exited. The command first explains the situation and then asks for confirmation, with No as the default:
+
+```bash title="Terminal"
+Task 3 is killed and its Agent session is not running.
+Entering the session requires recovering the task, which resumes its execution.
+To read what the task has done without resuming it, run 'cdg task logs 3 -w feature'.
+? Recover the task and enter its session? › No / Yes
+```
+
+If you choose Yes, the command recovers the task under the same rules as `cdg task recover{:sh}`, waits for the resumed session to be ready, and then connects. If you choose No, the command prints `Operation cancelled.` and exits, leaving the task and the queue as they were. Without an interactive terminal, the command doesn't show the question. It reports an error and exits with code 1. To recover the task in that case, add `--recover`.
+
+If you've already run `cdg task recover{:sh}` and the task shows `on-hold (agent-recovery-queued)`, the recovery is already queued. The command doesn't ask, and it enters once the resumed session is ready.
+
+You can enter two kinds of `on-hold` tasks without recovering them. For a task whose session is still running, the command connects directly. Entering doesn't release the hold: after you use the session to deal with the problem that stopped the task, you still have to run `cdg task recover{:sh}` before the task continues. For a task stopped at `merge-conflict`, the command reopens the merge-conflict session so that you can resolve the conflict by hand, and the task's state doesn't change.
+
+## Options for when a recovery can't go ahead [#recovery-options]
+
+`--acknowledge-unconfirmed` and `--force-owner-release` are two confirmation options, used only when a task is stopped for the corresponding hold reason. In both cases, CodeDAG can't confirm that the task's previous run has fully ended. To keep the same task from running twice or leaving changes of unknown origin, `recover` without the option leaves the task at `on-hold` until you've verified the situation and confirmed explicitly with the option.
+
+### --acknowledge-unconfirmed [#acknowledge-unconfirmed]
+
+```bash title="Terminal"
+cdg task recover <task-id> -w <workflow> --acknowledge-unconfirmed
+```
+
+This option applies only to Codex tasks. It lets through subagents whose outcome can't be verified. CodeDAG considers a task complete only after confirming that every subagent the task dispatched has ended. When a subagent leaves no session record that CodeDAG can read, there's no way to confirm whether it has ended or what it did, so the task is put on hold. `recover` without the option lets through only subagents whose records can be checked, not this one.
+
+When this happens, the `Diagnostic:` line of `cdg task status <task-id> -w <workflow>{:sh}` lists the subagent and marks it `state=unconfirmed`. After you run `cdg task recover{:sh}` without the option, the task is still stopped at `on-hold`, and the command tells you to verify the situation and then use this option.
+
+Before you confirm, verify what the subagent's previous run left behind:
+
+- The task's workspace has no unexpected changes. You can check with `git status` and `git diff` in the workspace.
+- No subagent is still running, and no command started by a subagent is still running. You can enter the task's session with `cdg task view{:sh}` and look at what Codex is currently showing.
+
+After you confirm, CodeDAG treats the listed subagents as ended and checks again whether the task is complete. If the main session has finished, the task completes in the normal way and is then auto-accepted or waits for review. If it hasn't, the task continues running. The confirmation covers only the subagents listed at that moment. If another subagent that can't be confirmed appears later, the task is put on hold again.
+
+A command can recover only one task with this option. If the command selects more than one task, it reports an error. `cdg dag recover{:sh}` doesn't have this option.
+
+### --force-owner-release [#force-owner-release]
+
+```bash title="Terminal"
+cdg task kill <task-id> -w <workflow> --force-owner-release
+cdg task recover <task-id> -w <workflow>
+```
+
+You need this option only when a task is stopped at `agent-worker-liveness-unknown`. The reason appears on the `Reason:` line of `cdg task status <task-id> -w <workflow>{:sh}`. It means that a process is still running under the worker process ID CodeDAG recorded, but CodeDAG can't confirm that it's the process that originally ran this task. To avoid having two agents work on the same task at once, `recover` doesn't start a new run in this situation, and the task stays at `on-hold`.
+
+Before you use the option, confirm that the original task really has stopped running:
+
+- `cdg task view <task-id> -w <workflow>{:sh}` can't connect to the original session and reports `Cannot reach the existing session of task …`. If it does connect, the session is still working, so don't release it.
+- `cdg task logs <task-id> -w <workflow> -f{:sh}` shows no new log output when you watch it for a while.
+- The files in the task's workspace have stopped changing. You can run `git status` again after a while and compare.
+
+After the command runs, the task becomes `killed`. CodeDAG doesn't send any signal to the original process and doesn't start a new run. It only stops waiting to confirm that process, and the command warns you that the original process may still be running. Then run `cdg task recover{:sh}`. CodeDAG resumes the original agent session in a new process, and the task continues.
+
+With this option, `cdg task kill{:sh}` handles only tasks stopped for this reason. Other tasks selected by the same command aren't killed.
+
+<Callout type="warn">If the original process is in fact still running, then after the recovery two agents modify the same workspace at once, and their changes may overwrite each other. If you aren't sure, wait until both the log and the workspace confirm that the original task has stopped, and only then run these two commands.</Callout>
+
+## cdg branch release [#branch-release]
+
+```bash title="Terminal"
+cdg branch release <branch-name...>
+```
+
+`cdg branch release{:sh}` releases a branch name that CodeDAG's sync repository is holding. Projects whose replicas are clones share branches between workspaces through the sync repository (remote `codedag-mirror`). When a branch kept there has the same name as a task's [`branchName`](/docs/reference/workflow-file#tasks-branch-name), the workflow can't use that name, and the task stops at `on-hold` (`branch-name-conflict`) when the workflow reaches it.
+
+To release a name, the command deletes the branch from the sync repository and then removes its remote-tracking ref in every registered workspace. Local branches of the same name in the workspaces aren't part of the release. You still have to [delete or rename](/docs/reference/branches-and-files#branch-name) them yourself, and the command lists each workspace that still has the local branch. The queue and task states aren't changed.
+
+You can give several branch names at once, separated by spaces, and a repeated name is handled only once. Run the command in any registered workspace of the project. The branches are checked as a batch first, and if any one of them can't be released, none of them are. A branch isn't released if it matches any of the following:
+
+- **A branch still in use:** The integration branch of a workflow in the queue, or a task branch that a task in the queue has already checked out. Wait until that workflow's review is finished and it has left the queue.
+- **A snapshot branch:** A snapshot branch saved by a review, whether or not that workflow is still in the queue. It holds the code as it was at that point, and once it's released, the code can't be restored.
+- **The only ref that keeps a task's result:** The branch is the only ref left in the sync repository that still reaches a task's result commit. The command's message calls it the merge source. Normally a task's result is kept by CodeDAG's own ref, so you run into this condition only when that ref has been lost.
+
+A task that stopped because of a same-named branch doesn't count as still using it. Freeing the name for that task is exactly what a release is for. The exit code is 0 when the release succeeds or when the sync repository never had the branch, so you can run the same command repeatedly. The exit code is 1, and no ref is changed, when a branch matches one of the conditions above, a branch name is invalid, or the command isn't run inside an initialized project.
+
+After the release, the command prints a `cdg task recover{:sh}` hint for the task that stopped because of this branch name. Follow it, and the task starts again on that branch. If a workspace still has a local branch of the same name, the command doesn't print the hint. Delete or rename the local branch first.
+
+## Related
+
+- [Intervene and Control](/docs/guides/intervene-and-control): When to pause, kill, or recover, and how to correct course and exit once you're in a session.
+- [Review](/docs/reference/cli/review): Give a decision on tasks and workflows that are done running, or stop tasks that are still running before you review them.
+- [Troubleshooting](/docs/troubleshooting/troubleshooting#on-hold): When a task or workflow is stopped at `on-hold`, deal with it according to the reason, and then recover it.

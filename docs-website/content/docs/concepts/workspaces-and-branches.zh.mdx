@@ -1,0 +1,160 @@
+---
+title: 工作区与分支
+description: 并行的任务怎样在各自的工作区和分支上隔离执行，结果怎样汇入集成分支，以及什么时候不需要这套隔离。
+icon: FolderGit2
+---
+
+CodeDAG 可以让一个工作流里互不依赖的任务同时修改同一个仓库。默认情况下，每个正在执行的任务独占一个工作区，也就是主仓库或它的一个副本，所以有几个工作区，最多就能同时执行几个任务；任务的改动提交在它自己的任务分支上，上游的结果由 CodeDAG 自动合并给下游，全部通过审核后汇到一条集成分支，你的主分支上不会多出提交。不编译、不运行测试的工作流用不着这套隔离，可以改用共享工作区模式。
+
+## 工作区 [#workspaces]
+
+几个任务同时改代码，不能共用一个目录：一个检出目录同一时刻只能在一条分支上，一个任务改到一半的代码，还会被另一个任务的编译和测试算进去。所以同时执行的每个任务都要有自己的一份检出。[项目](/zh/docs/concepts/how-it-works#project)的主仓库和每个副本正好各是一份，CodeDAG 把它们各称为一个**工作区**（workspace），执行任务时分配给任务。
+
+在默认的隔离分支模式下，每个任务独占一个工作区，从开始执行一直占到审核结束。所以工作区的数量就是同时执行的任务数的上限，`maxConcurrency` 只能把它再调低，见[同时执行几个任务由什么决定](/zh/docs/guides/parallel-workspaces#concurrency)。
+
+主仓库默认也是工作区，而且最先被分配任务，所以工作流运行期间它会被切换到任务分支上；想同时继续在主仓库里开发，可以让工作流只使用副本，见[想在工作流运行时同时手动开发](/zh/docs/guides/parallel-workspaces#keep-main-repo)。工作区里有未提交的改动时，CodeDAG 不会覆盖它们，任务会停在 `on-hold`，等你把改动提交或暂存后再恢复。
+
+工作区隔离的只是文件。数据库、端口、缓存目录这类本机资源仍然是几个工作区共用的，任务要用到它们时，需要你为各个工作区错开，比如使用不同的端口或不同的测试数据库。
+
+## 任务分支、集成分支与起点 [#branches]
+
+一个工作流里有好几个任务要改代码，有些还同时进行。它们的改动要能分开查看、分开退回，最后又要合到一起，而合起来的结果在你检查之前不该进入主分支。所以在默认的隔离分支模式下，每个任务的改动提交在它自己的**任务分支**上；所有任务分支从同一个提交开出，这个提交称为**起点**；通过审核的结果最后汇到一条**集成分支**上。CodeDAG 不在你的主分支上提交，结果何时、以什么方式[合入主分支](/zh/docs/guides/finish-and-merge#merge)，由你决定。
+
+以工作原理中的[菱形工作流](/zh/docs/concepts/how-it-works#workflow) `spec-to-code` 为例，它的任务和依赖是这样的：
+
+export const diamondChart = `flowchart LR
+  t1["任务 1<br/>起草接口契约"] --> t2["任务 2<br/>按契约写测试"]
+  t1 --> t3["任务 3<br/>按契约写实现"]
+  t2 --> t4["任务 4<br/>跑通测试"]
+  t3 --> t4`;
+
+<Tabs items={['图表', '代码']}>
+  <Tab value="图表">
+    <Mermaid chart={diamondChart} />
+  </Tab>
+  <Tab value="代码">
+    <DynamicCodeBlock lang="mermaid" code={diamondChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+对应的分支如下。每条任务分支都从起点开出，先合入上游已接受的结果，再提交自己的改动；最后汇入集成分支，`main` 没有任何变化。
+
+export const branchesChart = `%%{init: {"themeVariables": {"commitLabelFontSize": "12px"}}}%%
+gitGraph
+  commit id: "起点"
+  branch "cdg/spec-to-code/t1-起草接口契约"
+  commit id: "任务 1 的改动"
+  checkout main
+  branch "cdg/spec-to-code/t2-按契约写测试"
+  merge "cdg/spec-to-code/t1-起草接口契约" id: "任务 2 合入上游"
+  commit id: "任务 2 的改动"
+  checkout main
+  branch "cdg/spec-to-code/t3-按契约写实现"
+  merge "cdg/spec-to-code/t1-起草接口契约" id: "任务 3 合入上游"
+  commit id: "任务 3 的改动"
+  checkout main
+  branch "cdg/spec-to-code/t4-跑通测试"
+  merge "cdg/spec-to-code/t2-按契约写测试" id: "任务 4 合入任务 2"
+  merge "cdg/spec-to-code/t3-按契约写实现" id: "任务 4 合入任务 3"
+  commit id: "任务 4 的改动"
+  checkout main
+  branch "cdg/spec-to-code/integration"
+  merge "cdg/spec-to-code/t4-跑通测试" id: "汇入集成分支"`;
+
+<Tabs items={['图表', '代码']}>
+  <Tab value="图表">
+    <Mermaid chart={branchesChart} />
+  </Tab>
+  <Tab value="代码">
+    <DynamicCodeBlock lang="mermaid" code={branchesChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+起点在工作流开始执行时才取定，而不是提交时：写了 [`baseRef`](/zh/docs/reference/workflow-file#base-ref) 就是它那一刻指向的提交，没写就是主仓库那一刻检出的提交。
+
+所有任务审核完成后，CodeDAG 在主仓库里检出集成分支，把结果合并进去，所以工作流结束后主仓库停在集成分支上，不会切回你原来的分支。下一个工作流如果没写 `baseRef`，你也没有切回主分支，它就接着这个集成分支的结果开始。
+
+## 汇聚节点的合并与冲突 [#merge-and-conflicts]
+
+一个任务依赖几个并行的上游时，几路结果分别在各自的任务分支上，它开始之前得先把它们合并，有冲突还要先解决。这样的任务称为汇聚节点。
+
+这一步由谁来做，通常有两种设计。一种是手动：由写工作流的人在每个汇聚节点前加一个节点，专门合并分支、解决冲突。另一种是自动：由编排引擎在汇聚节点开始之前完成。CodeDAG 采用后一种。同一个菱形工作流，在两种设计下分别是这样的：
+
+export const mergeCompareChart = `%%{init: {"flowchart": {"padding": 10, "rankSpacing": 32}}}%%
+flowchart TB
+  subgraph manual["手动：由你添加合并节点"]
+    direction LR
+    m1["任务 1<br/>起草接口契约"] --> m2["任务 2<br/>按契约写测试"]
+    m1 --> m3["任务 3<br/>按契约写实现"]
+    m2 --> m4["任务 4<br/>合并分支，解决冲突"]
+    m3 --> m4
+    m4 --> m5["任务 5<br/>跑通测试"]
+  end
+  subgraph auto["自动：CodeDAG 的做法"]
+    direction LR
+    t1["任务 1<br/>起草接口契约"] --> t2["任务 2<br/>按契约写测试"]
+    t1 --> t3["任务 3<br/>按契约写实现"]
+    subgraph t4["任务 4"]
+      direction LR
+      tm(["CodeDAG 自动合并<br/>并解决冲突"]) --> tw["跑通测试"]
+    end
+    t2 --> tm
+    t3 --> tm
+  end
+  manual ~~~ auto
+  style tm stroke-dasharray: 5 5`;
+
+<Tabs items={['图表', '代码']}>
+  <Tab value="图表">
+    <Mermaid chart={mergeCompareChart} />
+  </Tab>
+  <Tab value="代码">
+    <DynamicCodeBlock lang="mermaid" code={mergeCompareChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+手动的设计下，工作流里除了开发任务还要写合并任务，分叉越多越繁琐。CodeDAG 把这件事交给引擎：汇聚节点开始之前，它把各路上游已接受的结果**自动合并**进这个任务的分支，也就是图中任务 4 里的虚线框。所以在 CodeDAG 的工作流里，只需要写开发任务和它们之间的依赖，不需要另写合并任务。
+
+合并出现冲突时，CodeDAG 另开一个 Agent 会话专门解决，最多三轮：它能看到每一路上游任务的标题和 prompt，按各自的意图合并，不做汇聚节点本身的工作。三轮仍未解决，这个任务停在 `on-hold`，等你在它的工作区里完成合并、再恢复任务，步骤见故障排除的[合并冲突](/zh/docs/troubleshooting/troubleshooting#hold-merge-conflict)。
+
+所有任务审核完成后汇入集成分支，也是同样的自动合并，冲突的处理相同，只是三轮仍未解决时，停在 `on-hold` 的是整个工作流。
+
+## 不满意时的退路 [#fallback]
+
+一个任务的结果不能用时，你只想退回这一个任务。它的改动都在自己的任务分支上，退回不会牵连别的任务，要定的只是两件事：退回到哪里，原来的结果留不留。CodeDAG 为它们各准备了一样东西：
+
+- **干净起点**：上游结果已经合并、任务还没动手的那个提交。任务分支退回到这里，丢掉的只是这个任务自己的改动，上游合并进来的结果还在。
+- **快照分支**：退回之前用来留档的分支，保存任务当时的改动。这些改动不会流向下游，之后还能取回。
+
+审核时处理改动的几种方式，都是这两者的组合：留不留快照（`--code snapshot` 或 `--code discard`），退回之后要不要开一个全新的会话重做（`rework`）。怎样选见[按你的判断选择动作](/zh/docs/guides/review-tasks#choose-action)，取回的做法见[取回快照中的部分改动](/zh/docs/reference/branches-and-files#restore-from-snapshot)。
+
+## 执行模式 [#execution-modes]
+
+每个任务一个工作区、一条任务分支，这套隔离是为同时改代码的任务准备的：一个任务编译或运行测试时，不会把另一个任务改到一半的代码算进去。写文档、做翻译、做调研这类任务不编译也不运行测试，受不到这种干扰；为它们准备副本、建分支、合并和提交，只是额外的开销。
+
+所以 CodeDAG 让每个工作流自己选择要不要这套隔离，这个选择称为**执行模式**，在工作流文件里用 [`executionMode`](/zh/docs/reference/workflow-file#execution-mode) 设置。默认是**隔离分支模式**（`isolated-branches`），也就是前面几节讲的做法。另一种是**共享工作区模式**（`shared-workspace`）：所有任务直接在同一个工作区里执行，不建分支、不合并、不提交，[快速开始](/zh/docs/get-started/quickstart)用的就是它。
+
+共享工作区模式下，所有任务默认在主仓库的当前分支上执行，结果以未提交的改动留在工作区里，由你检查后自己提交。它不需要副本，同时执行的任务数只由 `maxConcurrency` 决定。
+
+省掉隔离的代价，是失去按任务追溯和退回的能力：CodeDAG 不再区分哪些改动属于哪个任务，任务分支、自动合并、快照、丢弃和重做在这个模式下都不存在。写入也不再隔离，同时执行的任务改到同一个文件时会怎样，见[两个并行任务改了同一个文件怎么办](/zh/docs/guides/designing-tasks-and-prompts#same-file)。所以修改代码、运行测试的工作，仍然适合默认的隔离分支模式。

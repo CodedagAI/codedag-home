@@ -1,0 +1,418 @@
+---
+title: 第二个工作流：让它改代码
+description: 用主仓库加一个 worktree 并行完成两个待办，看到任务分支与集成分支，再把结果合入主分支。
+icon: GitFork
+---
+
+## 你将完成什么
+
+这个工作流有三个任务。任务 1 在你的项目里挑出两个最快能完成的待办，把每一项的目标、涉及的文件和完成标准写进 `docs/plans/two-small-changes.md`。任务 2 和任务 3 都依赖任务 1，各负责其中一项，先写最小的测试，再实现到测试通过，两者在两条互相隔离的代码分支上同时执行。三个任务都完成后，CodeDAG 把结果合并到集成分支 `cdg/two-small-changes/integration`。
+
+export const twoSmallChangesChart = `flowchart LR
+  t1["任务 1<br/>挑选两个待办<br/>写出实施计划"] --> t2["任务 2<br/>实现第一项"]
+  t1 --> t3["任务 3<br/>实现第二项"]
+  t2 --> m1(["集成分支<br/>cdg/two-small-changes/integration"])
+  t3 --> m1`;
+
+<Tabs items={['图表', '代码']}>
+  <Tab value="图表">
+    <Mermaid chart={twoSmallChangesChart} />
+  </Tab>
+  <Tab value="代码">
+    <DynamicCodeBlock lang="mermaid" code={twoSmallChangesChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+这里的待办，指项目里已经记下、还没动手的小事，比如代码里的 TODO 或 FIXME 注释、文档里的待办清单，或者 issue 跟踪工具里的条目。你不用事先挑好，任务 1 会自己去找，并按你的角色和负责范围筛选；实在没有合适的，它会提出两个小改动来代替。
+
+和快速开始不同，这个工作流使用 CodeDAG 默认的隔离分支模式：每个任务在自己的工作区、自己的任务分支上修改代码，提交和合并由 CodeDAG 完成。
+
+<Callout type="info">
+这个工作流运行期间，CodeDAG 会切换你仓库的分支：主仓库和 worktree 分别被切到正在执行的任务分支上；全部完成后，主仓库停在集成分支 `cdg/two-small-changes/integration`，而不是你原来所在的 `main`。`main` 本身不会多出任何提交，结果要不要合入由你决定。运行期间主仓库就是任务的工作现场，在里面改文件或切换分支会干扰正在执行的任务，所以等工作流结束再回来操作。
+</Callout>
+
+## 准备
+
+- 已跑通[快速开始](/zh/docs/get-started/quickstart)。本教程沿用快速开始时的那个仓库，项目已经初始化过。换一个仓库也可以，先在那个仓库里按快速开始的准备一节和第 1 步做一遍。
+- 主仓库检出的是主分支。下文假设它叫 `main`，如果叫 `master` 或别的名字，把后面命令里的 `main` 换成它即可。工作流会以开始执行时主仓库检出的提交为起点。
+- 主仓库的工作区是干净的。隔离分支模式只在干净的工作区里切换分支，`git status` 里还有未提交的改动或未跟踪的文件时，任务会停在 `on-hold`，等你处理。快速开始留下的 `docs/codedag-reports/` 也算在内，先把它提交，或者用 `git stash -u{:sh}` 暂存起来。
+- 用 Claude Code 时，完全授权的警告已经接受过。本教程的任务以 `bypassPermissions` 运行，快速开始用的是 `auto`，所以你可能还没见过这个警告：在终端里运行一次 `claude --permission-mode bypassPermissions{:sh}`，选择 “Yes, I accept” 后退出，见[提前接受 Claude Code 的完全授权警告](/zh/docs/guides/agents-and-permission-modes#accept-bypass-warning)。
+
+## 1. 准备一个 worktree
+
+如果这个仓库已经有一个你用来开发、运行过项目的 worktree，直接进入第 2 步。
+
+还没有的话，现在建一个。两个任务同时执行，各需要一个工作区：主仓库算一个，再加一个 git worktree 就够了，原因见[工作区](/zh/docs/concepts/workspaces-and-branches#workspaces)。
+
+在主仓库根目录运行下面的命令，把 `my-app` 换成你的项目目录名：
+
+```bash title="Terminal"
+git worktree add ../my-app-wt-1 -b wt-1
+```
+
+它在主仓库旁边新建目录 `my-app-wt-1`，并检出一条新分支 `wt-1`。这条分支只是占位，任务开始时，CodeDAG 会把这个目录切换到任务分支上。
+
+新目录里只有纳入版本控制的文件。如果你的项目要先安装依赖才能运行测试，比如 `node_modules` 或 Python 虚拟环境，在新目录里照常安装一遍；`.env` 这类没有提交的本地配置文件，也要复制过去。任务 2 和任务 3 会在各自的工作区里运行测试，缺了这些，在 worktree 里执行的那个任务就跑不起测试。
+
+## 2. 把 worktree 登记到 CodeDAG
+
+如果你在[快速开始](/zh/docs/get-started/quickstart#init-project)回答 `Select your repository setup method` 时已经选了 1 或 2，这一步也可以跳过。
+
+当时选的是 4 的话，回到主仓库根目录，重新运行初始化：
+
+```bash title="Terminal"
+cdg init
+```
+
+它会依次问几个问题，第一个问题的回答与快速开始时不同：
+
+1. `Select your repository setup method`：选 `1. I have set up git worktrees for this project`。CodeDAG 会自动找出这个仓库的 worktree，不需要你输入路径，接着让你勾选要登记为副本的那些。刚建的 `my-app-wt-1` 默认已勾选，回车确认即可；Claude Code 和 Codex 为自己的会话创建的 worktree 默认不勾选。
+2. `File ".codedag/.gitignore" already exists. How would you like to handle this file?`：选 `3. Keep All`。`.codedag/` 里的设置和模板文件是快速开始时生成的，Keep All 让它们全部保持原样。本机设置文件也随之保留，所以这一次不会再问你默认 Agent。
+3. `Update maxConcurrency to 2?`：这个项目现在有两个工作区，而保留下来的并发上限还是 1，初始化会问你要不要改成 2。默认是 Yes，回车即可。
+
+如果快速开始时没有安装 CodeDAG Guide 插件，还会再问一次是否安装，按你的需要回答即可。完成后，输出的开头是这样的：
+
+```bash title="Terminal"
+✔ Project initialized successfully!
+
+  Project Repository: /Users/you/my-app
+  Project Git workflow stays unchanged.
+  Associated Replica Repositories:
+    - /Users/you/my-app-wt-1
+```
+
+`Associated Replica Repositories` 下列出了 worktree 的路径，说明它已经登记为这个项目的工作区。
+
+并发上限那个问题选 Yes，项目设置里的上限就跟上了工作区数量。下一步的工作流文件里仍然写明 `maxConcurrency: 2`，这样不论项目设置里是多少，这个工作流都允许两个任务同时执行。要用 clone 代替 worktree、准备更多副本，或者直接改本机设置里的并发数，见[并行执行与工作区](/zh/docs/guides/parallel-workspaces)。
+
+## 3. 写工作流文件
+
+新建 `.codedag/dags/two-small-changes.yaml`，按你要用的 Agent 选一个版本，原样粘贴进去。两个版本只有每个任务的 `agent` 和 `mode` 不同。
+
+<Tabs items={['Claude Code', 'Codex']}>
+  <Tab value="Claude Code">
+
+```yaml title=".codedag/dags/two-small-changes.yaml"
+maxConcurrency: 2
+
+tasks:
+  - id: 1
+    title: 挑选两个待办
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      目标：
+      在这个项目里找出两个最快能完成的待办，为每一项写一份简短的实施计划，交给后续两个会话分别实现。
+
+      详细说明：
+      - 待办要按我的角色和负责范围来筛选，可以来自代码里的 TODO、FIXME 注释，文档里的待办清单，被跳过的测试，也可以来自你能访问的 issue 跟踪工具，比如 GitHub Issues、Linear、Jira。
+      - 找不到合适的待办时，根据这个项目的产品定位和现状，以及我的职责，提出两个小改动来代替。
+
+      完成标准：
+      计划写到 docs/plans/two-small-changes.md（文件已存在时直接覆盖），分为“第一项”和“第二项”两节，每节写明：
+      - 目标：要做成什么，一两句话。
+      - 涉及的文件：要修改或新增的文件路径，包括测试文件。
+      - 完成标准：怎样算完成，包括要先写的最小测试，以及运行这些测试的命令。
+
+      约束：
+      - 除了这份计划，不新建、不修改任何文件。
+
+  - id: 2
+    title: 实现第一项
+    dependencies: [1]
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      目标：
+      实现 docs/plans/two-small-changes.md 中“第一项”描述的待办。
+
+      上下文与必读材料：
+      - docs/plans/two-small-changes.md 是上一个任务写的计划，“第一项”一节写明了目标、涉及的文件和完成标准。
+
+      完成标准：
+      - 达到“第一项”写明的完成标准：先写出最小的测试，再实现到测试通过。
+
+      约束：
+      - 只修改“第一项”列出的文件，不修改计划文件，也不实现“第二项”的内容。
+
+      注意事项：
+      - 另一个会话正在另一条分支上同时实现“第二项”，你看不到它的改动；两边的结果之后由 CodeDAG 合并。
+
+  - id: 3
+    title: 实现第二项
+    dependencies: [1]
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      目标：
+      实现 docs/plans/two-small-changes.md 中“第二项”描述的待办。
+
+      上下文与必读材料：
+      - docs/plans/two-small-changes.md 是上一个任务写的计划，“第二项”一节写明了目标、涉及的文件和完成标准。
+
+      完成标准：
+      - 达到“第二项”写明的完成标准：先写出最小的测试，再实现到测试通过。
+
+      约束：
+      - 只修改“第二项”列出的文件，不修改计划文件，也不实现“第一项”的内容。
+
+      注意事项：
+      - 另一个会话正在另一条分支上同时实现“第一项”，你看不到它的改动；两边的结果之后由 CodeDAG 合并。
+```
+
+  </Tab>
+  <Tab value="Codex">
+
+```yaml title=".codedag/dags/two-small-changes.yaml"
+maxConcurrency: 2
+
+tasks:
+  - id: 1
+    title: 挑选两个待办
+    agent: codex
+    mode: yolo
+    prompt: |
+      目标：
+      在这个项目里找出两个最快能完成的待办，为每一项写一份简短的实施计划，交给后续两个会话分别实现。
+
+      详细说明：
+      - 待办要按我的角色和负责范围来筛选，可以来自代码里的 TODO、FIXME 注释，文档里的待办清单，被跳过的测试，也可以来自你能访问的 issue 跟踪工具，比如 GitHub Issues、Linear、Jira。
+      - 找不到合适的待办时，根据这个项目的产品定位和现状，以及我的职责，提出两个小改动来代替。
+
+      完成标准：
+      计划写到 docs/plans/two-small-changes.md（文件已存在时直接覆盖），分为“第一项”和“第二项”两节，每节写明：
+      - 目标：要做成什么，一两句话。
+      - 涉及的文件：要修改或新增的文件路径，包括测试文件。
+      - 完成标准：怎样算完成，包括要先写的最小测试，以及运行这些测试的命令。
+
+      约束：
+      - 除了这份计划，不新建、不修改任何文件。
+
+  - id: 2
+    title: 实现第一项
+    dependencies: [1]
+    agent: codex
+    mode: yolo
+    prompt: |
+      目标：
+      实现 docs/plans/two-small-changes.md 中“第一项”描述的待办。
+
+      上下文与必读材料：
+      - docs/plans/two-small-changes.md 是上一个任务写的计划，“第一项”一节写明了目标、涉及的文件和完成标准。
+
+      完成标准：
+      - 达到“第一项”写明的完成标准：先写出最小的测试，再实现到测试通过。
+
+      约束：
+      - 只修改“第一项”列出的文件，不修改计划文件，也不实现“第二项”的内容。
+
+      注意事项：
+      - 另一个会话正在另一条分支上同时实现“第二项”，你看不到它的改动；两边的结果之后由 CodeDAG 合并。
+
+  - id: 3
+    title: 实现第二项
+    dependencies: [1]
+    agent: codex
+    mode: yolo
+    prompt: |
+      目标：
+      实现 docs/plans/two-small-changes.md 中“第二项”描述的待办。
+
+      上下文与必读材料：
+      - docs/plans/two-small-changes.md 是上一个任务写的计划，“第二项”一节写明了目标、涉及的文件和完成标准。
+
+      完成标准：
+      - 达到“第二项”写明的完成标准：先写出最小的测试，再实现到测试通过。
+
+      约束：
+      - 只修改“第二项”列出的文件，不修改计划文件，也不实现“第一项”的内容。
+
+      注意事项：
+      - 另一个会话正在另一条分支上同时实现“第一项”，你看不到它的改动；两边的结果之后由 CodeDAG 合并。
+```
+
+  </Tab>
+</Tabs>
+
+文件里没有写 `executionMode`，所以使用默认的隔离分支模式。其中有几处值得留意：
+
+- **`maxConcurrency: 2`** 允许最多两个任务同时执行。实际能同时执行的任务数还不会超过可用的工作区数，这里是主仓库加一个 worktree，正好两个，见[`maxConcurrency`](/zh/docs/reference/workflow-file#max-concurrency)。
+- **任务 2 和任务 3 都写了 `dependencies: [1]`。** 它们都要等任务 1 完成并被接受才开始，彼此之间却没有依赖，所以任务 1 一被接受，两者就同时启动。
+- **任务 2 和任务 3 直接去读 `docs/plans/two-small-changes.md`。** 这个文件是任务 1 在它自己的分支上写的，任务 1 被接受后，CodeDAG 先把它的结果合并进任务 2、3 的任务分支，再启动这两个任务，所以它们一开始就能在各自的工作区里读到它。依赖为什么同时是传递信息的通道，见[依赖](/zh/docs/concepts/tasks-and-sessions#dependencies)。
+- **两个并行任务的改动范围可以重叠。** 任务 2 和任务 3 各在自己的任务分支上修改，执行时互不影响；两边的结果合并时碰到同一处代码，冲突由 CodeDAG 先交给 Agent 解决，见[汇聚节点的合并与冲突](/zh/docs/concepts/workspaces-and-branches#merge-and-conflicts)。所以任务 1 挑待办时不用避开会改到同一处的两项，任务 2、3 的约束也只把各自的工作限定在自己那一项之内。
+
+<Callout type="warn">
+和快速开始用的 `auto` 不同，这里的 `bypassPermissions`（Claude Code）和 `yolo`（Codex）都是完全授权：任务 Agent 读写文件、执行命令之前不再征求你的同意。工作流因此可以无人值守地跑完，代价是 Agent 的操作不再经过权限检查。只在你信任的任务和可控的环境里这样配置，不同授权档的取舍见[决定无人值守还是有人值守](/zh/docs/guides/agents-and-permission-modes#unattended-or-attended)。
+</Callout>
+
+## 4. 校验并提交
+
+先校验工作流文件：
+
+```bash title="Terminal"
+cdg dag validate two-small-changes
+```
+
+```bash title="Terminal"
+✔ Validation passed: .codedag/dags/two-small-changes.yaml
+```
+
+通过之后提交，并让当前终端跟随日志：
+
+```bash title="Terminal"
+cdg dag submit two-small-changes --attach
+```
+
+```bash title="Terminal"
+✔ Submitted successfully: .codedag/dags/two-small-changes.yaml
+
+Queue position:
+  #1  .codedag/dags/two-small-changes.yaml (now running in background)
+
+📊 Following logs... (Ctrl+C to detach logs, Ctrl+\ to kill current workflow)
+```
+
+任务 1 先在主仓库里运行；它结束并被自动接受后，日志里会接连出现任务 2 和任务 3 的开始行：
+
+```bash title="Terminal"
+[Task   1] [2026-09-30 10:39:32] END: 挑选两个待办
+[Task   2] [2026-09-30 10:39:36] START: 实现第一项
+[Task   3] [2026-09-30 10:39:36] START: 实现第二项
+```
+
+此后两个任务的日志交替滚动。和快速开始时一样，按 Ctrl+C 只是让终端不再跟随日志，工作流会在后台继续执行。
+
+## 5. 观察两个任务并行
+
+另开一个终端，进入主仓库，查看这个工作流的看板：
+
+```bash title="Terminal"
+cdg dag status two-small-changes --watch
+```
+
+任务 2 和任务 3 执行期间，看板是这样的：
+
+```bash title="Terminal"
+[TZ: -04:00] 2026-09-30 10:39:39
+
+Workflow: .codedag/dags/two-small-changes.yaml
+  Phase: 📤 submitted
+  Queue Position: 1
+  Status: 🟢 in-progress
+  Substatus: working
+
+Submitted Tasks (2):
+  🟢 [in-progress] [working]  Task 2: 实现第一项
+  🟢 [in-progress] [working]  Task 3: 实现第二项
+
+Reviewed Tasks (1):
+  🤖☑️ [auto-accepted]  Task 1: 挑选两个待办
+
+Progress: 1/3 tasks completed (33%), 1 reviewed
+```
+
+任务 1 已经被自动接受，移到了 `Reviewed Tasks`；任务 2 和任务 3 同时处于 `[in-progress] [working]`，各占一个工作区。想确认它们分别在哪里执行，可以看每个工作区当前检出的分支：
+
+```bash title="Terminal"
+git worktree list
+```
+
+```bash title="Terminal"
+/Users/you/my-app       9a2b3bc [cdg/two-small-changes/t2-实现第一项]
+/Users/you/my-app-wt-1  9a2b3bc [cdg/two-small-changes/t3-实现第二项]
+```
+
+主仓库被切到了任务 2 的分支，worktree 被切到了任务 3 的分支。任务分支按 `cdg/<工作流名>/t<任务 ID>-<标题>` 命名。两行的提交相同，都是 CodeDAG 接受任务 1 时为它留下的提交，也就是说，两个任务都从任务 1 的结果开始工作。
+
+## 6. 检查结果并合入主分支
+
+两个任务都完成后，CodeDAG 自动接受它们，把两条任务分支合并到集成分支，整个工作流随即被自动接受。跟随日志的终端会随之结束，最后一行是：
+
+```bash title="Terminal"
+✔ Workflow auto-accepted: .codedag/dags/two-small-changes.yaml
+```
+
+如果两个任务改到了同一处代码，合并到集成分支时会发生冲突，CodeDAG 会先交给 Agent 解决；三轮仍未解决时，工作流停在 `on-hold` 等你处理，而不会出现上面这一行，处理方法见[合并冲突](/zh/docs/troubleshooting/troubleshooting#hold-merge-conflict)。
+
+工作流结束后，主仓库停在集成分支上，`git branch --show-current{:sh}` 会显示 `cdg/two-small-changes/integration`。先看集成分支比 `main` 多了哪些提交：
+
+```bash title="Terminal"
+git log --oneline main..HEAD
+```
+
+```bash title="Terminal"
+ba8ab12 Merge task 3 into cdg/two-small-changes/integration
+b99fcd0 实现第一项
+d6077f1 实现第二项
+9a2b3bc 挑选两个待办
+```
+
+CodeDAG 接受一个任务时，把它留下的改动提交到它的任务分支上，提交说明就是任务标题；最上面的合并提交，是 CodeDAG 把任务 3 的分支并入集成分支时留下的。再看具体改了哪些文件：
+
+```bash title="Terminal"
+git diff main...HEAD --stat
+```
+
+合入之前，逐个文件读一遍改动，再在集成分支上运行项目的测试。CodeDAG 判断任务完成的依据是任务 Agent 结束了工作，自动接受也不看测试结果，改动是否正确，要由你来确认。任务 1 写的 `docs/plans/two-small-changes.md` 也在这些改动里，不想让它进入主分支，就先删除它并提交。
+
+确认之后，就可以把结果合入主分支了。团队协作时通常要经过 PR：集成分支是从 `main` 开出的，带着这次的全部改动，从它新建一条你自己的分支，推送到远程，再照常开 PR。分支名按团队的约定取，这里用 `feat/two-small-changes`：
+
+```bash title="Terminal"
+git checkout -b feat/two-small-changes cdg/two-small-changes/integration
+git push -u origin feat/two-small-changes
+git checkout main
+```
+
+推送要由你来做，CodeDAG 自己从不向你的远程仓库推送，也不从中拉取。最后一条命令让主仓库回到 `main`，它还决定了下一个工作流从哪里开始：工作流以开始执行时主仓库检出的提交为起点，主仓库还停在集成分支或这条新分支上时，下一个工作流会接着这次的结果做，见[任务分支、集成分支与起点](/zh/docs/concepts/workspaces-and-branches#branches)。
+
+不需要代码审查时，比如在个人项目里，也可以在本地直接合入：运行 `git checkout main{:sh}` 切回主分支，再运行 `git merge cdg/two-small-changes/integration{:sh}`。`main` 在这期间没有新的提交时，这是一次快进合并。其他合入方式见[合入主分支](/zh/docs/guides/finish-and-merge#merge)。
+
+## 你的仓库里发生了什么
+
+这次运行在仓库里留下了三条任务分支和一条集成分支，`main` 在你亲手合入之前没有被动过。每个任务在自己的工作区和任务分支上完成工作，下游开始之前先合入上游已接受的结果，全部完成后结果汇入集成分支，主分支留给你把关。这就是默认的隔离分支模式的完整过程，它为什么这样设计，见[工作区与分支](/zh/docs/concepts/workspaces-and-branches)。
+
+| 分支 | 内容 |
+|---|---|
+| `cdg/two-small-changes/t1-挑选两个待办` | 任务 1 的结果，也就是计划文件 |
+| `cdg/two-small-changes/t2-实现第一项` | 任务 1 的结果，加上第一项的实现 |
+| `cdg/two-small-changes/t3-实现第二项` | 任务 1 的结果，加上第二项的实现 |
+| `cdg/two-small-changes/integration` | 三个任务结果的合并，也就是最终合入 `main` 的内容 |
+| `wt-1` | 第 1 步创建 worktree 时一起建的占位分支 |
+
+合入主分支之后，这些 `cdg/two-small-changes/` 分支都可以删除。worktree 目录仍停在它执行过的那个任务的分支上，删除那条分支之前，要先让 worktree 切到别的分支。worktree 本身可以留着，以后的工作流会继续用它并行执行。删除分支、移除 worktree 的做法见[清理分支与工作区](/zh/docs/guides/finish-and-merge#cleanup)。
+
+三个任务的完整输出保存在 `.codedag/local/logs/two-small-changes.log`，以后随时可以用 `cdg dag logs two-small-changes{:sh}` 回看。
+
+## 想在中间停下来看一眼
+
+想先确认任务 1 挑的待办合不合适，再让任务 2、3 动手，可以关掉任务 1 的自动接受，也就是在任务 1 下面加一行 `autoAccepted: none`：
+
+```yaml title=".codedag/dags/two-small-changes.yaml"
+  - id: 1
+    title: 挑选两个待办
+    autoAccepted: none   # 完成后停下，等你审核
+    # agent、mode、prompt 保持不变
+```
+
+改好的文件要重新提交才会生效。`two-small-changes` 这次已经审核结束，不能原样再提交，先运行 `cdg dag review clear two-small-changes{:sh}` 让它回到可以提交的状态，再像第 4 步那样提交。这是一次新的执行，同样消耗 3 点额度；如果上一次的 `cdg/two-small-changes/` 分支还没删，这次的分支名会带上时间戳，以免与它们重名。重新运行的更多细节见[想再运行一次](/zh/docs/guides/finish-and-merge#run-again)。
+
+重新提交之后，任务 1 完成时不会被自动接受，而是停在 `done`：看板上显示为 `[done] [done]`，任务 2、3 保持 `[pending] [blocked]`。这时主仓库正处在任务 1 的分支上，打开其中的 `docs/plans/two-small-changes.md` 就能读到它写的计划。确认没有问题后，接受任务 1：
+
+```bash title="Terminal"
+cdg task review accept 1 -w two-small-changes
+```
+
+接受之后，任务 2、3 随即开始，后面的过程与前面相同。如果提交时加了 `--attach`，跟随日志的终端也会弹出 `Task 1 is ready for review (done).` 菜单，在里面选 `accept` 效果一样。对计划不满意时，还可以让任务 1 接着修改，或者自己动手改，做法见[按你的判断选择动作](/zh/docs/guides/review-tasks#choose-action)；自动接受为什么是默认、哪些节点值得停下，见[自动接受](/zh/docs/concepts/review-gates#auto-accept)。
+
+## 下一步
+
+- [让 Agent 帮你编排](/zh/docs/get-started/let-your-agent-orchestrate)：同样是完成两个待办，改由装了 CodeDAG Guide 插件的 Claude Code 或 Codex 写工作流、提交并跟踪。
+- [工作原理](/zh/docs/concepts/how-it-works)：工作流、队列、状态与项目怎样组织在一起。
+- [编写工作流文件](/zh/docs/guides/writing-workflows)：从零写出自己的工作流，了解还有哪些字段可以控制执行。

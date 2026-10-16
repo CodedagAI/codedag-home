@@ -1,0 +1,199 @@
+---
+title: 常见问题
+description: 使用 CodeDAG 时常见疑问的简短回答，并指向详细说明的页面。
+icon: MessageCircleQuestionMark
+---
+
+遇到任务停住、提交被拒、登录失败这类具体故障时，按症状查[故障排除](/zh/docs/troubleshooting/troubleshooting)会更快。
+
+## 概念
+
+<Accordions type="single">
+<Accordion title="工作流、dag 和 DAG 是一回事吗？" id="workflow-and-dag">
+
+是同一个东西。文档里称为“工作流”，命令里写作 `dag`，例如 `cdg dag submit{:sh}`；命令选项中的 `--workflow-file` 和 `--dag` 也是同义的。DAG 是有向无环图（Directed Acyclic Graph）的缩写，指任务和依赖连成的图，产品名 CodeDAG 和命令里的 `dag` 都由此而来，见[工作流](/zh/docs/concepts/how-it-works#workflow)。
+
+</Accordion>
+<Accordion title="任务之间为什么不共享对话上下文？" id="no-shared-context">
+
+因为每个任务都是一个全新的 Agent 会话。会话拉得越长，上下文里无关的信息越多，Agent 的判断就越不可靠；每个任务从干净的上下文开始，才能在最可靠的状态下完成一段边界清楚的工作。代价是上游的对话传不到下游，能传过去的只有它留在仓库里的文件，所以上游要把结论写进文件，下游要在 prompt 里指名去读。原因见[为什么要做任务拆分，以及拆分的标准](/zh/docs/concepts/tasks-and-sessions#why-split)，写法见[把结论传给下游](/zh/docs/guides/designing-tasks-and-prompts#pass-results)。
+
+</Accordion>
+<Accordion title="编排 Agent 是什么？" id="orchestrating-agent">
+
+编排 Agent 是替你操作 `cdg` 的 Claude Code 或 Codex 会话。它装有 CodeDAG Guide 插件，听你描述目标之后，负责写工作流、校验、提交、跟踪进度和推进审核。工作流里每个任务的代码仍由任务 Agent 来写，也就是 CodeDAG 为每个任务单独启动的全新会话，它们和编排 Agent 不是同一个会话。几个称呼的分工见[谁负责什么](/zh/docs/concepts/how-it-works#roles)，用法见[让 Agent 帮你编排](/zh/docs/get-started/let-your-agent-orchestrate)。
+
+</Accordion>
+<Accordion title="任务已经 done 了，为什么还不算结束？" id="done-is-not-final">
+
+`done` 只说明任务 Agent 认为自己做完了，结果还要经过审核门禁：被接受之后，任务才进入 `reviewed`，依赖它的下游任务才会开始。默认是自动接受，所以 `done` 通常一闪而过。如果任务设了 `autoAccepted: none`，或者它在隔离分支模式下执行、却没有留下任何改动，它就会停在 `done` 等你审核，下游也一直等着。门禁的作用见[审核门禁](/zh/docs/concepts/review-gates#review-gate)，审核操作见[审核任务与工作流](/zh/docs/guides/review-tasks)。
+
+</Accordion>
+</Accordions>
+
+## 执行与并行
+
+<Accordions type="single">
+<Accordion title="不用 worktree 能并行吗？" id="parallel-without-worktree">
+
+可以，有两种办法。
+
+- **用 clone 做副本。** 副本用 git worktree 或完整的 clone 都可以，但一个项目只能选其中一种，见[选 worktree 还是 clone](/zh/docs/guides/parallel-workspaces#worktree-or-clone)。
+- **改用共享工作区模式。** 写上 `executionMode: shared-workspace` 之后，所有任务都在同一个目录里执行，不需要副本，同时执行的任务数由工作流文件里的 `maxConcurrency` 决定；不写时采用项目设置，只登记了主仓库的项目默认是 1。这时 CodeDAG 不隔离各个任务的写入，所以它只适合不编译、不运行测试、各写各的文件的任务，比如文档、翻译和调研，见[执行模式](/zh/docs/concepts/workspaces-and-branches#execution-modes)。
+
+</Accordion>
+<Accordion title="同一个项目的两个工作流能同时执行吗？" id="concurrent-workflows">
+
+不能。同一个项目里的工作流按提交顺序排队，一次只执行排在最前面的一个，它审核结束、离开队列之后，下一个才开始。并行只发生在一个工作流内部，想让几件互不相关的事同时推进，就把它们写成同一个工作流里互不依赖的任务。不同项目各有各的队列，互不影响。见[提交与队列](/zh/docs/concepts/how-it-works#queue)。
+
+</Accordion>
+<Accordion title="一个工作流能跨多个仓库吗？" id="multiple-repositories">
+
+不能。一个工作流只作用于一个项目，也就是一个 Git 仓库连同登记在它名下的副本。一件事涉及几个仓库时，就在每个仓库里分别写工作流、分别提交，仓库之间的衔接由你来安排。见[项目](/zh/docs/concepts/how-it-works#project)。
+
+</Accordion>
+<Accordion title="支持条件分支或循环吗？" id="conditions-and-loops">
+
+不支持。工作流里的任务和依赖在提交时就固定了，CodeDAG 不会根据执行结果增删任务，也不会自动回到前面的任务重新执行。
+
+需要“视情况处理”时，可以把可能用到的任务都预先排好，在 prompt 里写明判断条件，条件不成立时只在约定的文件里记下原因。这条记录不能省：默认的隔离分支模式下，一个任务如果什么都没改，会停在 `done` 等人工审核。需要反复尝试的工作可以放进一个任务内部，比如“运行全部测试并修复，直到全部通过”，由任务 Agent 在会话里反复进行。其他限制见[CodeDAG 目前的限制](/zh/docs/introduction/when-to-use#limitations)。
+
+</Accordion>
+<Accordion title="任务运行太久，能设置超时吗？" id="task-timeout">
+
+不能，CodeDAG 没有任务超时设置，不会因为一个任务运行得久就中断它。长时间没有新输出也不一定是卡住了，任务 Agent 可能派出了子 Agent 在后台工作。怎样判断它是不是卡住，确实卡住时怎样中断、之后怎样在原会话里接着做，见[任务长时间没有新输出](/zh/docs/troubleshooting/troubleshooting#no-output)。
+
+</Accordion>
+<Accordion title="有 DAG 的可视化界面吗？" id="visual-interface">
+
+没有图形界面，执行情况都在终端里查看。`cdg status{:sh}` 显示整个项目的队列，`cdg dag status <工作流>{:sh}` 列出一个工作流里每个任务的状态，两者加上 `--watch` 都会持续刷新；想看任务具体在做什么，用 `cdg dag logs{:sh}` 或 `cdg task logs{:sh}`。任务之间的依赖关系以工作流文件为准。见[想知道现在怎么了：三个层级的 status](/zh/docs/guides/run-and-monitor#status)。
+
+</Accordion>
+<Accordion title="能定时执行工作流吗？" id="scheduled-runs">
+
+CodeDAG 本身暂未提供定时功能。不过 CodeDAG 是命令行工具，只要这台电脑已经登录 CodeDAG 账号并且能联网，cron、launchd 这类外部的定时任务工具都可以直接调用 `cdg dag submit{:sh}` 提交工作流。
+
+定时调用时没有交互终端，提交命令要加 `-y`，原因见[cdg dag submit 的选项](/zh/docs/reference/cli/validate-and-submit#options)。同一个工作流要反复执行时，有两种做法：每次提交前先[清除上一次的审核记录](/zh/docs/reference/cli/review#clear-and-resubmit)，这要求上一次已经审核结束；或者每次[换一个文件名提交](/zh/docs/guides/finish-and-merge#new-file-name)，上一次没有审核结束时也能提交。
+
+</Accordion>
+<Accordion title="工作流提交之后再改文件，会生效吗？" id="edit-after-submit">
+
+不会影响已经提交的这一次。提交时 CodeDAG 保存了当时的工作流定义，这次执行从头到尾都按它进行。改过的文件要等这次执行审核结束、清除审核记录之后重新提交才会生效，这是一次新的执行，会按任务数重新消耗额度，步骤见[修改已提交的工作流](/zh/docs/reference/cli/validate-and-submit#modify-submitted)。只是想调整某个任务的方向时不必改文件，可以直接进入任务会话和它对话，或者在审核时提出修改要求，见[选择观察与修改方式](/zh/docs/guides/intervene-and-control#choose-intervention)。
+
+</Accordion>
+</Accordions>
+
+## Git 与结果
+
+<Accordions type="single">
+<Accordion title="为什么我的当前分支变了？" id="current-branch-changed">
+
+因为在默认的隔离分支模式下，主仓库也是一个工作区：运行期间 CodeDAG 会把它切到分配给它的任务分支上，工作流结束后它停在集成分支 `cdg/<工作流名>/integration` 上，不会切回你原来所在的分支。这是预期的行为，你的主分支本身没有被改动。什么时候要自己切回去、怎样让主仓库不参与执行，见[主仓库分支被切走](/zh/docs/troubleshooting/troubleshooting#branch-switched)。
+
+</Accordion>
+<Accordion title="结果为什么不在 main 上？" id="results-not-on-main">
+
+因为 CodeDAG 不会在你的主分支上提交，合入的时机和方式由你决定。默认的隔离分支模式下，每个任务的改动留在自己的任务分支上，通过审核的结果最后合并到这个工作流的集成分支 `cdg/<工作流名>/integration`；你检查之后，可以直接合并进 main、推送后开 PR，或者只挑部分任务的分支合入。共享工作区模式没有这些分支，结果直接留在工作目录里，由你检查后提交。做法见[收口、合入主分支与清理](/zh/docs/guides/finish-and-merge)。
+
+</Accordion>
+<Accordion title="git branch 里那些 cdg/ 开头的分支能删吗？" id="delete-cdg-branches">
+
+可以。工作流审核结束、你已经把需要的结果合入之后，它的任务分支、集成分支和快照分支都可以用 `git branch -D` 删除；快照分支删掉之后，里面留档的改动也就取不回来了。仍在队列中或还在等待审核的工作流，它的分支 CodeDAG 还要用来合并和审核，等它审核结束再清理。删除的步骤见[清理分支与工作区](/zh/docs/guides/finish-and-merge#cleanup)。
+
+</Accordion>
+<Accordion title=".codedag 目录要提交到项目仓库吗？" id="commit-codedag-directory">
+
+不需要。`.codedag/` 本身是一个独立的 Git 仓库，`cdg init{:sh}` 已经让项目仓库忽略它，所以它不会出现在项目仓库的 `git status` 里。想保存工作流的历史或与团队共享，进入 `.codedag/` 用普通的 git 命令提交和推送即可。原因见[边车仓库](/zh/docs/concepts/how-it-works#sidecar-repo)，共享做法见[团队共享](/zh/docs/guides/team-sharing)。
+
+</Accordion>
+</Accordions>
+
+## 审核
+
+<Accordions type="single">
+<Accordion title="取消一个任务之后，为什么多了一个分支？" id="cancel-creates-snapshot">
+
+那是快照分支，用来留档被取消的改动。隔离分支模式下，`cancel` 和 `defer` 默认都带 `--code snapshot`：任务有改动时，CodeDAG 先把改动存进一条以 `cdg/<工作流名>/snapshots/` 开头的分支，再把任务分支退回任务开始前的状态，这些改动因此不会传给下游。这样你事后改变主意，还能从快照里取回；确定不需要时，加上 `--code discard` 直接放弃改动，就不会建这条分支。工作流级的 `cdg dag review cancel{:sh}` 同样默认留一份快照。什么时候留快照、什么时候直接丢弃，见 [`--code`](/zh/docs/reference/cli/review#code)；取回快照见[取回快照中的部分改动](/zh/docs/reference/branches-and-files#restore-from-snapshot)。
+
+</Accordion>
+<Accordion title="dag review 会覆盖我对单个任务的审核吗？" id="dag-review-and-task-reviews">
+
+不会。你已经对单个任务给出的结论保持不变，`dag review` 只处理还没有审核结论的任务：其中已经执行过的任务，按你这次给整个工作流的动作处理，例如 `cdg dag review accept{:sh}` 会接受它们。不过，工作流级的结论决定集成分支上最终留下什么：隔离分支模式下，`dag review cancel` 或 `defer` 会让集成分支回到本次工作流的起点，已经接受的任务结果也不会留在集成分支上（默认会先存一份快照）。两级审核的关系见[审核门禁](/zh/docs/concepts/review-gates#review-gate)，操作见[给整个工作流作审核决定](/zh/docs/guides/review-tasks#dag-review)。
+
+</Accordion>
+<Accordion title="审核能撤销吗？" id="undo-review">
+
+不能。`accept`、`cancel`、`defer` 是最终结论，给出之后在这次执行里不能再改，被接受的结果也可能已经合并进了下游任务，原因见[审核结论不能更改](/zh/docs/concepts/review-gates#no-undo)。所以还想让任务接着改时，要在给出最终结论之前用 `revise`、`request-changes` 或 `rework`，它们不给结论，任务接着改，动作的选择见[按你的判断选择动作](/zh/docs/guides/review-tasks#choose-action)。结论给出之后才发现结果有问题时，能补救的是代码结果，不是审核结论，做法见[任务已经有了审核结论，才发现问题](/zh/docs/troubleshooting/troubleshooting#after-conclusion)。
+
+</Accordion>
+</Accordions>
+
+## Agent
+
+<Accordions type="single">
+<Accordion title="不写 mode 会怎样？" id="mode-omitted">
+
+CodeDAG 不会替任务指定权限模式，任务 Agent 沿用它自己的配置，例如 Claude Code 设置里的默认权限模式，或 Codex 配置里的审批与沙箱设置。这些配置从工作流文件里看不出来；如果它要求批准文件修改或命令，任务就会停下来等人应答，无人值守的工作流会因此卡住。所以建议每个任务都显式写上 `mode`。不写时的具体行为见[不写 `mode` 时](/zh/docs/guides/agents-and-permission-modes#mode-omitted)，怎么选见[决定无人值守还是有人值守](/zh/docs/guides/agents-and-permission-modes#unattended-or-attended)，写法见[权限模式语法](/zh/docs/reference/workflow-file#mode-syntax)。
+
+</Accordion>
+<Accordion title="完全授权安全吗？" id="full-access-safety">
+
+谈不上安全，它是拿 Agent 自身的权限检查换来无人值守：完全授权下，任务 Agent 执行命令、读写文件之前不再征求同意，CodeDAG 也不会替它把关。Claude Code 与 Codex 的官方文档都提醒谨慎使用这类模式。隔离分支模式能让代码改动留在任务分支上、不碰你的主分支，但管不到仓库之外的文件、本机的其他资源和网络访问。所以完全授权适合可信的仓库和任务；想在无人值守时仍有把关，可以在工作流里安排人工审核节点或验证任务。做法见[无人值守不等于无门禁](/zh/docs/guides/agents-and-permission-modes#gates)。
+
+</Accordion>
+<Accordion title="Claude Code 与 Codex 能在一个工作流里混用吗？" id="mix-agents">
+
+可以。每个任务用 [`agent`](/zh/docs/reference/workflow-file#tasks-agent) 字段单独选择 `claude`（Claude Code）或 `codex`（Codex），常见的分工是一家实现、另一家审查。两家的 `mode` 写法不同，混用时每个任务都要按自己的 Agent 来写。做法见[混合使用 Claude Code 与 Codex](/zh/docs/guides/mixing-agents)。
+
+</Accordion>
+<Accordion title="为什么插件列表里多了一个运行时插件？" id="runtime-plugin">
+
+那是 CodeDAG 自动加载的内部插件，不需要你管理。你在 Claude Code 任务的会话里（例如用 `cdg task view{:sh}` 进入之后）看到的 `codedag-runtime`，是 CodeDAG 启动每个 Claude Code 任务会话时一并加载的，用来让 CodeDAG 得知会话的进展，比如任务什么时候做完。它不会写进你的插件配置，也不会出现在你平时自己打开的会话里，由 CodeDAG 随版本自动维护。它和 CodeDAG Guide 插件是两回事，后者的管理见[管理 CodeDAG Guide 插件](/zh/docs/guides/guide-plugin)。
+
+</Accordion>
+</Accordions>
+
+## 账号与额度
+
+<Accordions type="single">
+<Accordion title="什么时候扣额度？提交成功后额度为什么没变？" id="when-credits-are-charged">
+
+额度在工作流排到队首、真正开始执行之前扣除，按任务数一次性扣，每个任务 1 点。提交时 CodeDAG 只检查你是否已登录、剩余额度是否足够，并不扣除；排队期间也不扣。所以前面还有工作流在执行时，提交成功后额度暂时不变，要等轮到它开始执行才会减少。完整规则见[什么时候扣除额度](/zh/docs/account/credits-and-subscription#when-charged)。
+
+</Accordion>
+<Accordion title="CodeDAG 会上传我的代码吗？" id="data-uploaded">
+
+不会。任务在你的电脑上执行，CodeDAG 服务只接收计算和扣除额度所需的信息：工作流文件的相对路径与内容（包括其中的 prompt）、任务 ID、CLI 版本、操作系统与处理器架构；仓库里的代码和运行日志都不会上传。发送的时机与内容见[你的数据边界](/zh/docs/account/login-and-account#data-boundary)，完整的数据处理说明见[隐私政策](/zh/privacy)。
+
+</Accordion>
+<Accordion title="在网页上退出登录后，CLI 为什么还能用？" id="web-sign-out">
+
+因为网页控制台和 CLI 的登录互相独立。在网页上退出只结束浏览器里的会话，CLI 仍然保持登录；要退出这台电脑上的 CLI，运行 `cdg auth logout{:sh}`。见[登出、多台电脑与切换账号](/zh/docs/account/login-and-account#sign-out)。
+
+</Accordion>
+<Accordion title="没有浏览器怎么登录？" id="sign-in-without-browser">
+
+目前无法登录，这项支持已列入后续版本的规划。登录要在运行 `cdg` 的这台电脑上用浏览器完成，SSH 远程会话、容器和没有图形界面的服务器都做不到。原因和行不通的变通办法，见[没有桌面浏览器时](/zh/docs/account/login-and-account#no-browser)。
+
+</Accordion>
+</Accordions>
+
+## 平台与安装
+
+<Accordions type="single">
+<Accordion title="支持 Windows 吗？" id="windows">
+
+公测期间暂不支持。CodeDAG 目前支持 macOS 与 Linux，通过 Homebrew 安装，见[安装与登录](/zh/docs/get-started/installation)。
+
+</Accordion>
+<Accordion title="需要安装 Node.js 吗？" id="nodejs">
+
+不需要。CodeDAG 以独立的可执行程序分发，用 Homebrew 安装之后就能直接运行 `cdg`，见[安装与登录](/zh/docs/get-started/installation)。Claude Code 或 Codex 按它们各自的方式安装。
+
+</Accordion>
+<Accordion title="能在服务器或容器里用吗？" id="servers-and-containers">
+
+没有桌面浏览器的服务器或容器目前用不了，这项支持已列入后续版本的规划。使用 CodeDAG 需要登录，而目前登录要在同一台机器上用浏览器完成，见[没有桌面浏览器时](/zh/docs/account/login-and-account#no-browser)。
+
+</Accordion>
+</Accordions>

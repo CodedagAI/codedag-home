@@ -1,0 +1,418 @@
+---
+title: "Second Workflow: Let It Change Code"
+description: Complete two TODOs in parallel using the primary repository plus one worktree, see task branches and the integration branch, and then merge the result into the main branch.
+icon: GitFork
+---
+
+## What you'll do
+
+This workflow has three tasks. Task 1 picks the two TODOs in your project that are quickest to finish and writes the goal, affected files, and completion criteria for each one to `docs/plans/two-small-changes.md`. Tasks 2 and 3 both depend on task 1, and each takes one of the items: it writes a minimal test first, then implements the item until the test passes. The two run at the same time, on two branches that are isolated from each other. When all three tasks are done, CodeDAG merges the results into the integration branch `cdg/two-small-changes/integration`.
+
+export const twoSmallChangesChart = `flowchart LR
+  t1["Task 1<br/>Pick two TODOs<br/>Write an implementation plan"] --> t2["Task 2<br/>Implement the first item"]
+  t1 --> t3["Task 3<br/>Implement the second item"]
+  t2 --> m1(["Integration branch<br/>cdg/two-small-changes/integration"])
+  t3 --> m1`;
+
+<Tabs items={['Diagram', 'Code']}>
+  <Tab value="Diagram">
+    <Mermaid chart={twoSmallChangesChart} />
+  </Tab>
+  <Tab value="Code">
+    <DynamicCodeBlock lang="mermaid" code={twoSmallChangesChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+A TODO here is any small piece of work that's already recorded in your project but hasn't been started, such as a TODO or FIXME comment in the code, a to-do list in the docs, or an item in your issue tracker. You don't need to pick them ahead of time. Task 1 finds them itself and filters them by your role and area of responsibility. If nothing suitable turns up, it proposes two small changes instead.
+
+Unlike the quickstart, this workflow uses CodeDAG's default isolated-branches mode. Each task changes code in its own workspace, on its own task branch, and CodeDAG handles the commits and merges.
+
+<Callout type="info">
+While this workflow runs, CodeDAG switches branches in your repository. The primary repository and the worktree are each switched to the branch of the task running there. When everything is done, the primary repository is left on the integration branch `cdg/two-small-changes/integration`, not on `main` where you started. `main` itself gets no new commits, and whether to merge the result is up to you. During the run, the primary repository is where tasks do their work, and editing files or switching branches there interferes with the running tasks. Wait until the workflow finishes before you work in it again.
+</Callout>
+
+## Before you begin
+
+- You've completed the [quickstart](/docs/get-started/quickstart). This tutorial continues in the repository you used there, where the project is already initialized. You can use a different repository if you first go through the quickstart's "Before you begin" section and step 1 in that repository.
+- The primary repository has the main branch checked out. This tutorial assumes it's called `main`. If yours is `master` or something else, substitute that name for `main` in the commands below. When the workflow starts running, it takes the commit checked out in the primary repository as its base.
+- The primary repository's workspace is clean. Isolated-branches mode switches branches only in a clean workspace. If `git status` still shows uncommitted changes or untracked files, the task stops at `on-hold` and waits for you to deal with them. That includes the `docs/codedag-reports/` directory left over from the quickstart, so commit it or stash it with `git stash -u{:sh}` first.
+- If you use Claude Code, you've already accepted its full-access warning. The tasks in this tutorial run with `bypassPermissions`, and the quickstart used `auto`, so you may not have seen this warning yet. To accept it, run `claude --permission-mode bypassPermissions{:sh}` once in a terminal, choose "Yes, I accept", and then exit. See [Accept Claude Code's full-access warning in advance](/docs/guides/agents-and-permission-modes#accept-bypass-warning).
+
+## 1. Set up a worktree
+
+If this repository already has a worktree that you develop in and have run the project in, skip to step 2.
+
+If not, create one now. Two tasks running at the same time each need a workspace. The primary repository counts as one, so one more git worktree is enough. For the reasoning, see [Workspaces](/docs/concepts/workspaces-and-branches#workspaces).
+
+From the root of the primary repository, run the following command, replacing `my-app` with the name of your project directory:
+
+```bash title="Terminal"
+git worktree add ../my-app-wt-1 -b wt-1
+```
+
+This creates a `my-app-wt-1` directory next to the primary repository and checks out a new branch, `wt-1`, in it. That branch is only a placeholder. When a task starts, CodeDAG switches this directory to the task branch.
+
+The new directory contains only version-controlled files. If your project needs dependencies installed before its tests can run, such as `node_modules` or a Python virtual environment, install them in the new directory as you normally would. Copy over uncommitted local configuration files such as `.env` as well. Tasks 2 and 3 run tests in their own workspaces, and without these, the task that runs in the worktree can't run its tests.
+
+## 2. Register the worktree with CodeDAG
+
+If you chose 1 or 2 for `Select your repository setup method` in the [quickstart](/docs/get-started/quickstart#init-project), you can skip this step too.
+
+If you chose 4, go back to the root of the primary repository and run initialization again:
+
+```bash title="Terminal"
+cdg init
+```
+
+It asks a few questions in order, and your answer to the first one differs from the quickstart:
+
+1. `Select your repository setup method`: Choose `1. I have set up git worktrees for this project`. CodeDAG finds this repository's worktrees automatically, so you don't type any paths, and then asks you to select the ones to register as replicas. The `my-app-wt-1` worktree you just created is selected by default, so press Enter to confirm. Worktrees that Claude Code and Codex created for their own sessions aren't selected by default.
+2. `File ".codedag/.gitignore" already exists. How would you like to handle this file?`: Choose `3. Keep All`. The settings and template files in `.codedag/` were generated during the quickstart, and Keep All leaves them all as they are. The local settings file is kept as well, so this time you aren't asked about a default agent.
+3. `Update maxConcurrency to 2?`: The project now has two workspaces, but the concurrency limit you kept is still 1, so initialization asks whether to change it to 2. The default is Yes, so press Enter.
+
+If you didn't install the CodeDAG Guide plugin during the quickstart, you're asked once more whether to install it. Answer whichever way suits you. When initialization finishes, the output begins like this:
+
+```bash title="Terminal"
+✔ Project initialized successfully!
+
+  Project Repository: /Users/you/my-app
+  Project Git workflow stays unchanged.
+  Associated Replica Repositories:
+    - /Users/you/my-app-wt-1
+```
+
+The worktree's path is listed under `Associated Replica Repositories`, which means it's now registered as a workspace for this project.
+
+Answering Yes to the concurrency question brings the limit in the project settings in line with the number of workspaces. The workflow file in the next step still sets `maxConcurrency: 2` explicitly, so this workflow allows two tasks to run at once no matter what the project settings say. To use clones instead of worktrees, set up more replicas, or edit the concurrency value in your local settings directly, see [Run in Parallel with Workspaces](/docs/guides/parallel-workspaces).
+
+## 3. Write the workflow file
+
+Create `.codedag/dags/two-small-changes.yaml`, pick the version for the agent you want to use, and paste it in as is. The two versions differ only in each task's `agent` and `mode`.
+
+<Tabs items={['Claude Code', 'Codex']}>
+  <Tab value="Claude Code">
+
+```yaml title=".codedag/dags/two-small-changes.yaml"
+maxConcurrency: 2
+
+tasks:
+  - id: 1
+    title: Pick two TODOs
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      Goal:
+      Find the two TODOs in this project that are quickest to finish, and write a short implementation plan for each so that two later sessions can implement them separately.
+
+      Details:
+      - Filter the TODOs by my role and area of responsibility. They can come from TODO or FIXME comments in the code, to-do lists in the docs, skipped tests, or an issue tracker you have access to, such as GitHub Issues, Linear, or Jira.
+      - If you can't find suitable TODOs, propose two small changes instead, based on what this project is for, its current state, and my responsibilities.
+
+      Completion criteria:
+      Write the plan to docs/plans/two-small-changes.md (overwrite the file if it already exists), in two sections titled "First item" and "Second item". In each section, state:
+      - Goal: what to achieve, in a sentence or two.
+      - Affected files: the paths of the files to modify or add, including test files.
+      - Completion criteria: what counts as done, including the minimal tests to write first and the command that runs them.
+
+      Constraints:
+      - Don't create or modify any file other than this plan.
+
+  - id: 2
+    title: Implement the first item
+    dependencies: [1]
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      Goal:
+      Implement the TODO described under "First item" in docs/plans/two-small-changes.md.
+
+      Context and required reading:
+      - docs/plans/two-small-changes.md is the plan written by the previous task. Its "First item" section states the goal, the affected files, and the completion criteria.
+
+      Completion criteria:
+      - Meet the completion criteria stated under "First item": write the minimal tests first, then implement until they pass.
+
+      Constraints:
+      - Modify only the files listed under "First item". Don't modify the plan file, and don't implement anything from "Second item".
+
+      Notes:
+      - Another session is implementing "Second item" on a different branch at the same time, and you can't see its changes. CodeDAG merges the two results afterward.
+
+  - id: 3
+    title: Implement the second item
+    dependencies: [1]
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      Goal:
+      Implement the TODO described under "Second item" in docs/plans/two-small-changes.md.
+
+      Context and required reading:
+      - docs/plans/two-small-changes.md is the plan written by the previous task. Its "Second item" section states the goal, the affected files, and the completion criteria.
+
+      Completion criteria:
+      - Meet the completion criteria stated under "Second item": write the minimal tests first, then implement until they pass.
+
+      Constraints:
+      - Modify only the files listed under "Second item". Don't modify the plan file, and don't implement anything from "First item".
+
+      Notes:
+      - Another session is implementing "First item" on a different branch at the same time, and you can't see its changes. CodeDAG merges the two results afterward.
+```
+
+  </Tab>
+  <Tab value="Codex">
+
+```yaml title=".codedag/dags/two-small-changes.yaml"
+maxConcurrency: 2
+
+tasks:
+  - id: 1
+    title: Pick two TODOs
+    agent: codex
+    mode: yolo
+    prompt: |
+      Goal:
+      Find the two TODOs in this project that are quickest to finish, and write a short implementation plan for each so that two later sessions can implement them separately.
+
+      Details:
+      - Filter the TODOs by my role and area of responsibility. They can come from TODO or FIXME comments in the code, to-do lists in the docs, skipped tests, or an issue tracker you have access to, such as GitHub Issues, Linear, or Jira.
+      - If you can't find suitable TODOs, propose two small changes instead, based on what this project is for, its current state, and my responsibilities.
+
+      Completion criteria:
+      Write the plan to docs/plans/two-small-changes.md (overwrite the file if it already exists), in two sections titled "First item" and "Second item". In each section, state:
+      - Goal: what to achieve, in a sentence or two.
+      - Affected files: the paths of the files to modify or add, including test files.
+      - Completion criteria: what counts as done, including the minimal tests to write first and the command that runs them.
+
+      Constraints:
+      - Don't create or modify any file other than this plan.
+
+  - id: 2
+    title: Implement the first item
+    dependencies: [1]
+    agent: codex
+    mode: yolo
+    prompt: |
+      Goal:
+      Implement the TODO described under "First item" in docs/plans/two-small-changes.md.
+
+      Context and required reading:
+      - docs/plans/two-small-changes.md is the plan written by the previous task. Its "First item" section states the goal, the affected files, and the completion criteria.
+
+      Completion criteria:
+      - Meet the completion criteria stated under "First item": write the minimal tests first, then implement until they pass.
+
+      Constraints:
+      - Modify only the files listed under "First item". Don't modify the plan file, and don't implement anything from "Second item".
+
+      Notes:
+      - Another session is implementing "Second item" on a different branch at the same time, and you can't see its changes. CodeDAG merges the two results afterward.
+
+  - id: 3
+    title: Implement the second item
+    dependencies: [1]
+    agent: codex
+    mode: yolo
+    prompt: |
+      Goal:
+      Implement the TODO described under "Second item" in docs/plans/two-small-changes.md.
+
+      Context and required reading:
+      - docs/plans/two-small-changes.md is the plan written by the previous task. Its "Second item" section states the goal, the affected files, and the completion criteria.
+
+      Completion criteria:
+      - Meet the completion criteria stated under "Second item": write the minimal tests first, then implement until they pass.
+
+      Constraints:
+      - Modify only the files listed under "Second item". Don't modify the plan file, and don't implement anything from "First item".
+
+      Notes:
+      - Another session is implementing "First item" on a different branch at the same time, and you can't see its changes. CodeDAG merges the two results afterward.
+```
+
+  </Tab>
+</Tabs>
+
+The file doesn't set `executionMode`, so the workflow uses the default isolated-branches mode. A few things in it are worth noting:
+
+- **`maxConcurrency: 2`** allows up to two tasks to run at the same time. The number of tasks that actually run at once also can't exceed the number of available workspaces. Here that's the primary repository plus one worktree, which makes exactly two. See [`maxConcurrency`](/docs/reference/workflow-file#max-concurrency).
+- **Tasks 2 and 3 both set `dependencies: [1]`.** Both wait for task 1 to finish and be accepted before they start, but neither depends on the other, so they start together as soon as task 1 is accepted.
+- **Tasks 2 and 3 read `docs/plans/two-small-changes.md` directly.** Task 1 wrote that file on its own branch. After task 1 is accepted, CodeDAG merges its result into the task branches for tasks 2 and 3 before it starts them, so each can read the file in its own workspace from the start. For why a dependency is also a channel for passing information, see [Dependencies](/docs/concepts/tasks-and-sessions#dependencies).
+- **The two parallel tasks can change overlapping code.** Tasks 2 and 3 each make their changes on their own task branch, so they don't affect each other while they run. If their results touch the same code when they're merged, CodeDAG first hands the conflict to an agent to resolve. See [Merges and conflicts at join nodes](/docs/concepts/workspaces-and-branches#merge-and-conflicts). That's why task 1 doesn't have to avoid picking two TODOs that change the same place, and why the constraints on tasks 2 and 3 only confine each one to its own item.
+
+<Callout type="warn">
+Unlike the `auto` mode used in the quickstart, `bypassPermissions` (Claude Code) and `yolo` (Codex) both grant full access: the task agent no longer asks for your consent before it reads or writes files or runs commands. That lets the workflow run to completion unattended, but the agent's operations no longer go through permission checks. Use this configuration only for tasks you trust, in an environment you control. For the tradeoffs between access levels, see [Decide between unattended and attended runs](/docs/guides/agents-and-permission-modes#unattended-or-attended).
+</Callout>
+
+## 4. Validate and submit
+
+First, validate the workflow file:
+
+```bash title="Terminal"
+cdg dag validate two-small-changes
+```
+
+```bash title="Terminal"
+✔ Validation passed: .codedag/dags/two-small-changes.yaml
+```
+
+Once it passes, submit the workflow and have the current terminal follow the logs:
+
+```bash title="Terminal"
+cdg dag submit two-small-changes --attach
+```
+
+```bash title="Terminal"
+✔ Submitted successfully: .codedag/dags/two-small-changes.yaml
+
+Queue position:
+  #1  .codedag/dags/two-small-changes.yaml (now running in background)
+
+📊 Following logs... (Ctrl+C to detach logs, Ctrl+\ to kill current workflow)
+```
+
+Task 1 runs first, in the primary repository. After it finishes and is auto-accepted, the start lines for tasks 2 and 3 appear in the logs one right after the other:
+
+```bash title="Terminal"
+[Task   1] [2026-09-30 10:39:32] END: Pick two TODOs
+[Task   2] [2026-09-30 10:39:36] START: Implement the first item
+[Task   3] [2026-09-30 10:39:36] START: Implement the second item
+```
+
+From then on, the logs from the two tasks are interleaved. As in the quickstart, pressing Ctrl+C only stops the terminal from following the logs, and the workflow keeps running in the background.
+
+## 5. Watch two tasks run in parallel
+
+Open another terminal, go to the primary repository, and view the status board for this workflow:
+
+```bash title="Terminal"
+cdg dag status two-small-changes --watch
+```
+
+While tasks 2 and 3 are running, the board looks like this:
+
+```bash title="Terminal"
+[TZ: -04:00] 2026-09-30 10:39:39
+
+Workflow: .codedag/dags/two-small-changes.yaml
+  Phase: 📤 submitted
+  Queue Position: 1
+  Status: 🟢 in-progress
+  Substatus: working
+
+Submitted Tasks (2):
+  🟢 [in-progress] [working]  Task 2: Implement the first item
+  🟢 [in-progress] [working]  Task 3: Implement the second item
+
+Reviewed Tasks (1):
+  🤖☑️ [auto-accepted]  Task 1: Pick two TODOs
+
+Progress: 1/3 tasks completed (33%), 1 reviewed
+```
+
+Task 1 has been auto-accepted and moved to `Reviewed Tasks`. Tasks 2 and 3 are both `[in-progress] [working]`, each in its own workspace. To confirm where each one is running, look at the branch currently checked out in each workspace:
+
+```bash title="Terminal"
+git worktree list
+```
+
+```bash title="Terminal"
+/Users/you/my-app       9a2b3bc [cdg/two-small-changes/t2-implement-the-first-item]
+/Users/you/my-app-wt-1  9a2b3bc [cdg/two-small-changes/t3-implement-the-second-item]
+```
+
+The primary repository has been switched to task 2's branch, and the worktree to task 3's branch. Task branches are named `cdg/<workflow-name>/t<task-id>-<title>`. Both lines show the same commit, the one CodeDAG created for task 1 when it accepted that task. In other words, both tasks start from task 1's result.
+
+## 6. Check the result and merge into the main branch
+
+When both tasks finish, CodeDAG auto-accepts them and merges the two task branches into the integration branch, and the workflow as a whole is then auto-accepted. The terminal following the logs stops at that point, and the last line is:
+
+```bash title="Terminal"
+✔ Workflow auto-accepted: .codedag/dags/two-small-changes.yaml
+```
+
+If the two tasks changed the same code, the merge into the integration branch produces a conflict, and CodeDAG first hands it to an agent to resolve. If it's still unresolved after three rounds, the workflow stops at `on-hold` and waits for you, and the line above doesn't appear. To resolve it, see [Merge conflicts](/docs/troubleshooting/troubleshooting#hold-merge-conflict).
+
+After the workflow finishes, the primary repository is left on the integration branch, and `git branch --show-current{:sh}` prints `cdg/two-small-changes/integration`. Start by looking at the commits the integration branch has that `main` doesn't:
+
+```bash title="Terminal"
+git log --oneline main..HEAD
+```
+
+```bash title="Terminal"
+ba8ab12 Merge task 3 into cdg/two-small-changes/integration
+b99fcd0 Implement the first item
+d6077f1 Implement the second item
+9a2b3bc Pick two TODOs
+```
+
+When CodeDAG accepts a task, it commits the changes the task left behind to that task's branch, with the task title as the commit message. The merge commit at the top is the one CodeDAG created when it merged task 3's branch into the integration branch. Next, look at which files changed:
+
+```bash title="Terminal"
+git diff main...HEAD --stat
+```
+
+Before you merge, read through the changes file by file, then run your project's tests on the integration branch. CodeDAG considers a task complete when the task agent has stopped working, and auto-accept doesn't look at test results either, so confirming that the changes are correct is up to you. The `docs/plans/two-small-changes.md` file that task 1 wrote is part of these changes too. If you don't want it on the main branch, delete it and commit first.
+
+Once you're satisfied, you can merge the result into the main branch. On a team, that usually goes through a pull request. The integration branch was created from `main` and carries all the changes from this run, so create a branch of your own from it, push that branch to the remote, and open a pull request as usual. Name the branch according to your team's conventions. This example uses `feat/two-small-changes`:
+
+```bash title="Terminal"
+git checkout -b feat/two-small-changes cdg/two-small-changes/integration
+git push -u origin feat/two-small-changes
+git checkout main
+```
+
+Pushing is up to you: CodeDAG itself never pushes to your remote repository or pulls from it. The last command puts the primary repository back on `main`, and it also determines where the next workflow starts. When a workflow starts running, it takes the commit checked out in the primary repository as its base, so if the primary repository is still on the integration branch or on this new branch, the next workflow builds on this run's result. See [Task branches, the integration branch, and the base](/docs/concepts/workspaces-and-branches#branches).
+
+If you don't need code review, as in a personal project, you can also merge locally: run `git checkout main{:sh}` to switch back to the main branch, then run `git merge cdg/two-small-changes/integration{:sh}`. If `main` has no new commits in the meantime, this is a fast-forward merge. For other ways to merge, see [Merge into the main branch](/docs/guides/finish-and-merge#merge).
+
+## What happened in your repository
+
+This run left three task branches and one integration branch in the repository, and `main` wasn't touched until you merged into it yourself. Each task did its work in its own workspace, on its own task branch. Before a downstream task started, the accepted upstream results were merged into its branch. When everything was done, the results were merged into the integration branch, and the main branch was left for you to sign off on. That's the whole process in the default isolated-branches mode. For why it's designed this way, see [Workspaces and Branches](/docs/concepts/workspaces-and-branches).
+
+| Branch | Contents |
+|---|---|
+| `cdg/two-small-changes/t1-pick-two-todos` | Task 1's result, which is the plan file |
+| `cdg/two-small-changes/t2-implement-the-first-item` | Task 1's result, plus the implementation of the first item |
+| `cdg/two-small-changes/t3-implement-the-second-item` | Task 1's result, plus the implementation of the second item |
+| `cdg/two-small-changes/integration` | The merged results of all three tasks, which is what ultimately goes into `main` |
+| `wt-1` | The placeholder branch created along with the worktree in step 1 |
+
+After you merge into the main branch, you can delete all of these `cdg/two-small-changes/` branches. The worktree directory is still on the branch of the task it ran, so switch the worktree to another branch before you delete that one. You can keep the worktree itself, and later workflows will go on using it to run tasks in parallel. For how to delete branches and remove worktrees, see [Clean up branches and workspaces](/docs/guides/finish-and-merge#cleanup).
+
+The full output of all three tasks is saved in `.codedag/local/logs/two-small-changes.log`, and you can go back to it at any time with `cdg dag logs two-small-changes{:sh}`.
+
+## Stop partway to take a look
+
+To make sure the TODOs that task 1 picked are suitable before tasks 2 and 3 start work, turn off auto-accept for task 1 by adding the line `autoAccepted: none` under it:
+
+```yaml title=".codedag/dags/two-small-changes.yaml"
+  - id: 1
+    title: Pick two TODOs
+    autoAccepted: none   # Stop when done and wait for your review
+    # agent, mode, and prompt stay the same
+```
+
+The edited file takes effect only when you submit it again. This run of `two-small-changes` has already been reviewed, so it can't be submitted again as is. First run `cdg dag review clear two-small-changes{:sh}` to return it to a state where it can be submitted, then submit it as you did in step 4. This is a new run, and it uses 3 credits just like the first. If the `cdg/two-small-changes/` branches from the previous run haven't been deleted, the branch names for this run include a timestamp so they don't collide. For more on rerunning, see [Run the workflow again](/docs/guides/finish-and-merge#run-again).
+
+After you resubmit, task 1 isn't auto-accepted when it finishes. It stops at `done` instead: the board shows it as `[done] [done]`, and tasks 2 and 3 stay at `[pending] [blocked]`. At this point the primary repository is on task 1's branch, so you can open `docs/plans/two-small-changes.md` there and read the plan it wrote. Once you've confirmed the plan is fine, accept task 1:
+
+```bash title="Terminal"
+cdg task review accept 1 -w two-small-changes
+```
+
+Once task 1 is accepted, tasks 2 and 3 start right away, and the rest goes as before. If you submitted with `--attach`, the terminal following the logs also shows a `Task 1 is ready for review (done).` menu, and choosing `accept` there has the same effect. If you aren't happy with the plan, you can also have task 1 keep revising it, or edit it yourself. See [Choose an action based on your assessment](/docs/guides/review-tasks#choose-action). For why auto-accept is the default and which nodes are worth stopping at, see [Auto-accept](/docs/concepts/review-gates#auto-accept).
+
+## Next steps
+
+- [Let Your Agent Orchestrate](/docs/get-started/let-your-agent-orchestrate): Complete two TODOs again, but this time Claude Code or Codex with the CodeDAG Guide plugin installed writes the workflow, submits it, and tracks it.
+- [How CodeDAG Works](/docs/concepts/how-it-works): How workflows, the queue, states, and projects fit together.
+- [Write a Workflow File](/docs/guides/writing-workflows): Write your own workflow from scratch, and learn which other fields control execution.

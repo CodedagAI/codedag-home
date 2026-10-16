@@ -1,0 +1,553 @@
+---
+title: Workflow File Reference
+description: The syntax, values, and default of each field in a workflow file, and the precedence order.
+icon: FileBraces
+---
+
+A workflow file is a YAML or JSON file in the primary repository's `.codedag/dags/` directory. Only the `tasks` list and each task's `id`, `title`, and `prompt` are required. Every other field is optional, and a field you omit takes the value from project settings or its own default. For a walkthrough of writing a workflow file from scratch, see [Write a Workflow File](/docs/guides/writing-workflows).
+
+## Find a field by what you want to do [#fields-by-goal]
+
+Fields go at one of two levels. Fields marked "Workflow" go at the top level of the file, alongside `tasks`, and apply to the whole workflow. Fields marked "Task" go inside an item in `tasks` and affect only that task.
+
+| What you want to do | Field | Level |
+|---|---|---|
+| Run all tasks directly in the same workspace, with no branches and no commits | [`executionMode`](#execution-mode) | Workflow |
+| Limit how many tasks run at once, or remove the limit | [`maxConcurrency`](#max-concurrency) | Workflow |
+| Pin the commit the workflow starts from | [`baseRef`](#base-ref) | Workflow |
+| Leave certain workspaces unused, for example to keep the primary repository for your own development | [`excludeWorkspaces`](#exclude-workspaces) | Workflow |
+| Choose which agent resolves conflicts in automatic merges | [`mergeConflictAgent`](#merge-conflict-agent) | Workflow |
+| Make a particular task stop when it finishes and wait for your review | [`autoAccepted`](#tasks-auto-accepted) | Task |
+| Make every task stop when it finishes and wait for your review | [`taskAutoAccepted`](#task-auto-accepted) | Workflow |
+| Have the whole workflow wait for your decision before it ends | [`dagAutoAccepted`](#dag-auto-accepted) | Workflow |
+| Choose whether Claude Code or Codex runs a task | [`agent`](#tasks-agent) | Task |
+| Set the model and reasoning effort a task uses | [`model`](#tasks-model), [`effort`](#tasks-effort) | Task |
+| Decide which operations need your approval while a task runs | [`mode`](#tasks-mode); for the syntax, see [Permission mode syntax](#mode-syntax) | Task |
+| Give a task branch a fixed name | [`branchName`](#tasks-branch-name) | Task |
+| Record notes in the file, such as its purpose and maintainer | [`metadata`](#metadata) | Workflow |
+
+## File location and format [#file-location]
+
+Workflow files go in the primary repository's `.codedag/dags/` directory or in a subdirectory at any depth below it, with the extension `.yaml`, `.yml`, or `.json`. A file in any other location or with any other extension can't be validated or submitted. For how to refer to a workflow file in a command, see [Specify a workflow](/docs/reference/cli#specify-workflow).
+
+A workflow's name comes from the file's path relative to `.codedag/dags/`, with the extension removed and each `/` replaced by an underscore. The workflow in `.codedag/dags/build.yaml` is named `build`, and the one in `.codedag/dags/team/build.yaml` is named `team_build`. The name appears in the task branch and integration branch names, where this page writes it as `<workflow-name>`, so the integration branch of the second workflow is `cdg/team_build/integration`. Any characters in the name that can't be used in a Git branch name are normalized as well. When in doubt, go by the `Integration Branch` value that `cdg dag status{:sh}` prints.
+
+Files with the same name in different subdirectories get different workflow names, and their log files are stored under the same relative path too, so they don't affect each other. Two files that differ only in extension, such as `build.yaml` and `build.yml`, get the same name and share one set of branch names and one log file.
+
+The fields are identical in YAML and JSON. A workflow file also has to stay within the following limits:
+
+- **Field names:** Case-sensitive and always camelCase. A field that CodeDAG doesn't recognize doesn't fail validation. CodeDAG ignores it and gives a warning. See [Validate](/docs/guides/writing-workflows#validate).
+- **YAML syntax:** Anchors (`&`), aliases (`*`), and merge keys (`<<`) aren't supported, and a file that uses them fails validation. Write repeated content out in full. The characters `&` and `*` inside string content aren't affected.
+- **Nesting depth:** No more than 64 levels. A workflow file with a normal structure comes nowhere near this limit.
+- **File size and task count:** A workflow file can be at most 256 KiB, counted as the UTF-8 bytes of the raw file, comments and whitespace included. A workflow can contain at most 1024 tasks. The server checks these two limits at submission, and `cdg dag validate{:sh}` doesn't. A workflow that exceeds either one is rejected when you run `cdg dag submit{:sh}`.
+
+## Workflow-level fields [#workflow-fields]
+
+Workflow-level fields go at the top level of the file. All of them except `tasks` are optional. When you omit `maxConcurrency`, `taskAutoAccepted`, or `dagAutoAccepted`, CodeDAG looks first at the field of the same name in project settings. For the full order, see [Defaults and precedence](#precedence).
+
+| Field | Type | Required | When omitted |
+|---|---|---|---|
+| [`tasks`](#tasks) | Array | Yes | — |
+| [`executionMode`](#execution-mode) | `isolated-branches` or `shared-workspace` | No | `isolated-branches` |
+| [`maxConcurrency`](#max-concurrency) | Integer | No | The value in project settings; `1` if it isn't set there |
+| [`taskAutoAccepted`](#task-auto-accepted) | `always`, `done`, or `none` | No | The value in project settings; `always` if it isn't set there |
+| [`dagAutoAccepted`](#dag-auto-accepted) | `always`, `done`, or `none` | No | The value in project settings; `done` if it isn't set there |
+| [`baseRef`](#base-ref) | String | No | The primary repository's `HEAD` when the workflow starts running; if the primary repository is excluded, the `HEAD` of the first replica that isn't excluded |
+| [`excludeWorkspaces`](#exclude-workspaces) | Array of strings | No | No workspaces are excluded |
+| [`mergeConflictAgent`](#merge-conflict-agent) | Object | No | The agent depends on where the merge happens; see the field's description |
+| [`metadata`](#metadata) | Object | No | None |
+
+### tasks [#tasks]
+
+`tasks` is the list of tasks and the only required field in a workflow file. It's an array with at least one task, and each task needs at least an `id`, a `title`, and a `prompt`. For all the available fields, see [Task-level fields](#task-fields).
+
+```yaml title="yaml"
+tasks:
+  - id: 1
+    title: Collect the test commands
+    prompt: Find the command that runs all the tests locally and write it to docs/notes/testing.md.
+```
+
+### executionMode [#execution-mode]
+
+`executionMode` determines whether tasks run in isolation on their own branches or directly in the same workspace. It's optional and takes `isolated-branches` or `shared-workspace`. When omitted, it defaults to `isolated-branches`.
+
+| Value | Meaning | Suited to |
+|---|---|---|
+| `isolated-branches` (default) | Isolated-branches mode. Each task runs in a workspace, on a task branch created from the same base. Before a downstream task starts, CodeDAG merges the upstream results into its task branch. After all tasks finish, the results are merged into the integration branch, `cdg/<workflow-name>/integration`, and the main branch stays unchanged. | Work that changes code and needs each task's result checked or rolled back on its own |
+| `shared-workspace` | Shared-workspace mode. All tasks run directly on the current branch of the same workspace. CodeDAG creates no branches, performs no merges, and makes no commits, and the results are left in that workspace as uncommitted changes. | Tasks that don't compile or run tests, such as documentation, research, and translation |
+
+For why there are two modes and what each one costs, see [Execution modes](/docs/concepts/workspaces-and-branches#execution-modes). The mode you choose also changes how several other fields and the review options behave:
+
+| | `isolated-branches` | `shared-workspace` |
+|---|---|---|
+| Where tasks run | Each running task occupies one workspace | All tasks share one workspace: the primary repository, or the first replica that isn't excluded if the primary repository is excluded |
+| Check before a task starts | If the workspace has uncommitted changes, the task stops at `on-hold` | No check for whether the workspace is clean |
+| [`maxConcurrency`](#max-concurrency) | The actual concurrency never exceeds the number of available workspaces | Not limited by the number of workspaces |
+| [`baseRef`](#base-ref) | Every task branch is created from it | Recorded only; the workspace isn't switched |
+| [`excludeWorkspaces`](#exclude-workspaces) | Excluded workspaces take no part in the run | Determines which workspace is used |
+| [`mergeConflictAgent`](#merge-conflict-agent) | Takes effect | Has no effect, because nothing is merged |
+| [`branchName`](#tasks-branch-name) | Can be used | Fails validation if set |
+| A task that finishes without leaving any changes | Not auto-accepted; it stops at `done` and waits for your review | Auto-accepted as usual and only marked `zero output` in its status; see [Auto-accept values](#auto-accept-values) |
+| Review | All actions and options are available | The `--code` option and the `rework` action can't be used; see [Shared-workspace mode](/docs/reference/cli/review#shared-workspace) in the review command reference |
+
+```yaml title="yaml"
+executionMode: shared-workspace   # Tasks run directly on the primary repository's current branch
+```
+
+### maxConcurrency [#max-concurrency]
+
+`maxConcurrency` is the limit on how many tasks run at once. It's an optional integer. A positive integer means at most that many tasks run at once, and 0 or a negative number means the workflow itself sets no limit. When omitted, the workflow uses `maxConcurrency` from project settings, which `cdg init{:sh}` sets to 1 plus the number of replicas by default. If project settings don't have it either, the value is 1, and tasks run one at a time.
+
+In isolated-branches mode, each running task occupies one workspace, so the actual concurrency also never exceeds the number of available workspaces: the registered workspaces minus the ones that [`excludeWorkspaces`](#exclude-workspaces) excludes. With 0 or a negative number, the concurrency equals the number of available workspaces. If you don't have enough available workspaces, add replicas first. See [Set up replicas](/docs/guides/parallel-workspaces#prepare-replicas).
+
+In shared-workspace mode, concurrency isn't limited by the number of workspaces. With 0 or a negative number, every task that's ready to start starts at the same time. These tasks all write to the same workspace, and CodeDAG doesn't isolate their changes, so tasks that run at the same time need to write to different files.
+
+```yaml title="yaml"
+maxConcurrency: 2   # At most 2 tasks run at once
+```
+
+```yaml title="yaml"
+maxConcurrency: 0   # No limit from the workflow; in isolated-branches mode, it uses every available workspace
+```
+
+### taskAutoAccepted [#task-auto-accepted]
+
+`taskAutoAccepted` is the default review policy for every task in the workflow. It determines whether a task is auto-accepted when it finishes, or stops and waits for your review. It's optional and takes `always`, `done`, or `none`. For what each value means, see [Auto-accept values](#auto-accept-values). When omitted, the workflow uses `taskAutoAccepted` from project settings. If project settings don't have it either, the value is `always`, which means auto-accept.
+
+A task that sets its own [`autoAccepted`](#tasks-auto-accepted) uses its own value. The `--task-auto-accepted` submit option, in turn, overrides both for that one submission. See [Defaults and precedence](#precedence).
+
+```yaml title="yaml"
+taskAutoAccepted: none   # Every task stops when it finishes and waits for your review
+tasks:
+  - id: 1
+    title: Format the code
+    autoAccepted: always # This task is the exception: it's auto-accepted when it finishes
+    prompt: Run the project's format command to format all the source files.
+```
+
+### dagAutoAccepted [#dag-auto-accepted]
+
+`dagAutoAccepted` is the review policy for the whole workflow. It determines whether, after every task has been reviewed, the workflow is auto-accepted or stops and waits for your decision on the full set of results. It's independent of the tasks' review policies: even when every task has been auto-accepted, this field still decides whether the workflow stops. It's optional and takes `always`, `done`, or `none`. For what each value means, see [Auto-accept values](#auto-accept-values). When omitted, the workflow uses `dagAutoAccepted` from project settings. If project settings don't have it either, the value is `done`, which means auto-accept. The `--dag-auto-accepted` submit option overrides it for that one submission.
+
+```yaml title="yaml"
+dagAutoAccepted: none   # After all tasks finish, wait for your decision on the whole workflow
+```
+
+### baseRef [#base-ref]
+
+`baseRef` sets the workflow's base, the commit that every task branch is created from in isolated-branches mode. It's an optional non-empty string in any of the following forms:
+
+| Form | Example |
+|---|---|
+| Local branch name | `main`, `feature/auth` |
+| Remote-tracking branch name | `origin/main` |
+| Tag name | `v1.4.0` |
+| Commit ID, full or abbreviated to at least 7 characters | `4f3c2b1` |
+| Full ref | `refs/heads/main`, `refs/tags/v1.4.0` |
+| Any other expression that Git can resolve to a commit | `main~1`, `HEAD~2` |
+
+The value has to identify exactly one commit. If a branch and a tag have the same name, or an abbreviated commit ID matches more than one commit, CodeDAG doesn't guess. In the first case, use a full ref such as `refs/heads/...` or `refs/tags/...`. In the second, write more characters of the commit ID.
+
+`baseRef` is resolved to a specific commit when the workflow actually starts running, not when you run the submit command. So with `baseRef: main`, the base is the commit that `main` points to at the moment the workflow starts, and it includes any commits added to `main` while the workflow waited in the queue. Validation checks only that the value isn't an empty string. Whether the ref exists and identifies a single commit can't be determined until the workflow starts. If it can't be resolved, the workflow stops at `on-hold`. To fix that, see [A workflow can't start running](/docs/troubleshooting/troubleshooting#dag-startup).
+
+When `baseRef` is omitted, the base is the primary repository's `HEAD` when the workflow starts running. If [`excludeWorkspaces`](#exclude-workspaces) excludes the primary repository, it's the `HEAD` of the first replica that isn't excluded. After a workflow finishes, the primary repository is left on that workflow's integration branch, so the next workflow without `baseRef` starts from the previous workflow's results. See [Where the repository is left after a workflow finishes](/docs/guides/finish-and-merge#where-repo-stays). To start from `main` no matter what, set `baseRef: main`.
+
+In shared-workspace mode, `baseRef` is only resolved and recorded, and CodeDAG doesn't switch the workspace to it. To have shared-workspace tasks run on a particular version, check out the target commit in that workspace yourself, then submit the workflow.
+
+```yaml title="yaml"
+baseRef: main     # Start from the commit main points to when the workflow starts
+```
+
+```yaml title="yaml"
+baseRef: v1.4.0   # Start from the tag v1.4.0
+```
+
+### excludeWorkspaces [#exclude-workspaces]
+
+`excludeWorkspaces` lists the workspaces this workflow doesn't use. It's an optional array of strings, each one the path of a workspace. `.` means the primary repository, relative paths are resolved from the root of the primary repository, and absolute paths are allowed too. Every item has to be a workspace that's already registered with the current project, or validation fails. For how workspaces are registered, see [Register and update workspaces](/docs/reference/cli/init#register-workspaces). When omitted, every registered workspace can be used.
+
+In isolated-branches mode, an excluded workspace doesn't have its branch switched and doesn't run tasks. That leaves fewer available workspaces, which can lower the actual concurrency too. In shared-workspace mode, the workflow runs in the first workspace that isn't excluded. The primary repository comes first in that order, followed by the replicas in the order they were registered. In either mode, at least one workspace has to remain. If you exclude every registered workspace, validation fails and the workflow isn't submitted.
+
+With the primary repository excluded, you can keep developing in it while the workflow runs only in replicas. It's best to set [`baseRef`](#base-ref) as well in that case. Otherwise, the base is whatever commit the first replica has checked out at the time. For how to set this up, see [Keep developing while a workflow runs](/docs/guides/parallel-workspaces#keep-main-repo).
+
+```yaml title="yaml"
+excludeWorkspaces: ["."]   # Don't use the primary repository; the workflow runs only in replicas
+baseRef: main
+```
+
+```yaml title="yaml"
+excludeWorkspaces:
+  - ../my-app-wt-2         # Don't use this replica, for example because other work is using it
+```
+
+### mergeConflictAgent [#merge-conflict-agent]
+
+`mergeConflictAgent` sets which agent resolves conflicts in automatic merges. It's an optional object and takes effect only in isolated-branches mode. In that mode, CodeDAG merges automatically in two places: before a downstream task starts, it merges the upstream results into the task's branch, and after all tasks finish, it merges the results into the integration branch. When a conflict occurs in either place, CodeDAG starts an agent session to resolve it. If the session can't resolve it, the task or workflow involved stops at `on-hold`. For how this works, see [Merges and conflicts at join nodes](/docs/concepts/workspaces-and-branches#merge-and-conflicts). For the steps to fix it, see [Merge conflicts](/docs/troubleshooting/troubleshooting#hold-merge-conflict).
+
+| Subfield | Required | Value | When omitted |
+|---|---|---|---|
+| `agent` | Yes | `claude` or `codex`; must be an agent the project allows | — |
+| `mode` | No | Same syntax as a task's `mode`, checked against the chosen `agent`; see [Permission mode syntax](#mode-syntax) | `yolo` |
+| `model` | No | A model name that the chosen agent supports | The default model configured in the agent itself |
+
+When `mergeConflictAgent` is omitted, each of the two places has its own default:
+
+| Where the conflict occurs | Who resolves it when `mergeConflictAgent` is omitted |
+|---|---|
+| Merging upstream results before a downstream task starts | The downstream task's own `agent` and `model` |
+| Merging into the integration branch after all tasks finish | The project's default agent, as determined when the workflow was submitted |
+
+When it's set, both places use the `agent`, `mode`, and `model` in the object. If the object omits `model`, the downstream task's `model` isn't used in its place.
+
+There's no way to respond to an approval request in a conflict session, so the session doesn't follow the task's `mode`. When `mergeConflictAgent` has no `mode`, including when the whole field is omitted, the session always runs with `yolo` and can finish the merge unattended. Set `mode` only to switch to a different access level. If you switch to a level that stops to request approval, the session stalls as soon as an approval request comes up, and the merge can't go any further.
+
+```yaml title="yaml"
+mergeConflictAgent:        # Hand every merge conflict to Claude Code
+  agent: claude
+  model: opus
+```
+
+### metadata [#metadata]
+
+`metadata` holds notes for human readers, such as the workflow's purpose, maintainer, or version. It's an optional object, and what goes in it is up to you. CodeDAG doesn't read or check its contents. The template file that `cdg init{:sh}` generates comes with a few entries such as `version` and `description`, which you can keep, change, or delete as needed.
+
+```yaml title="yaml"
+metadata:
+  description: Weekly dependency upgrades and regression tests
+  owner: platform-team
+```
+
+## Task-level fields [#task-fields]
+
+Task-level fields go inside each item in `tasks` and apply only to that task.
+
+| Field | Type | Required | When omitted |
+|---|---|---|---|
+| [`id`](#tasks-id) | Positive integer | Yes | — |
+| [`title`](#tasks-title) | String | Yes | — |
+| [`prompt`](#tasks-prompt) | String | At least one of `prompt` and `details` | — |
+| [`description`](#tasks-description) | String | No | Empty |
+| [`dependencies`](#tasks-dependencies) | Array of integers | No | `[]`: the task waits for no other task |
+| [`agent`](#tasks-agent) | `claude` or `codex` | No | The project's default agent |
+| [`mode`](#tasks-mode) | String | No | The agent's own permission settings |
+| [`model`](#tasks-model) | String | No | The default model configured in the agent itself |
+| [`effort`](#tasks-effort) | String | No | The default reasoning effort from the agent's own configuration or the model |
+| [`autoAccepted`](#tasks-auto-accepted) | `always`, `done`, or `none` | No | The workflow's `taskAutoAccepted` |
+| [`branchName`](#tasks-branch-name) | String | No | Named automatically |
+
+### id [#tasks-id]
+
+`id` is the task's number. `dependencies` and the commands under `cdg task{:sh}` use it to identify the task. It's a required positive integer and must be unique within the workflow, but IDs don't have to start at 1 or be consecutive.
+
+### title [#tasks-title]
+
+`title` is the task's name. It's shown on the status board and in logs, and it's used to generate the default task branch name. It's a required string and can't be empty. The task agent receives only the [`prompt`](#tasks-prompt) and never sees `title`, so anything the agent needs to know has to go in `prompt`.
+
+### prompt [#tasks-prompt]
+
+`prompt` holds the instructions for the task agent, and the task's agent session takes it as its first input. It's a required string. You can also write it as `details`, an alternative name accepted for compatibility, and at least one of the two has to be set. Setting either one alone has the same effect. When both are set, only `prompt` is used, and the content of `details` is ignored. If you set `prompt`, it can't be blank: an empty string or a string of only whitespace fails validation.
+
+Every task is a fresh agent session that can't see any other task's conversation. For how to write a prompt that such a session can complete on its own, see [Write prompts: let a fresh session finish on its own](/docs/guides/designing-tasks-and-prompts#write-prompts).
+
+```yaml title="yaml"
+  - id: 2
+    title: Implement the search API
+    prompt: |
+      Read docs/plans/search.md. First write unit tests for each new endpoint in the plan,
+      then implement the search API as the plan describes and run all the tests until they pass.
+      Modify only the server/ directory.
+```
+
+### description [#tasks-description]
+
+`description` is an additional note for human readers. It's an optional string and is empty by default. It isn't passed to the task agent, so put anything the agent needs to know in [`prompt`](#tasks-prompt).
+
+### dependencies [#tasks-dependencies]
+
+`dependencies` lists the `id` of each upstream task this task waits for. It's an optional array of integers. The default is an empty array, which means the task waits for no other task and can be scheduled as soon as the workflow starts. Every `id` listed has to belong to a task that exists in the same workflow, and dependencies can't form a cycle. A task that depends on itself counts as a cycle too.
+
+A task starts only after all of its upstream tasks are done and have passed review. Auto-accept counts as passing. In isolated-branches mode, the upstream results are merged into its task branch before it starts.
+
+```yaml title="yaml"
+  - id: 4
+    title: Run the tests and fix failures
+    dependencies: [2, 3]   # Starts only after tasks 2 and 3 have both passed review
+    prompt: Run all the tests and fix any failures until they all pass.
+```
+
+### agent [#tasks-agent]
+
+`agent` sets which agent runs the task: `claude` means Claude Code, and `codex` means Codex. It's optional. When omitted, the task uses the project's default agent, which is [`defaultAgent`](/docs/reference/settings#default-agent) in project settings and is usually chosen during `cdg init{:sh}`. The agent you choose has to be one that the project allows, or validation fails.
+
+A task's [`mode`](#tasks-mode) is checked against the syntax of the agent the task ends up using. When `agent` is omitted, `mode` is checked against the project's default agent. The default agent is usually stored in the local settings, so the same file can fail validation on a machine with a different default agent. A task that sets `mode` should therefore set `agent` explicitly too.
+
+```yaml title="yaml"
+  - id: 3
+    title: Review the implementation
+    agent: claude             # Only this task goes to Claude Code
+    mode: bypassPermissions
+    prompt: Review the code added to the server/ directory in this change, and write the issues you find to docs/review.md.
+```
+
+### mode [#tasks-mode]
+
+`mode` is the task agent's permission mode. It determines which operations the agent can perform right away while the task runs and which ones it has to stop and get your approval for. It's an optional non-empty string. When omitted, CodeDAG passes no permission mode to the agent, and the agent runs with its own configuration, such as `permissions.defaultMode` in Claude Code's project or user settings, or Codex's `~/.codex/config.toml`. In that case, the workflow file doesn't show how much access the task actually has.
+
+The syntax of `mode` differs by agent. See [Permission mode syntax](#mode-syntax). Set `mode` explicitly when you want a task to run to completion unattended, or when you want the file to pin each task's access level. For how to choose between unattended and attended runs, see [Decide between unattended and attended runs](/docs/guides/agents-and-permission-modes#unattended-or-attended).
+
+```yaml title="yaml"
+  - id: 1
+    title: Write the implementation plan
+    agent: codex
+    mode: yolo                # Codex: no approval requests and no sandbox
+    prompt: Read docs/spec/search.md and write the implementation plan to docs/plans/search.md.
+  - id: 2
+    title: Implement the search API
+    dependencies: [1]
+    agent: claude
+    mode: acceptEdits         # Claude Code: file edits run right away, and other commands need your approval first
+    prompt: Implement the search API as described in docs/plans/search.md.
+```
+
+### model [#tasks-model]
+
+`model` sets the model the task uses. It's an optional non-empty string that's passed as is to the agent's `--model` option. When omitted, the task uses the default model configured in the agent itself. CodeDAG doesn't check model names. A misspelled name passes validation, and the agent reports the error only when the task runs.
+
+For Claude Code, you can write an alias such as `sonnet`, `opus`, or `haiku`, or a full model name. See Claude Code's [model configuration documentation](https://code.claude.com/docs/en/model-config). For Codex, write a model name. For the available models, see Codex's [models documentation](https://learn.chatgpt.com/docs/models).
+
+```yaml title="yaml"
+  - id: 3
+    title: Review the implementation
+    agent: claude
+    model: sonnet   # Use the latest Sonnet model
+    prompt: Review the code added to the server/ directory in this change, and write the issues you find to docs/review.md.
+```
+
+### effort [#tasks-effort]
+
+`effort` sets the model's reasoning effort. It's an optional non-empty string that's passed to the agent as is. When omitted, the agent's own configuration or the default of the model in use decides the reasoning effort. CodeDAG doesn't check the value, and a wrong value surfaces only when the task runs.
+
+| Agent | How it's passed to the agent | Common values |
+|---|---|---|
+| Claude Code | The `--effort` option | `low`, `medium`, `high`, `xhigh`, `max` |
+| Codex | The `model_reasoning_effort` configuration key | `low`, `medium`, `high`, `xhigh`; some models also support higher levels such as `max` |
+
+For both agents, the available levels depend on the model you choose, and some models don't offer the highest ones. For specifics, see Claude Code's [model configuration documentation](https://code.claude.com/docs/en/model-config) and Codex's [models documentation](https://learn.chatgpt.com/docs/models).
+
+```yaml title="yaml"
+  - id: 1
+    title: Write the implementation plan
+    agent: codex
+    effort: high    # The plan shapes every later task, so use higher reasoning effort
+    prompt: Read docs/spec/search.md and write the implementation plan to docs/plans/search.md.
+```
+
+### autoAccepted [#tasks-auto-accepted]
+
+`autoAccepted` is this task's review policy. It determines whether the task is auto-accepted when it finishes, or stops and waits for your [review](/docs/guides/review-tasks). It's optional and takes `always`, `done`, or `none`. For what each value means, see [Auto-accept values](#auto-accept-values). When omitted, the task inherits the workflow's [`taskAutoAccepted`](#task-auto-accepted). If the workflow doesn't set that either, the value comes from project settings and then from the final default, `always`. The `--task-auto-accepted` submit option overrides this field on every task for that one submission. See [Defaults and precedence](#precedence).
+
+```yaml title="yaml"
+  - id: 1
+    title: Write the implementation plan
+    autoAccepted: none   # Stops once the plan is written; downstream tasks start only after you accept it
+    prompt: Read docs/spec/search.md and write the implementation plan to docs/plans/search.md.
+```
+
+### branchName [#tasks-branch-name]
+
+`branchName` sets the name of this task's task branch. It's an optional non-empty string that can be used only in isolated-branches mode. In shared-workspace mode, setting it fails validation. When omitted, CodeDAG names the task branch `cdg/<workflow-name>/t<id>-<title>` automatically.
+
+When you set `branchName`, CodeDAG uses the name exactly as written, with no prefix and no suffix. The name has to meet the following requirements, or validation fails:
+
+- It follows Git's rules for branch names, which means it passes `git check-ref-format`.
+- No other task in the same workflow uses it.
+- It isn't this workflow's integration branch, `cdg/<workflow-name>/integration`, and it doesn't start with the snapshot branch prefix, `cdg/<workflow-name>/snapshots/`.
+
+If a branch with the same name already exists, for example one left by the same workflow's previous run, validation gives a `branch-name-conflict` warning. If you submit without dealing with it, the task stops at `on-hold` when the workflow reaches it. The warning says what's holding the name, and once you've dealt with the old branch, you can keep using the original name. For how, see [Use a fixed task branch name](/docs/reference/branches-and-files#branch-name). Automatically named task branches don't have this problem, so set `branchName` only when you really need a fixed branch name, for example because you plan to push the branch to a remote and open a pull request.
+
+```yaml title="yaml"
+  - id: 2
+    title: Implement the search API
+    branchName: feature/search-api
+    prompt: Implement the search API as described in docs/plans/search.md.
+```
+
+## Auto-accept values [#auto-accept-values]
+
+The values `always`, `done`, and `none` are used by every review policy setting: a task's `autoAccepted`, the workflow's `taskAutoAccepted` and `dagAutoAccepted`, the fields of the same name in project settings, and the `--task-auto-accepted` and `--dag-auto-accepted` options of `cdg dag submit{:sh}`. Settings with `dag` in the name apply to the whole workflow, and the rest apply to tasks. Here's what each value means in the two kinds of setting:
+
+| Value | For a task | For the whole workflow |
+|---|---|---|
+| `always` | The task is auto-accepted when it finishes, and its downstream tasks can start right away | After every task has been reviewed, the whole workflow is auto-accepted; in isolated-branches mode the results are merged into the integration branch, and the workflow leaves the queue |
+| `done` | Same as `always` | Same as `always` |
+| `none` | The task stops when it finishes and waits for your review. Until you give a decision, its downstream tasks don't start, and in isolated-branches mode the task also keeps occupying its workspace | After every task has been reviewed, the workflow stops and waits for you to give a decision with `cdg dag review{:sh}`. Until then, the workflows behind it in the queue don't start |
+
+In 0.1.0, `always` and `done` have the same effect: both mean auto-accept. The final default is `always` for tasks and `done` for the workflow, so when you set nothing, both the tasks and the workflow are auto-accepted.
+
+Auto-accept has one exception. In isolated-branches mode, a task that finishes without leaving any changes isn't auto-accepted, even when the value is `always`. It stops and waits for your review instead. In shared-workspace mode, a task with zero output is auto-accepted as usual and is only marked as such in its status.
+
+Use `none` where you want to check the result yourself, such as a planning task that every later task depends on, or a new workflow on its first run. For which nodes are worth setting this way and why auto-accept is the default, see [Auto-accept](/docs/concepts/review-gates#auto-accept). For how to review once a task or workflow has stopped, see [Review Tasks and Workflows](/docs/guides/review-tasks).
+
+## Permission mode syntax [#mode-syntax]
+
+`mode` appears in tasks and in [`mergeConflictAgent`](#merge-conflict-agent), and its syntax depends on the agent it applies to. For Claude Code, it's a mode name. For Codex, it's a shorthand or a comma-separated list of key-value pairs. Validation checks the format against the corresponding agent, so one agent's syntax on the other agent's task fails validation.
+
+### Claude Code [#mode-claude-code]
+
+For a Claude Code task, `mode` is a mode name that contains no spaces, commas, or `=`. CodeDAG passes it to Claude Code as `--permission-mode`. CodeDAG provides two aliases: `yolo` is equivalent to `bypassPermissions`, and `askForPermissions` is equivalent to `default`. Any other mode name is passed to Claude Code as is. CodeDAG checks only the format, and Claude Code decides whether the name is valid.
+
+| Value | Operations that run without your approval | In a CodeDAG task |
+|---|---|---|
+| `bypassPermissions`, alias `yolo` | All operations, with permission checks skipped, except a few that Claude Code protects | Almost never stops to wait for your approval while it runs, so it suits unattended runs; use it only for tasks you trust in an environment you control |
+| `auto` | All operations, reviewed in the background by Claude Code's safety classifier; operations it blocks don't run | Requires a model and an account that support auto mode; without that support, the session starts in `default` mode, and the task stops at operations that need approval |
+| `acceptEdits` | Reads, file edits, and common filesystem commands such as `mkdir`, `mv`, and `cp` | Stops before running any other command and waits for your approval |
+| `default`, alias `askForPermissions` | Reads only | Stops before most operations that edit files, run commands, or access the network, and waits for your approval; called Manual in the Claude Code interface |
+| `dontAsk` | Reads, plus the tools you've allowed in advance in Claude Code's permission rules | Never stops to wait for your approval; every other operation is denied outright |
+| `plan` | Reads, plus commands the classifier lets through when auto mode is available | Doesn't modify files until you approve the plan, so it doesn't suit tasks that need to change files |
+
+For the full description of each mode, treat Claude Code's [permission modes documentation](https://code.claude.com/docs/en/permission-modes) as the source of truth.
+
+```yaml title="yaml"
+mode: acceptEdits   # File edits run right away; other commands need your approval before they run
+```
+
+### Codex [#mode-codex]
+
+For a Codex task, `mode` takes one of two forms: a single shorthand for the whole value, or a comma-separated list of `key=value` pairs. The two forms can't be mixed, and a value such as `approve-for-me,search=true` fails validation.
+
+Each of the two shorthands stands for a complete set of permission settings:
+
+- **`yolo`:** Codex doesn't request approval for any operation, doesn't use a sandbox, and turns on live web search. It can read and write any file, access the network, and run any command, so use it only for tasks you trust in an environment you control. Writing Codex's native option name, `dangerously-bypass-approvals-and-sandbox`, has the same effect.
+- **`approve-for-me`, which can also be written `auto`:** Codex runs in the workspace-write sandbox and requests approval as needed when it has to go outside the sandbox. Those requests go first to Codex's automatic review for a decision, so the task doesn't stop to wait for you. When a request is denied, the agent adjusts its approach on its own and carries on. This shorthand can run unattended and still keeps a layer of review.
+
+The key-value form accepts the five keys below. Each key can appear at most once, and spaces are allowed on either side of a comma. A key you leave out isn't passed to Codex, and Codex's own configuration decides it.
+
+| Key | Values | Meaning |
+|---|---|---|
+| `ask-for-approval` | `on-request`, `never` | `on-request`: the model decides when to stop and request approval, for example when it needs to go outside the sandbox. `never`: never requests approval; operations the sandbox doesn't allow fail immediately, and the task doesn't stop to wait for a person |
+| `sandbox` | `read-only`, `workspace-write`, `danger-full-access` | `read-only`: commands can only read. `workspace-write`: commands can read anywhere but write only to the task's workspace, and they can't access the network by default. `danger-full-access`: no restrictions at all |
+| `approvals_reviewer` | `user`, `auto_review` | Who decides approval requests. `user` sends them to you, and the session stops and waits for your response. `auto_review` sends them to Codex's automatic review, and the session doesn't stop to wait for a person. With `ask-for-approval=never`, Codex produces no approval requests, so this key has no effect |
+| `search` | `true`, `false` | `true`: turns on live web search. `false`: turns off the web search tool. When omitted, Codex's own configuration applies, and by default Codex uses cached search results |
+| `network_access` | `true`, `false` | Whether commands in the `workspace-write` sandbox can access the network. When omitted, Codex's own configuration applies, and by default Codex doesn't allow it |
+
+The five keys can be combined freely. Only `network_access` has an extra requirement: when you set it, you also have to set `sandbox=workspace-write` explicitly. A key name that isn't in the table, a value that isn't in the table, and a repeated key are all reported as errors by `cdg dag validate{:sh}` and `cdg dag submit{:sh}`, and none of them is passed to Codex as is. The table lists the values that the current version of Codex accepts. `untrusted`, an approval policy from earlier versions of Codex, and `on-failure`, which Codex has deprecated, aren't among them. Using either one produces an error such as `ask-for-approval must be on-request or never, received 'untrusted'`.
+
+```yaml title="yaml"
+# Allow writes only to the task's workspace; the model requests approval to go beyond it
+mode: "ask-for-approval=on-request,sandbox=workspace-write"
+```
+
+```yaml title="yaml"
+# Same as above, plus network access for commands, for example to install dependencies or reach a test service
+mode: "ask-for-approval=on-request,sandbox=workspace-write,network_access=true"
+```
+
+```yaml title="yaml"
+# Send approval requests to Codex's automatic review instead of stopping to wait for your response
+mode: "approvals_reviewer=auto_review,ask-for-approval=on-request,sandbox=workspace-write,network_access=true"
+```
+
+```yaml title="yaml"
+# Turn on live web search without opening up network access for commands
+mode: "sandbox=workspace-write,search=true"
+```
+
+```yaml title="yaml"
+# Never request approval: whatever the sandbox allows runs right away, whatever it doesn't fails immediately, and the task doesn't stop to wait for a person
+mode: "ask-for-approval=never,sandbox=workspace-write,network_access=true"
+```
+
+For the detailed behavior of approvals and the sandbox, treat Codex's [configuration documentation](https://learn.chatgpt.com/docs/config-file/config-reference) as the source of truth.
+
+## Defaults and precedence [#precedence]
+
+The same setting can appear in several places: a `cdg dag submit{:sh}` option, a task field, a workflow field, the project's local settings in `.codedag/local/settings.local.jsonc`, and its shared settings in `.codedag/settings.jsonc`. At submission, CodeDAG goes through the sources in the table below from left to right and takes the first one that has a value. If none of them has one, it uses the final default.
+
+| Setting | Precedence, highest to lowest | Final default |
+|---|---|---|
+| Review policy for tasks | `--task-auto-accepted` → the task's `autoAccepted` → the workflow's `taskAutoAccepted` → local settings → shared settings | `always` |
+| Review policy for the whole workflow | `--dag-auto-accepted` → the workflow's `dagAutoAccepted` → local settings → shared settings | `done` |
+| Concurrency limit | The workflow's `maxConcurrency` → local settings → shared settings | `1` |
+| A task's agent | The task's `agent` → the project's default agent, which is `defaultAgent` in settings, with local settings taking precedence over shared settings | `codex`; `claude` if the project doesn't allow Codex |
+| A task's `mode`, `model`, and `effort` | The task field → the agent's own configuration | The agent's built-in default |
+
+Values are fixed at submission. Changing the file or the settings afterward doesn't affect a run that's already been submitted. The last row of the table is the exception. When a task doesn't set `mode`, `model`, or `effort`, CodeDAG doesn't pick a value for it. The agent decides each time it starts a session, based on its own configuration at that moment. So if you change the agent's configuration after submission, tasks that haven't started yet run with the new configuration. To pin a permission mode or a model for a run, set it on the task.
+
+The two submit options apply only to that one submission and don't modify any file. For how to use them, see [Adjust review settings for a single submission](/docs/reference/cli/validate-and-submit#auto-accept-options). For what goes in the local settings and in the shared settings, and how to make a value apply only to you, see [Where settings go](/docs/reference/settings#files). Which agent resolves conflicts in automatic merges follows its own rules. See [`mergeConflictAgent`](#merge-conflict-agent).
+
+## More configuration examples [#examples]
+
+Both files below are complete workflows. You can save them to `.codedag/dags/` as they are and then adapt the prompts to your own project.
+
+The first workflow runs only in replicas and always starts from `main`, so you can keep developing in the primary repository at the same time. Tasks 1 and 2 run at the same time, each in a replica of its own, so the project needs at least two registered replicas. Before task 3 starts, CodeDAG merges the results of the first two tasks into its task branch.
+
+```yaml title=".codedag/dags/deps-upgrade.yaml"
+baseRef: main              # Start from main, whichever branch the primary repository is on
+excludeWorkspaces: ["."]   # Don't use the primary repository; the workflow runs only in replicas
+maxConcurrency: 2
+tasks:
+  - id: 1
+    title: Upgrade frontend dependencies
+    agent: codex
+    mode: yolo
+    prompt: |
+      Upgrade the dependencies under web/ to the latest versions within their current major versions,
+      then run all the tests in web/ and fix any failures. Modify only the web/ directory.
+  - id: 2
+    title: Upgrade backend dependencies
+    agent: codex
+    mode: yolo
+    prompt: |
+      Upgrade the dependencies under server/ to the latest versions within their current major versions,
+      then run all the tests in server/ and fix any failures. Modify only the server/ directory.
+  - id: 3
+    title: Record the upgrades
+    dependencies: [1, 2]
+    agent: codex
+    mode: yolo
+    prompt: |
+      Compare the dependency versions before and after this upgrade, and write which dependencies were upgraded
+      and which changes need attention to docs/notes/deps-upgrade.md. Write only this file (overwrite it if it already exists).
+```
+
+The second workflow writes a plan first and stops when the plan is done so that you can confirm it. Two tasks then implement the API and the page separately. The two implementation tasks use fixed branch names, which makes it easy to push each one separately later. If a conflict occurs when the results are merged into the integration branch after all tasks finish, Claude Code resolves it.
+
+```yaml title=".codedag/dags/search-feature.yaml"
+mergeConflictAgent:              # Hand merge conflicts to Claude Code
+  agent: claude
+tasks:
+  - id: 1
+    title: Write the implementation plan
+    agent: codex
+    mode: yolo
+    autoAccepted: none           # Stop once the plan is written and wait for you to confirm it before implementation starts
+    prompt: |
+      Read docs/spec/search.md and write the implementation plan for the search feature to docs/plans/search.md.
+      List the modules to change, the API changes, and the key points to test. Write only the plan and don't modify any code.
+  - id: 2
+    title: Implement the search API
+    dependencies: [1]
+    agent: codex
+    mode: yolo
+    branchName: feature/search-api
+    prompt: |
+      Implement the search API as described in docs/plans/search.md, and add the unit tests that go with it.
+      Run all the tests until they pass.
+  - id: 3
+    title: Implement the search page
+    dependencies: [1]
+    agent: claude
+    mode: bypassPermissions
+    branchName: feature/search-ui
+    prompt: |
+      Implement the search page as described in docs/plans/search.md, and add the component tests that go with it.
+      Run all the tests until they pass.
+```
+
+## Related
+
+- [Write a Workflow File](/docs/guides/writing-workflows): Write a workflow file starting from the minimal structure, and validate it before you submit.
+- [Choose Agents, Models, and Permission Modes](/docs/guides/agents-and-permission-modes): Choose an agent, a model, and an access level for each task.
+- [Project Settings](/docs/reference/settings): The fields in the shared settings and the local settings, and their defaults.
+- [Validate and Submit](/docs/reference/cli/validate-and-submit): The arguments and options of `cdg dag validate{:sh}` and `cdg dag submit{:sh}`.

@@ -1,0 +1,6 @@
+{
+  "title": "了解 CodeDAG",
+  "icon": "Telescope",
+  "defaultOpen": true,
+  "pages": ["overview", "when-to-use", "design-philosophy"]
+}

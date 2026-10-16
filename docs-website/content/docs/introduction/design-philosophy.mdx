@@ -1,0 +1,88 @@
+---
+title: Design Philosophy
+description: The thinking and tradeoffs behind CodeDAG's approach to automating software development at scale.
+icon: Lightbulb
+---
+
+Agent-assisted coding has led us to ask: how much of software development can we automate, and how far can that automation scale? CodeDAG is our tentative answer. These eight principles guide its design:
+
+<ul className="philosophy-principles" role="list" lang="en">
+  <li><a href="#continuity">Work should flow without constant prompting.</a></li>
+  <li><a href="#decoupling">Every task deserves its own context.</a></li>
+  <li><a href="#precision">What's written is what runs.</a></li>
+  <li><a href="#reversibility">Make it safe to be wrong.</a></li>
+  <li><a href="#controllability">Hands off is not hands tied.</a></li>
+  <li><a href="#observability">Show the work, not just the result.</a></li>
+  <li><a href="#autonomy">Agents can orchestrate as well as execute.</a></li>
+  <li><a href="#diversity">Let different minds sharpen one another.</a></li>
+</ul>
+
+## Work should flow without constant prompting [#continuity]
+
+Today, many developers still work with agents one exchange at a time: send a prompt, wait for the agent to finish, review the result, then decide what comes next. This resembles early command-line computing, with a person issuing instructions one by one. Scripts changed that pattern: a sequence of commands could be written in advance and left to run without someone standing by.
+
+CodeDAG brings the same idea to agent-assisted development: define the work as a [workflow](/docs/concepts/how-it-works), then let the system carry it forward. Once a workflow is submitted, tasks run according to their dependencies. Multiple workflows can also be queued to run one after another, so development keeps moving even when you step away.
+
+Interactive work still makes sense when you are exploring goals, discussing approaches, or changing direction as you learn. Where the work allows it, we favor continuous execution, so people do not have to keep returning just to move things along. That preference is CodeDAG's starting point. Everything that follows is about making continuous execution something people can trust.
+
+## Every task deserves its own context [#decoupling]
+
+Continuous execution can take several forms. One agent can handle successive tasks in a long-running session, compacting its context as needed. A team of agents can exchange information throughout execution. Or a main agent can dispatch subagents as work progresses. CodeDAG takes a different approach: within a predefined workflow, each task gets its own [agent session](/docs/concepts/tasks-and-sessions), with an independent, stable context focused on that task. The orchestration engine handles the dependencies and determines when each task can run.
+
+Independent contexts do not mean disconnected tasks. Each task starts a fresh session and receives the upstream results it needs through concrete artifacts such as code and documents. It does not need to inherit an entire conversation or rely on a stream of ad hoc messages from other tasks. A stable context has clear boundaries around the task's goal and sources of information. It grows primarily with the task's own work, rather than with the history of the entire workflow.
+
+Having one agent do everything is convenient, but irrelevant information and outdated assumptions from earlier tasks can interfere with its judgment. Context compaction reduces the volume of information, but may omit important constraints or preserve a conclusion while losing the conditions that made it valid. Live discussion within an agent team can spark ideas, but that ongoing mutual influence also makes execution less predictable. For software development, we place more weight on reliability and stability. We are willing to put more effort into defining tasks and to give up some of the convenience of a continuous conversation and the creative potential of live collaboration. That tradeoff may not be worthwhile for quick experiments or open-ended creative work. For large-scale software development, we believe the benefits of decoupling outweigh those costs.
+
+## What's written is what runs [#precision]
+
+Separate contexts do not, by themselves, determine how tasks should fit together. Even when a main agent delegates execution to subagents, it still decides along the way how to split the work, when to start each task, and where each result should go. This is flexible and well suited to simple tasks and open-ended exploration. But as tasks and dependencies multiply, the main agent has more relationships and task states to keep track of at once. Relying on the model's attention alone makes it easier to miss a dependency or misjudge when work can proceed, allowing execution to drift from the original plan.
+
+CodeDAG makes that coordination explicit in a [workflow file](/docs/guides/writing-workflows) before execution begins. The engine then follows the declared dependencies and conditions for proceeding. A workflow can be reviewed before it runs, reused across runs, and revised as you learn, without asking a main agent to recreate the plan each time. Adding tasks and dependencies increases the amount of scheduling work, but it does not change the rules. The engine continues to enforce the declared dependencies and conditions, even at scales well beyond what a single agent can keep track of.
+
+This precision and repeatability come at the cost of some flexibility. The task structure must be defined in advance and followed during execution; nodes cannot be freely added or removed on the fly. These constraints apply to the relationships between tasks, not to every decision an agent makes within a task. Each task agent still decides how to do its work. CodeDAG is for work complex enough to warrant planning its orchestration up front and having a system execute it reliably.
+
+## Make it safe to be wrong [#reversibility]
+
+Even with clear task boundaries and precise orchestration, agents will still make mistakes. To build larger workflows with confidence, we need to be able to recover from mistakes locally. If a single bad change can leave the whole project in an unrecoverable state, someone has to approve every step before it happens—and continuous execution still depends on constant supervision.
+
+CodeDAG therefore isolates each task's code changes by default. Concurrent tasks run in separate workspaces on their own branches, so even changes to the same file can be traced back to the task that made them. Sequential tasks also have their own branches: each incorporates upstream results before starting its own work, keeping its changes distinct from what it inherited. The primary purpose of isolation is to make each task's changes reversible. It also lets independent tasks run in parallel, speeding up execution.
+
+Before a task's result is accepted, unwanted changes can be discarded, or the task can be reworked from its clean baseline. Accepted results flow to downstream tasks according to their dependencies and are merged into an [integration branch](/docs/concepts/workspaces-and-branches#branches); the orchestrator still decides whether to merge them into the main branch. This leaves room for local trial and error, reducing the need for repeated human approval just to avoid irreversible consequences.
+
+Choosing a default means choosing which costs to accept. Claude Code Dynamic Workflows use subagents that [share a checkout by default, with isolation available as an option](https://code.claude.com/docs/en/sub-agents#supported-frontmatter-fields). CodeDAG defaults to isolation but also offers a shared-workspace option. Isolation makes branch management and result integration more complex. We take on that complexity in the tool's design and implementation: CodeDAG manages the branches and merges the results, so users gain reversibility without having to manage all that complexity themselves.
+
+## Hands off is not hands tied [#controllability]
+
+Being able to undo a change is no reason to wait until a run finishes before addressing a problem. Nor should automation require giving up control while work is in progress. People should be able to decide where review is needed and step in when something goes wrong, without having to supervise every step.
+
+Some controls belong in the plan; others need to be available when circumstances change. A workflow can include agent reviews and [manual review gates](/docs/concepts/review-gates) at key points, so results are checked before work proceeds. When an unexpected issue arises, you can pause or resume a workflow or an individual task, interrupt execution when necessary, or send new instructions to a task's session. These controls let the orchestrator respond to problems that the workflow's author could not anticipate.
+
+We hope—and expect—that better models and better-designed workflows will make human review and ad hoc intervention increasingly rare. But needing to intervene less often is not the same as losing the ability to do so. Workflows should be able to run unattended for long periods while remaining under our control. Knowing we can step in when needed makes it easier to let them run.
+
+## Show the work, not just the result [#observability]
+
+Effective control depends on visibility. Knowing that an agent is running, or seeing its final result, is often not enough to decide whether intervention is needed. We want both a live view of what it is doing and a record that lets us trace how it arrived at a result.
+
+Alongside workflow and task status, CodeDAG provides [live logs](/docs/guides/run-and-monitor#logs) with agents' full output, tool calls, and status messages, as well as direct access to each task's [native agent session](/docs/guides/intervene-and-control#task-view). These records support audits and post-run reviews, helping us trace problems to their source and identify gaps in the information given to an agent. The same visibility that helps us decide when to intervene also helps us improve the workflow for future runs.
+
+Even if future models rarely need human intervention, we want detailed observability and control to remain available. A better self-driving car may need less input from its driver, but that is no reason to remove the brakes and steering wheel. We accept the added system complexity to preserve both the ability to take over and a record of what happened.
+
+## Agents can orchestrate as well as execute [#autonomy]
+
+Making workflows explicit, observable, and controllable does not mean people have to do all the planning and supervision themselves. The precision we require applies once a workflow is defined; it does not limit an agent's initiative in creating one. A person can write a workflow, or an agent can interpret the goal, break it into tasks, and define their dependencies. An agent can be a worker in the workflow or an [orchestrator acting on a person's behalf](/docs/get-started/let-your-agent-orchestrate).
+
+An orchestrating agent's job need not end when it submits the workflow. Within its authorized scope, it can use CodeDAG to monitor progress and verify results, intervening or arranging rework and follow-up tasks as needed until the goal is met. The engine executes the workflow as defined, while the orchestrating agent handles ongoing planning and supervision, so people do not have to oversee every step themselves.
+
+At first glance, this resembles a main agent dispatching subagents directly. In both cases, an agent plans and coordinates the work. But with direct dispatch, the main agent must coordinate each handoff within its own conversation: decide which task to start, which results to wait for, and what to pass to the next task. With CodeDAG, it writes those arrangements into a workflow. The engine schedules tasks according to their dependencies, manages branch isolation, and brings the results together. The orchestrating agent can then focus on judgment and intervention, supported by a precise execution system with built-in tools for monitoring and control.
+
+Tools have allowed people to organize and carry out work on ever larger scales. We believe orchestration tools can give agents the same leverage: the ability to manage more work than they could coordinate within a single conversation. A precise execution system does not rule out agent autonomy. It extends the reach of an agent's planning and judgment, reducing the coordination people must do themselves.
+
+## Let different minds sharpen one another [#diversity]
+
+As agents take on more of both execution and orchestration, automated development can scale beyond what people can personally inspect. Alongside the safeguards built into the system, who else can verify agents' work and keep them in check? Our answer is other agents with different capabilities and perspectives.
+
+That is why CodeDAG is not tied to a single agent harness or model. Users can choose an agent to suit each task, or combine Claude Code and Codex in a single workflow to [divide responsibilities and review each other's work](/docs/guides/mixing-agents). One agent's judgment need not be the final word: another can check it from a different angle, challenge its assumptions, and catch what it missed.
+
+The value lies not just in the number of agents, but in the differences in how they evaluate the work. Agents can collaborate and challenge one another across clear task boundaries: each forms an independent judgment, then checks the others' artifacts. This preserves distinct perspectives instead of letting them influence one another too early. The same context boundaries that make execution more predictable also support independent verification, reducing the need for people to check every result themselves.
+
+Supporting multiple harnesses and models adds integration and maintenance costs. We accept those costs so users remain free to choose the agents best suited to carrying out and verifying their work. We believe diversity can offer more than a division of labor: agents with different strengths, perspectives, and blind spots can complement and challenge one another, achieving more together than each could alone. When human attention can no longer cover every step, system-level constraints and cross-checks between agents can sustain continuous development at a larger scale.

@@ -1,0 +1,5 @@
+{
+  "title": "核心概念",
+  "icon": "BookOpen",
+  "pages": ["how-it-works", "tasks-and-sessions", "workspaces-and-branches", "review-gates"]
+}

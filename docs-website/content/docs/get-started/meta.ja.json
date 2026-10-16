@@ -1,0 +1,12 @@
+{
+  "$schema": "../../../.source/json-schema/docs.meta.json",
+  "title": "使い始める",
+  "icon": "Rocket",
+  "defaultOpen": true,
+  "pages": [
+    "installation",
+    "quickstart",
+    "second-workflow",
+    "let-your-agent-orchestrate"
+  ]
+}

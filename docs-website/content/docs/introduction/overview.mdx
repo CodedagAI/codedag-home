@@ -1,0 +1,98 @@
+---
+title: Overview
+description: Learn in a few minutes what CodeDAG does and how it works, and decide whether it fits the work in front of you.
+icon: LayoutTemplate
+---
+
+## What CodeDAG is
+
+With CodeDAG, you describe a set of development tasks in a workflow file and queue it to run. Each task runs in a fresh Claude Code or Codex session, on its own branch by default. Results that pass review are merged into an integration branch dedicated to that workflow, and you decide when to merge it into your main branch.
+
+When you use Claude Code or Codex directly, work moves forward one turn at a time: you ask for something, wait for it to finish, check the result, and ask for the next thing. You can run several sessions at once, but then you're the one switching between terminals and keeping track of where each one stands. Step away, and every session sits idle, waiting for your next message.
+
+With CodeDAG, you write down what comes next ahead of time, in the workflow: which tasks go first, which wait for other tasks to finish, and which can run at the same time. After you submit the workflow, CodeDAG starts tasks according to that plan and hands upstream results to downstream tasks, so you don't have to be there to prompt each one. You can check progress, pause execution, or open a task's session and talk to the agent directly at any time, but the workflow no longer depends on you to keep it moving.
+
+CodeDAG itself is a command-line tool, and its command is `cdg`. It runs in a Git repository on your computer and calls the Claude Code or Codex you've already installed and signed in to, so the agents' own usage still counts against your own account. You also need to sign in to a CodeDAG account. When a workflow's turn comes and it starts running, it consumes CodeDAG credits by task count, at 1 credit per task. Every new account comes with free credits. For details, see [Credits, Subscription, and Charges](/docs/account/credits-and-subscription).
+
+## CodeDAG in one minute
+
+After you write and submit a workflow, CodeDAG starts tasks in dependency order. Each task runs on its own branch, results that pass review go to downstream tasks, and everything ends up merged into the integration branch. Whether to merge that into your main branch is up to you.
+
+export const overviewChart = `%%{init: {"flowchart": {"padding": 10, "nodeSpacing": 30, "rankSpacing": 28}}}%%
+flowchart LR
+  s1["Write the<br/>workflow"] --> s2["Submit"]
+  s2 --> s3
+  subgraph engine["CodeDAG keeps it moving"]
+    s3["Run tasks<br/>fresh session,<br/>own branch"] --> s4["Review<br/>auto-accepted<br/>by default"]
+    s4 --> s5["Merge into the<br/>integration branch"]
+  end
+  s5 -.-> s6["You merge into<br/>the main branch"]`;
+
+<Tabs items={['Diagram', 'Code']}>
+  <Tab value="Diagram">
+    <Mermaid chart={overviewChart} />
+  </Tab>
+  <Tab value="Code">
+    <DynamicCodeBlock lang="mermaid" code={overviewChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+1. **Write the workflow.** Break your goal into tasks. For each task, write the instructions for the agent and note which tasks have to finish before it.
+2. **Submit.** The workflow joins the project's queue. When its turn comes, it starts running in the background, and closing the terminal doesn't affect it. Multiple workflows in the same project run one after another in the order you submitted them.
+3. **Run tasks.** Each task whose dependencies are satisfied starts a fresh Claude Code or Codex session and works on its own branch. Upstream results that have passed review are merged into that branch before the task starts. Tasks don't share conversations; they pass information through files in the repository. Once you've set up extra worktrees or clones for CodeDAG, tasks that don't depend on each other can run at the same time.
+4. **Review.** A finished task has to be accepted before its result goes to the tasks that depend on it. By default, results are auto-accepted and the workflow doesn't pause. You can also [have specific tasks stop when they finish](/docs/concepts/review-gates), so you can check the result and then decide whether to let it through, request changes, or abandon it.
+5. **Merge into the integration branch.** Once every task has passed review, CodeDAG merges their results into the workflow's [integration branch](/docs/concepts/workspaces-and-branches#branches). The workflow as a whole then goes through one review of its own, which is also auto-accepted by default. After that, you decide whether to merge into the main branch and whether to merge directly or open a pull request, and you do it yourself.
+
+<Callout type="info">
+CodeDAG never commits to your main branch, and it never pushes to or pulls from your remote repository. By default, though, it switches your repository to each task branch while the workflow runs, and when the workflow finishes, your repository is left on the integration branch rather than the branch you started on.
+</Callout>
+
+## What it's good for, and what it isn't
+
+CodeDAG suits multi-step, long-running development work that you don't want to babysit from a terminal. That usually means one of the following:
+
+- **Multi-step, long-running work you set up in one go.** For example, write a plan, then write tests against the plan, then implement and fix until the tests pass. Once the workflow is written, you can walk away and check the results when you come back.
+- **Several changes you want to move forward at once.** The changes run in parallel on separate branches and separate copies of the code, and they're merged together automatically when they're done. You don't have to coordinate between sessions.
+- **Quality processes where another model checks the work.** For example, have Claude Code implement and Codex review, or have two models each write a version and then combine them. Every task in a workflow can specify a different agent and model.
+
+These kinds of work aren't a good fit for CodeDAG:
+
+- **Small fixes that take a few lines.** Making the change directly in Claude Code or Codex is faster.
+- **Exploration where you set the direction as you go.** Work out the approach in an interactive session first, then write the parts that can run continuously as a workflow.
+- **Work where a person has to see each result before deciding the next step.** The results are too uncertain to plan from the start, and the next step matters too much to leave to an agent's judgment. For example, you build a few prototypes, look at how they actually turn out, and then decide which direction the product takes. Getting that decision wrong is expensive to undo. This kind of work is better done step by step in Claude Code or Codex.
+
+For a point-by-point comparison of CodeDAG with the way you work today, including how it differs from Claude Code Dynamic Workflow and what it can't do yet, see [When to Use CodeDAG](/docs/introduction/when-to-use).
+
+## Two ways to use it
+
+Day to day, you can describe your goal to a Claude Code or Codex session that has the CodeDAG Guide plugin installed and let it write the workflow, submit it, and track progress. Or you can write the workflow file yourself. Both give you the same kind of workflow, they run identically, and you can mix the two.
+
+That means you don't have to learn to write workflows before you can use CodeDAG. The CodeDAG Guide plugin teaches an agent how to use `cdg`, and you can install it when you initialize a project. Once it's installed, you describe what you want done. The agent breaks the goal into tasks, writes and submits the workflow, checks progress for you while it runs, and tells you where the results are when it finishes. Writing workflows by hand is better for learning and fine-tuning. Workflow files are usually written in YAML, and each task spells out its ID, title, instructions for the agent, and the tasks it depends on, so every detail is in your hands.
+
+Mixing the two comes naturally. Have the agent draft a workflow, open the file and adjust a few tasks, then have the agent submit it. Or write and submit the workflow yourself, then have the agent keep an eye on the run for you.
+
+<Cards>
+  <Card href="/docs/get-started/let-your-agent-orchestrate" title="Let Your Agent Orchestrate">
+    Describe your goal to a Claude Code or Codex session with the CodeDAG Guide plugin installed, and let it write the workflow, submit it, and track progress.
+  </Card>
+  <Card href="/docs/guides/writing-workflows" title="Write Workflows by Hand">
+    Write the tasks, instructions, and dependencies yourself, and control exactly who runs each task and how.
+  </Card>
+</Cards>
+
+Even if you plan to leave most of this to an agent, we recommend following the [quickstart](/docs/get-started/quickstart) and writing one small workflow yourself first. Once you've been through a whole workflow file, you'll read the ones an agent writes much faster, and you'll spot its mistakes more easily.
+
+## Next steps
+
+- [When to Use CodeDAG](/docs/introduction/when-to-use): Compare CodeDAG point by point with the way you work today, and decide whether the work in front of you should go to it.
+- [Installation and Sign-In](/docs/get-started/installation): Install `cdg` and sign in to your CodeDAG account.
+- [Quickstart: Your First Workflow](/docs/get-started/quickstart): Run a workflow in your own repository that only adds new files and doesn't change existing code.
+
+To have an agent read these docs, start it at the page index in `/llms.txt`. Append `.md` to any page URL to get that page's content as Markdown. For the exact spelling of fields and commands, see the [Workflow File Reference](/docs/reference/workflow-file) and the [CLI Overview](/docs/reference/cli).

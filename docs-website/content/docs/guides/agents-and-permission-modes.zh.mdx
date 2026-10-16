@@ -1,0 +1,216 @@
+---
+title: 选择 Agent、模型与权限模式
+description: 为每个任务选择 Agent、模型与推理力度，并按无人值守或有人值守选择权限模式。
+icon: ShieldCheck
+---
+
+工作流里的每个任务交给哪个 Agent、用什么模型，运行中能不能不经你批准就动手，分别由任务的 `agent`、`model` 与 `effort`、`mode` 几个字段决定。其中 `mode` 最值得花时间：[任务 Agent](/zh/docs/concepts/tasks-and-sessions#task-agent) 一旦停下来请求批准，就会一直等到有人应答，所以它决定工作流能不能在没人看着的时候跑完，也决定你为此承担多大的风险。
+
+## 选 Agent [#choose-agent]
+
+`agent` 写 `claude` 表示由 Claude Code 执行，写 `codex` 表示由 Codex 执行；不写时，任务交给项目的默认 Agent。默认 Agent 在 `cdg init{:sh}` 时定下，之后想换，修改项目设置中的 [`defaultAgent`](/zh/docs/reference/settings#default-agent)。想在一个工作流里让两家分工，例如一家实现、另一家审查，见[混合使用 Claude Code 与 Codex](/zh/docs/guides/mixing-agents)。
+
+写了 `mode` 的任务，最好同时写明 `agent`。两家的 `mode` 写法不同，校验时按任务实际使用的 Agent 检查；默认 Agent 通常记在每台机器自己的本机设置里，同一个工作流文件拿到默认 Agent 不同的机器上，没写 `agent` 的任务就会换一家执行，按原来那家写的 `mode` 通常也就无法通过校验。
+
+项目设置里写了 [`availableAgents`](/zh/docs/reference/settings#available-agents) 时，任务只能用其中列出的 Agent；用到列表之外的那一家，校验会报错，并指出这个字段在哪个文件。
+
+## 选模型与推理力度 [#model-and-effort]
+
+`model` 指定模型，`effort` 指定推理力度，CodeDAG 把两者原样交给 Agent；不写时，任务使用 Agent 自己配置的默认模型和推理力度。大多数任务可以不写。想控制成本或质量时，一般让机械性的任务用较省的配置，把强模型和较高的推理力度留给审查、综合这类需要判断的任务，成本上的考虑见[按任务选模型](/zh/docs/account/cost-control#model-per-task)。
+
+两个字段直接写在任务下面，例如 `model: opus`、`effort: high`，可以填的值由各家 Agent 决定：
+
+- **Claude Code：** `model` 可以写别名 `sonnet`、`opus`、`haiku`，分别指向 Sonnet、Opus、Haiku 系列的模型，也可以写完整的模型名。
+- **Codex：** `model` 写模型名，例如 `gpt-6.1-sol`，当前可用的模型以 Codex 的 `/model` 菜单为准。
+- **推理力度：** `effort` 哪些档位可用取决于模型。`low`、`medium`、`high` 最常见，更高的 `xhigh`、`max` 等档位只有部分模型支持。
+
+CodeDAG 不检查这两个字段的取值，写错的名字也能通过校验，要到任务运行时才由 Agent 报错。模型和档位会随 Agent 的更新而变化，以 Claude Code 的[模型配置文档](https://code.claude.com/docs/en/model-config)和 Codex 的[模型文档](https://learn.chatgpt.com/docs/models)为准。给 Claude Code 任务选模型时还要留意一点：`auto` 权限模式只在部分模型上可用，见 [Claude Code 的写法](#claude-code)。
+
+## 决定无人值守还是有人值守 [#unattended-or-attended]
+
+`mode` 决定任务 Agent 运行中哪些操作可以直接执行、哪些要先停下来等你批准，也就决定了工作流能不能在没人看着的时候跑完：任务 Agent 一旦请求批准，就会一直等下去，任务状态仍显示为 `working`，直到有人进入它的会话应答，怎样发现这种情况见[怎样判断它是不是卡住了](/zh/docs/guides/run-and-monitor#is-it-stuck)。想无人值守，就选完全授权，或者把审批交给 Agent 一侧的自动审查；审批要你本人应答的那一档，只适合你在旁边的时候。三档在两家 Agent 里分别这样写：
+
+| 授权档 | Claude Code | Codex |
+|---|---|---|
+| 完全授权：不经审批 | `bypassPermissions`：跳过 Claude Code 的权限检查，操作直接执行 | `yolo`：不请求批准，也不使用沙箱，读写文件、运行命令、访问网络都不受限制 |
+| 中等授权，审批交给自动审查 | `auto`：由 Claude Code 的安全分类器在后台审查操作，安全的直接执行，有风险的拦下；少数情况仍会停下请你批准 | `approve-for-me`：在 workspace-write 沙箱里按需请求批准，每个请求交给 Codex 的自动审查决定，不停下等人 |
+| 中等授权，审批交给你 | `acceptEdits`：文件编辑和常用的文件命令直接执行，运行测试、构建这类其他命令都要你批准 | `ask-for-approval=on-request,sandbox=workspace-write,network_access=true`：读取文件、写入工作区、运行命令和联网都直接执行，需要越出沙箱时请你批准 |
+
+**完全授权**让工作流可以在你离开时一路跑完，[第二个工作流](/zh/docs/get-started/second-workflow)教程用的就是这一档。它适合你信任的任务：prompt 由你自己写，任务读取的材料来自可信的来源，这台机器上也没有你不愿让 Agent 碰到的东西。它的代价是 Agent 的操作不再经过权限检查，后果见下面的提示。
+
+**中等授权**给操作加上限制：Claude Code 只放行分类器认为安全的操作，Codex 让命令在沙箱里运行、只允许写入任务的工作区。它适合任务会接触到你不想让 Agent 自由操作的东西时，比如共享的数据库、远程仓库或生产环境的凭证，也适合第一次运行一个还不熟悉的工作流。被挡下的操作要经过审批才能继续，而审批交给谁，决定了这一档还能不能无人值守。
+
+**审批交给自动审查**时，任务不会停下来等人。Codex 的 `approve-for-me` 把每个审批请求交给 Codex 自己的自动审查，放行还是拒绝都由它定；Claude Code 的 `auto` 虽然也由分类器在后台判断，但少数情况仍会停下请你批准，所以还要有人照看，[快速开始](/zh/docs/get-started/quickstart)用的就是这一档。
+
+**审批交给你**时，任何一次请求都会让任务停下，依赖它的下游和队列里排在后面的工作流也跟着等待，所以它只适合你在旁边、或者会定时查看的时候，不适合过夜运行。应答审批的做法见[想应答一个审批](/zh/docs/guides/intervene-and-control#approval)；让 Agent 帮你编排时，还可以约定由编排 Agent 在一定范围内代你应答，见[提交前要和它确认的三件事](/zh/docs/get-started/let-your-agent-orchestrate#confirm-before-submit)。
+
+`mode` 按任务设置，同一个工作流里可以给不同任务不同的授权档。不过，只要其中有一个任务可能停下来等批准，整个工作流就需要有人照看。
+
+<Callout type="warn">
+完全授权跳过的是 Agent 自己的权限检查，CodeDAG 也不会替它把关：任务 Agent 可以删除仓库以外的文件、访问网络、推送到远程仓库，它从网页或 issue 这类外部内容里读到的恶意指令也不会被拦下。隔离分支模式只能把任务的代码改动留在任务分支上，管不到这些操作的后果。Claude Code 与 Codex 的官方文档都建议只在容器、虚拟机这类隔离环境里使用这类模式。
+</Callout>
+
+### 不写 `mode` 时 [#mode-omitted]
+
+不写 `mode` 时，CodeDAG 不向 Agent 传递任何权限设置，任务 Agent 按它自己的配置启动，例如 Claude Code 设置文件中的 `permissions.defaultMode`，或者 Codex 的 `~/.codex/config.toml`；这些都没有设置时，使用 Agent 的内置默认。这些配置从工作流文件里看不出来，Agent 的内置默认还会随版本改变，所以同一个工作流换一台机器或者升级 Agent 之后，可能从一路跑完变成频繁停下。每个任务都显式写上 `mode`，文件本身就说明了每个任务的授权程度，也不再依赖每台机器上各自的配置。
+
+### `mode` 管到哪些会话 [#mode-scope]
+
+`mode` 在提交时随工作流定义一起定下，这个任务在这次执行中启动的会话都按它运行：审核时用 `request-changes` 让它接着改、用 `rework` 让它重做，都沿用同一个 `mode`；任务结束后用 `cdg task view{:sh}` 重新进入它的会话，你在里面让它做的事也按这个授权档执行。
+
+隔离分支模式下还有一类会话不按任务的 `mode` 运行：自动合并出现冲突时，CodeDAG 启动的那个解决冲突的 Agent 会话。它没有应答审批的入口，所以一律按完全授权（`yolo`）运行，没人看着也能把合并做完；任务写的是要你审批的 `mode` 时也是如此。想让冲突会话改用别的权限档，或者固定由哪一家来解决冲突，在工作流里写上 [`mergeConflictAgent`](/zh/docs/reference/workflow-file#merge-conflict-agent)。
+
+## 无人值守不等于无门禁 [#gates]
+
+完全授权去掉的只是任务运行中的逐步批准，对结果的把关可以放进工作流本身：把关键节点的审核门禁设为关，安排验证任务，或者安排只审查、不改代码的任务。下面这个工作流适合在你离开时运行，三个任务都用完全授权，把关的位置放在最后：
+
+```yaml title=".codedag/dags/overnight-tests.yaml"
+tasks:
+  - id: 1
+    title: 补充单元测试
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      找出仓库中缺少单元测试的三个函数，为它们补充单元测试，并运行这些测试直到通过。
+      把补充了哪些测试、分别在哪个文件，写入 docs/notes/new-tests.md。
+      只新增或修改测试文件和这份记录。
+
+  - id: 2
+    title: 审查新增的测试
+    dependencies: [1]
+    agent: claude
+    mode: bypassPermissions
+    model: opus                # 审查需要判断，用强模型
+    effort: high
+    prompt: |
+      阅读 docs/notes/new-tests.md 和其中列出的测试文件，
+      检查这些测试是否真正验证了函数的行为、有没有遗漏的边界情况，
+      把发现的问题逐条写入 docs/notes/test-review.md。不修改任何代码和测试。
+
+  - id: 3
+    title: 修正问题并运行全部测试
+    dependencies: [2]
+    agent: claude
+    mode: bypassPermissions
+    autoAccepted: none         # 完成后停下，由你确认结果
+    prompt: |
+      阅读 docs/notes/test-review.md，逐条修正其中指出的问题。
+      然后运行项目的全部测试，修复失败项，直到全部通过。
+      把运行了哪些检查、改了什么、还有什么没有通过，写入 docs/notes/test-report.md。
+```
+
+任务 2 只读代码、把问题写进文件，由任务 3 修正；任务 3 是验证任务，运行全部测试并把结果写成报告。它设了 `autoAccepted: none`，完成后停下等你：读过 `docs/notes/test-report.md`，再决定接受，还是让它接着改。有了验证任务仍要留这道门禁，是因为 CodeDAG 不读测试结果，测试修不好时验证任务同样会变成 `done`，门禁设为开就会被自动接受，见[验证节点](/zh/docs/concepts/review-gates#verification-task)。其他值得这样设置的节点，见[哪些节点值得把门禁设为关](/zh/docs/concepts/review-gates#when-to-close)。
+
+用 Codex 执行时，把 `agent` 换成 `codex`、`mode` 换成 `yolo`，`model` 与 `effort` 删掉或换成 Codex 的取值。
+
+门禁管的是结果能不能交给下游，管不到任务运行中 Agent 执行了什么命令，完全授权的风险仍然要靠可信的任务和可控的环境来控制。
+
+## 首次启动 Agent 前的确认 [#agent-first-run]
+
+Agent 有几个只在第一次才出现的确认界面，其中要你本人应答的有两个，都是 Claude Code 的界面：[完全授权的警告](#accept-bypass-warning)和[读取工作目录以外文件的询问](#allow-outside-reads)。它们决定给 Agent 多大权限，是你对这台电脑的授权，CodeDAG 不会代你应答，任务在后台遇到时会停下来等你。两个都可以在提交之前先在终端里做掉，之后这台电脑上不再出现。确认目录和其中的规则文件可以信任的界面，由 [CodeDAG 代你应答](#auto-answered)。
+
+### 提前接受 Claude Code 的完全授权警告 [#accept-bypass-warning]
+
+Claude Code 任务要以完全授权模式 `bypassPermissions`（含别名 `yolo`）运行，而你在这台电脑上还没有接受过这个模式的警告时，提交之前先在终端里做一次：运行 `claude --permission-mode bypassPermissions{:sh}`，选 “Yes, I accept” 再退出。接受一次之后，这台电脑上的所有目录都不再出现。这个警告要你确认愿意承担跳过权限检查的后果，CodeDAG 不会代你确认。Codex 以完全授权方式运行时没有这一步。
+
+没有提前接受也可以事后补上：任务会停在 `on-hold`，原因是 `agent-bypass-permissions-unaccepted`。`cdg task status <任务 ID> -w <工作流>{:sh}` 的诊断会写明在终端接受警告的做法，照着做完，再运行 `cdg task recover <任务 ID> -w <工作流>{:sh}`，任务从头重新启动。
+
+### 提前允许 Claude Code 读取工作目录以外的文件 [#allow-outside-reads]
+
+Claude Code 任务以 `auto` 模式运行、又要读仓库以外的文件，而你还没有回答过 “Allow this read outside the working directories?” 这个询问时，提交之前先在终端里回答一次。它不在启动时出现，而是出现在任务运行途中、Claude Code 第一次要读取工作目录以外的文件的时候，CodeDAG 同样不会代你选择。
+
+1. 在仓库根目录运行 `claude --permission-mode auto{:sh}`，发送下面的提示词。把路径换成其他任何一个仓库以外的文件也可以。
+
+   ```text title="提示词"
+   用 Read 工具读取 ~/.claude/projects/ 下最近修改的一个 .jsonl 文件的前 10 行。
+   ```
+
+2. 出现 “Allow this read outside the working directories?” 时，选择 “Yes, and keep allowing any reads outside the working directories”。这个选择对这台电脑上的所有项目生效，以后不再询问；没有出现询问，说明你以前已经允许过。
+3. 退出 Claude Code。
+
+没有提前允许也可以事后补上：任务会停在这个询问上等你，进入任务会话作出选择，它就接着执行，做法见[Agent 在等你审批或回答](/zh/docs/troubleshooting/troubleshooting#approval-waiting)。
+
+### CodeDAG 代你应答的询问 [#auto-answered]
+
+**目录信任。** 两家 Agent 第一次在某个目录里启动时，都会先问是否信任这个目录。任务运行在你自己登记的工作区里，所以 CodeDAG 直接替你选择信任，换一个仓库、为并行执行新建副本目录时也一样。这个选择由 Agent 自己记下：Claude Code 按目录记，Codex 按 Git 仓库根记在它的 `config.toml` 里。
+
+**外部 CLAUDE.md 导入。** 项目或它的上级目录里的 CLAUDE.md 用 `@` 导入了工作目录以外的文件时，Claude Code 首次启动会问 “Allow external CLAUDE.md file imports?”。导入进来的是你自己为这个项目或这台电脑配置的规则文件，所以 CodeDAG 直接替你选择允许导入。这个选择和目录信任一样按启动目录记录，新仓库、为并行执行新建的副本目录，也都由 CodeDAG 在任务启动时应答。
+
+## Claude Code 的写法 [#claude-code]
+
+Claude Code 任务的 `mode` 写一个权限模式名，CodeDAG 把它作为 `--permission-mode` 交给 Claude Code。无人值守写 `bypassPermissions`，也可以写 CodeDAG 提供的别名 `yolo`；有人值守写 `auto`，任务所用的模型不支持 auto 模式时，改写 `acceptEdits`。
+
+```yaml title=".codedag/dags/fix-lint.yaml"
+tasks:
+  - id: 1
+    title: 修复 lint 问题
+    agent: claude
+    mode: auto      # 有人值守；无人值守时改为 bypassPermissions
+    model: sonnet   # auto 需要所用模型支持
+    prompt: |
+      运行项目的 lint 命令，修复报告的全部问题，直到 lint 通过。
+      只修改 lint 报告涉及的文件。
+```
+
+`auto` 模式有使用条件：任务所用的模型要支持它，这里的模型指任务的 `model`，没写时是 Claude Code 的默认模型，Haiku 4.5 这类较旧的模型就不支持；组织管理员也可以关闭 auto 模式。条件不满足时，Claude Code 以 Manual 模式（`default`）启动，任务会在第一个需要批准的编辑或命令处停下，见[写了 `auto`，任务却停下来等批准](#auto-unavailable)。改用 `acceptEdits` 时，文件编辑和 `mkdir`、`mv`、`cp` 这类常用的文件命令直接执行，运行测试、构建这类其他命令都要批准，任务停下的次数会多得多。其余模式名和别名见[权限模式语法](/zh/docs/reference/workflow-file#mode-claude-code)。
+
+这两个模式各有一个只在第一次出现、要你本人应答的界面：`bypassPermissions` 启动时的[完全授权警告](#accept-bypass-warning)，和 `auto` 模式下任务第一次读取工作目录以外的文件时的[询问](#allow-outside-reads)。还没应答过的话，任务会停在那里等你，提交之前先在终端里做掉。
+
+即使用了 `bypassPermissions`，Claude Code 仍会为少数操作停下来问你，例如权限规则里设为需要询问的工具、Agent 主动向你提出的问题，以及删除根目录或主目录这类关键路径的命令，这时任务同样会停在那里。
+
+模式名和每个模式的具体行为由 Claude Code 决定，也会随它的版本变化，以 `claude --help{:sh}` 和官方的[权限模式文档](https://code.claude.com/docs/en/permission-modes)为准。
+
+## Codex 的写法 [#codex]
+
+Codex 任务的 `mode` 二选一：整个写成一个简写，或者写成逗号分隔的若干个 `键=值`。简写有两个，`yolo` 是完全授权，`approve-for-me`（也可以写 `auto`）是自动审查档；要你本人应答审批时，写 `ask-for-approval=on-request,sandbox=workspace-write,network_access=true`，让 Codex 在沙箱里自由工作，要越出沙箱时再请你批准。
+
+```yaml title=".codedag/dags/fix-lint.yaml"
+tasks:
+  - id: 1
+    title: 修复 lint 问题
+    agent: codex
+    # 审批交给你：沙箱内直接执行，要越出沙箱时请你批准
+    # 想无人值守，改为 approve-for-me（自动审查）或 yolo（完全授权）
+    mode: "ask-for-approval=on-request,sandbox=workspace-write,network_access=true"
+    prompt: |
+      安装项目依赖，运行项目的 lint 命令，修复报告的全部问题，直到 lint 通过。
+      只修改 lint 报告涉及的文件。
+```
+
+`yolo` 让 Codex 不请求批准、不使用沙箱，并开启实时网页搜索，相当于 Codex 自己的 `--dangerously-bypass-approvals-and-sandbox` 加上 `--search`。
+
+`approve-for-me` 让 Codex 在 workspace-write 沙箱里工作，需要越出沙箱时照常提出审批请求，但每个请求交给 Codex 自己的自动审查判断，不会停下来等人，所以这一档也能无人值守。被拒绝的操作不执行，Agent 收到拒绝后自行调整，换一种做法接着往下做。这个简写要独占整个 `mode`，不能再跟 `sandbox`、`search` 这些键混写。
+
+同一个回合里被自动审查连续拒绝几次之后，Codex 会中断这个回合，任务停在 `on-hold`，原因是 `agent-lifecycle-state-unavailable`。`cdg task status <任务 ID> -w <工作流>{:sh}` 的诊断里带着 Codex 给出的中断说明，按说明里写的原因处理之后，用 `cdg task recover <任务 ID> -w <工作流>{:sh}` 让任务继续，见[Agent 会话问题](/zh/docs/troubleshooting/troubleshooting#hold-agent-session)。
+
+键值写法中，`ask-for-approval` 决定什么时候请求批准，`sandbox` 决定命令能读写哪些位置，`approvals_reviewer` 决定审批请求交给谁判断，全部键和取值见[权限模式语法](/zh/docs/reference/workflow-file#mode-codex)。写了范围外的取值，`cdg dag validate{:sh}` 就会报错，不会等到任务启动才失败。
+
+键值写法里没写 `approvals_reviewer` 时，审批请求交给谁判断由每台电脑上 `~/.codex/config.toml` 里的设置决定，所以同一份工作流可能在一台电脑上交给自动审查、在另一台上停下来等人。把 `mode` 写成 `approve-for-me`，或者在键值写法里写上 `approvals_reviewer`（`user` 交给你本人，`auto_review` 交给自动审查），各台电脑的行为就一致了。
+
+不想让自动审查替你放行、又要无人值守时，可以把 `ask-for-approval` 设为 `never`，例如 `ask-for-approval=never,sandbox=workspace-write,network_access=true`：沙箱允许的操作直接执行，不允许的直接失败，任务不会停下等人。代价是被拦下的操作不会有人补批，任务可能没做完就结束，所以最好配上验证任务或审核门禁。
+
+<Callout type="info">
+`workspace-write` 沙箱允许 Codex 读取任何位置的文件，但只能写入任务所在的工作区，并且默认不允许命令访问网络。安装依赖、下载数据、访问测试服务这类需要联网的任务，要在 `mode` 里写上 `network_access=true`，而且必须同时写明 `sandbox=workspace-write`。没有开放网络时，这些命令会失败，任务可能看起来完成了却没有做完，见[任务“完成”了但什么也没做](/zh/docs/troubleshooting/troubleshooting#empty-result)。
+</Callout>
+
+## 常见问题
+
+### 任务停下来等批准了，怎么办
+
+用 `cdg task view <任务 ID> -w <工作流>{:sh}` 进入任务 Agent 的会话，在它原生的界面里作出选择，然后按 Ctrl+C 退出，任务会接着执行；怎样确认任务是在等批准，见[怎样判断它是不是卡住了](/zh/docs/guides/run-and-monitor#is-it-stuck)。这次执行的 `mode` 已经定下，之后遇到的审批仍要逐个应答；想让以后不再停下，修改工作流文件里的 `mode`，下次提交时生效。
+
+### 写了 `auto`，任务却停下来等批准 [#auto-unavailable]
+
+多半是 auto 模式对这个任务不可用，Claude Code 退回了 Manual 模式。最常见的原因是任务所用的模型不支持 auto，例如 `model` 写的是 Haiku 4.5 这类较旧的模型；组织管理员关闭了 auto 模式，或者 auto 模式暂时不可用，也会这样。这时任务日志里能看到 Claude Code 状态栏上的提示，例如 `auto mode unavailable for this model` 和 `⏸ manual mode on`。即使 auto 可用，分类器接连多次拦下操作时，Claude Code 也会暂时恢复逐个询问。
+
+已经停下的任务，进入会话应答即可。之后的工作流，把这个任务的模型换成支持 auto 的，例如 `sonnet` 或 `opus`；或者改用 `acceptEdits`，但它会在更多命令上停下；能接受完全授权的风险时，改用 `bypassPermissions`。
+
+### 两家 Agent 的用量限额是分开的吗
+
+是分开的，一家撞上限额，不影响另一家的任务继续执行；CodeDAG 额度与选哪家 Agent、哪个模型都无关，每个任务都是 1 点。怎样利用这一点在两家之间分配任务，见[两家的用量限额互不影响](/zh/docs/guides/mixing-agents#usage-limits)。
+
+## 相关
+
+- [干预与控制](/zh/docs/guides/intervene-and-control)：任务停下来等批准时，进入会话应答或纠正方向。
+- [混合使用 Claude Code 与 Codex](/zh/docs/guides/mixing-agents)：在一个工作流里让两家 Agent 分工或互相审查。
+- [工作流文件参考](/zh/docs/reference/workflow-file)：`agent`、`mode`、`model`、`effort` 的全部取值与默认值。

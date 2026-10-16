@@ -1,0 +1,441 @@
+---
+title: Troubleshooting
+description: Look up the symptom you see to find the cause and the fix, and get stopped tasks and workflows running again.
+icon: Wrench
+---
+
+When a workflow stalls or a task isn't making progress, you usually just need to deal with the cause. The workflow then picks up where it stopped, and you don't need to resubmit it. For what the state names themselves mean, see [State Meanings](/docs/reference/states).
+
+## Find your symptom
+
+| What you see | Go to |
+|---|---|
+| A task stays `working`, but nothing new has appeared in its log for a long time | [A task has no new output for a long time](#no-output) |
+| A task or workflow shows `on-hold` | [A task or workflow is on hold](#on-hold) |
+| A task is stopped at `done`, and the tasks that depend on it never start | [A task is stuck at done](#stuck-in-done) |
+| A workflow further back in the queue never starts | [Later workflows in the queue don't start](#queue-waiting) |
+| A task stops right after it starts, and its log ends at the agent's startup screen | [A task stops right after it starts](#agent-start-failed) |
+| The log ends at the agent's confirmation prompt or at a question | [The agent is waiting for your approval or answer](#approval-waiting) |
+| A task shows as done, but the changes it should have made aren't there | [A task is "done" but did nothing](#empty-result) |
+| The log shows a usage or rate limit, or the reason is `agent-api-error` | [Agent usage limits or rate limits](#agent-usage-limits) |
+| A task still shows `working` after your computer restarted or a process crashed | [After a machine restart or process crash](#after-restart) |
+| `cdg dag submit{:sh}` reports an error, and the workflow isn't added to the queue | [Submission rejected](#submit-rejected) |
+| You registered replicas, but tasks still run one after another | [Concurrency is only 1](#concurrency-one) |
+| The primary repository's current branch has changed | [The primary repository was switched to another branch](#branch-switched) |
+| `cdg task view{:sh}` won't connect, or doesn't respond to key presses | [task view can't connect or doesn't respond](#task-view-problems) |
+| `cdg init{:sh}` fails, or reports a problem with a settings file | [Initialization and settings](#init-and-settings) |
+| Sign-in fails, or you keep being asked to sign in again | [Sign-in fails or you keep being asked to sign in](#sign-in-problems) |
+| A message says there's a problem with the CLI, Claude Code, or plugin version | [Version problems](#versions) |
+| After a task was accepted, canceled, or deferred, you find that its result is wrong or the decision was a mistake | [You find a problem after a task already has a review decision](#after-conclusion) |
+| The same problem keeps coming back, and you want to start over with a new workflow | [A workflow is partway through and hard to continue](#start-over) |
+| You want to ask us for help | [Collect information to get help](#get-help) |
+
+## A task has no new output for a long time [#no-output]
+
+When a task keeps showing `working` but nothing new has appeared in its log for a long time, first find out whether it's still working, waiting for you, or already stopped.
+
+1. Run `cdg task status <task-id> -w <workflow>{:sh}` and check the task's substatus. If it shows `on-hold`, follow [A task or workflow is on hold](#on-hold). If it shows `working (stale owner)`, the process that was running the task is gone, so follow [After a machine restart or process crash](#after-restart).
+2. Run `cdg task logs <task-id> -w <workflow> -n 50{:sh}` and read the last few dozen lines of the log. If it ends at the agent's confirmation prompt or at a question, the agent is waiting for you. See [The agent is waiting for your approval or answer](#approval-waiting). If it shows a usage or rate limit message, see [Agent usage limits or rate limits](#agent-usage-limits). If it's still sitting at the agent's startup screen and your prompt is nowhere to be seen, see [A task stops right after it starts](#agent-start-failed).
+3. If nothing in the log looks wrong, the agent is most likely still working. For why a task can go a long time without new output, and how long to wait before stepping in, see [Is it stuck?](/docs/guides/run-and-monitor#is-it-stuck).
+4. If you're still not sure, enter the task's session with `cdg task view <task-id> -w <workflow>{:sh}` and see for yourself. If needed, send the agent a message right there to correct its course. For how to enter and exit, see [Enter a session, make changes, and exit](/docs/guides/intervene-and-control#task-view).
+
+Once you've confirmed that the task really is stuck, for example on a command that hangs and never returns, you can kill it with `cdg task kill <task-id> -w <workflow>{:sh}`. Killing only interrupts the agent's current output, and the session is kept. Afterward, run `cdg task recover <task-id> -w <workflow>{:sh}` to continue in the same session.
+
+## A task or workflow is on hold [#on-hold]
+
+`on-hold` means CodeDAG ran into something it can't handle on its own and stopped to wait for you. The steps are always the same: read the reason, deal with it, and then recover.
+
+To see a task's reason, look at that task by itself. When you give `cdg task status <task-id> -w <workflow>{:sh}` a single task ID, the output includes a `Reason:` line. Some reasons also come with a `Diagnostic:` line that describes the situation in more detail and suggests what to do. The `Docs:` line after it links to the matching section of this page. When you give several task IDs at once, the output is only a list and doesn't show reasons.
+
+```bash title="Terminal"
+cdg task status 2 -w feature
+```
+
+```bash title="Terminal"
+[TZ: -04:00] 2026-09-30 10:19:28
+
+Task 2 in .codedag/dags/feature.yaml
+Title: Implement the login endpoint
+Phase: 📤 submitted
+Status: 🔘 pending
+Substatus: on-hold
+Reason: workspace-dirty
+Diagnostic: Task workspace has uncommitted changes: ?? notes.txt
+Docs: https://codedag.com/docs/troubleshooting/troubleshooting#hold-workspace
+Workspace: /Users/you/my-app
+Branch: cdg/feature/t2-implement-the-login-endpoint
+```
+
+A workflow itself can also be put on hold. In that case, the reason appears on the `Reason:` line near the top of the `cdg dag status <workflow>{:sh}` output, for example `Reason: DAG startup failed (dag-startup-failed)`. Some reasons also come with a `Diagnostic:` line here, again followed by a `Docs:` line. To see which tasks are on hold, look for `[pending] [on-hold]` on each task's line in the same output.
+
+After you've dealt with the cause, recover a task with `cdg task recover <task-id> -w <workflow>{:sh}` and a workflow with `cdg dag recover <workflow>{:sh}`. The latter also recovers every task in the workflow that can be recovered. If the cause isn't really gone, the task or workflow stops at `on-hold` again. Entering the session with `cdg task view{:sh}` doesn't release the hold. After you sort things out in the session, you still have to run `recover`.
+
+### The workspace has uncommitted changes or an unfinished Git operation [#hold-workspace]
+
+When the reason is `workspace-dirty` or `git-operation-in-progress`, the workspace assigned to the task isn't clean, so CodeDAG can't check out the task branch there. This happens only in the default isolated-branches mode, and new untracked files count as changes too. The most common case is uncommitted work left in the primary repository, which is the first workspace to be used. CodeDAG also points this out when you submit.
+
+In that workspace, commit the changes, stash them (for example with `git stash -u`), or discard them. If a merge, rebase, or cherry-pick is unfinished, complete it or abort it with `--abort`. Then run `cdg task recover{:sh}` or `cdg dag recover{:sh}`. If you're not sure which workspace it is, the `Workspace:` line of `cdg task status <task-id> -w <workflow>{:sh}` gives its path. To keep developing in the primary repository while a workflow runs, you can exclude the primary repository from the run. See [Keep developing while a workflow runs](/docs/guides/parallel-workspaces#keep-main-repo).
+
+If you don't plan to clean up the workspace for this task, you can end the task without recovering it. `cdg task review cancel <task-id> -w <workflow>{:sh}` or `defer` gives it a final decision. At the workflow level, use `cdg dag review cancel <workflow>{:sh}` or `defer`. A task like this never ran, so the review doesn't touch its code, and the changes in the workspace and the current branch stay as they are. The same goes for a task on hold that you've already stopped with `cdg task kill{:sh}`: you can end it directly, or clean up and then run `recover`, in which case the task is prepared again and starts from the beginning.
+
+There's one case where you have to clean up first: when the dirty workspace is also the integration workspace, typically the primary repository of a single-workspace project. Here, `cdg dag review cancel{:sh}` reports `Integration workspace must be clean before DAG publish.` and changes nothing. `cdg task review cancel{:sh}` does end the task, but the workflow then stops at `integration-workspace-dirty`.
+
+When the reason is `integration-workspace-dirty` or `integration-git-operation-in-progress`, the situation is the same, except that it comes up after all tasks have been reviewed, when CodeDAG is about to merge the results into the integration branch. The workspace being checked is the one that holds the integration branch, usually the primary repository. Clean it up, and then run `cdg dag recover <workflow>{:sh}`.
+
+### Branch problems [#hold-branch]
+
+These reasons mean CodeDAG couldn't switch a workspace to the branch it needs. With the first two, the task is still preparing its workspace, just as in [The workspace has uncommitted changes](#hold-workspace). You can fix the problem and recover, or end the task directly with `cdg task review cancel{:sh}` or `defer`.
+
+- `branch-name-conflict`: The task sets a branch name with [`branchName`](/docs/reference/workflow-file#tasks-branch-name) in the workflow file, and a branch with that name already exists. This most often happens when you rerun a workflow that sets `branchName`: the branch from the previous run is still there, and CodeDAG won't reuse it for the new run. The `Diagnostic:` line of `cdg task status <task-id> -w <workflow>{:sh}` says what's holding the branch name and how to free it:
+
+  - **A local branch of the same name in a workspace:** The diagnostic gives the workspace's path. Delete that branch yourself, or rename it with `git branch -m` to keep it.
+  - **A branch name held by CodeDAG's sync repository:** When your replicas are clones, the branch from the previous run is still in the sync repository, so dealing with the local branches in each clone isn't enough. Run `cdg branch release <branch-name>{:sh}` in the project to release it. The command deletes the branch from the sync repository and then removes the leftover remote-tracking refs in each workspace.
+
+  When both are holding the name, the diagnostic lists both. Deal with both, and then run `cdg task recover{:sh}`. `cdg branch release{:sh}` won't release a snapshot branch or a branch name that's still in use. If the name belongs to the integration branch or a task branch of a workflow in the queue, wait until that workflow's review is finished. For the other cases, see [cdg branch release](/docs/reference/cli/control#branch-release). Validation at submission also warns about same-named branches. If you act on the warning before you submit, the task doesn't stop here.
+
+- `branch-checkout-failed`: Checking out the task branch failed. For example, the branch is checked out in another workspace, and Git doesn't allow the same branch to be checked out in two places at once. Switch that workspace to another branch, and then run `cdg task recover{:sh}`.
+- `integration-branch-checkout-failed`: The integration branch, `cdg/<workflow-name>/integration`, is checked out in another workspace. Here too, switch that workspace to another branch, and then run `cdg dag recover <workflow>{:sh}`.
+- `integration-branch-drifted`: The integration branch was moved to a position CodeDAG can't continue from, or it was deleted. For example, someone committed other changes to the integration branch or reset it while the workflow was still running. Put the integration branch back where it was (undo the extra commits, and use `git reflog` to find the original commit if you need to), and then run `cdg dag recover <workflow>{:sh}`. If you can't put it back, end this run by following [A workflow is partway through and hard to continue](#start-over).
+
+### A workflow can't start running [#dag-startup]
+
+When a workflow's `Reason:` line shows `DAG startup failed (dag-startup-failed)`, the workflow's turn came, but CodeDAG couldn't set up the base, workspace, or integration branch it needs to start running. In `cdg dag status <workflow>{:sh}`, the `Diagnostic:` line right below `Reason:` says why it failed this time. Find the row that matches it:
+
+| `Diagnostic:` | Cause | What to do |
+|---|---|---|
+| `Failed to resolve baseRef '<baseRef-value>' to a unique commit.` | [`baseRef`](/docs/reference/workflow-file#base-ref) doesn't resolve to a commit, or it matches more than one. `baseRef` is resolved only when the workflow starts running, and CodeDAG doesn't fetch remote branches for you. So the workflow stops here if `baseRef` names a branch that doesn't exist on this machine yet, a branch that exists only on the remote, or a name shared by both a branch and a tag. | Make the name resolve to exactly one commit, for example by creating or fetching the branch. |
+| `Failed to resolve DAG base commit from HEAD.` | The workflow doesn't set `baseRef`, so it starts from `HEAD` in the workspace that supplies the base, usually the primary repository. That workspace has no commits yet, for example because the repository was just created and nothing has been committed. | A workflow has to start from an existing commit. Make the first commit in this repository. |
+| `No available workspace after applying excludeWorkspaces.` | [`excludeWorkspaces`](/docs/reference/workflow-file#exclude-workspaces) excludes every registered workspace. Validation catches this case, so seeing it here means fewer workspaces are registered now than when you submitted. | Use `cdg init{:sh}` to register at least one workspace that isn't excluded. |
+| Starts with `No workspace is available for this workflow:` | The directories of all the workspaces that aren't excluded no longer exist. The message lists those directories in parentheses. Validation catches this case too, so the directories went missing after you submitted. | Run `cdg init{:sh}` again to update the registered workspaces. |
+| `Merge in progress.`, `Rebase in progress.`, or `Cherry-pick in progress.` | A merge, rebase, or cherry-pick is unfinished in the integration workspace (usually the primary repository). | Complete it in that workspace, or abort it with `--abort`. |
+
+When `Diagnostic:` says something else, such as the raw error from a Git command, follow what it says. Then run `cdg dag recover <workflow>{:sh}`, and the workflow tries to start again.
+
+A submitted run always follows the workflow definition as it was at submission, and editing the workflow file has no effect on it. So if `baseRef` itself is wrong, or `excludeWorkspaces` excludes too much, the only option is to end this run, fix the file, and submit again:
+
+```bash title="Terminal"
+cdg dag review cancel <workflow>
+cdg dag review clear <workflow>
+cdg dag submit <workflow>
+```
+
+By this point, CodeDAG credits have already been deducted for the workflow. Resubmitting is a new run, and it uses credits again based on the number of tasks. For the rules, see [Clear the review and resubmit](/docs/reference/cli/review#clear-and-resubmit).
+
+### Merge conflicts [#hold-merge-conflict]
+
+When the reason is `merge-conflict` (for a task) or `integration-merge-conflict` (for a workflow), CodeDAG hit a conflict while automatically merging task results, and a separate agent session worked on it for three rounds without resolving it. You need to complete the merge yourself in the workspace involved. Automatic merges happen in two places: before a join task starts, when its upstream tasks' results are merged into its task branch, and after all tasks have been reviewed, when each task's result is merged into the integration branch. For how this works, see [Merges and conflicts at join nodes](/docs/concepts/workspaces-and-branches#merge-and-conflicts).
+
+By the time the task or workflow stops, CodeDAG has already backed out of the merge. The workspace still holds the files the agent was partway through editing, the conflicted files aren't staged, and Git is no longer in the middle of a merge. If you run `git add` and commit now, you get an ordinary commit, not a merge, and when you recover, CodeDAG still considers the upstream result unmerged. The reliable approach is to throw away the half-finished edits and redo the merge yourself.
+
+When a task is stopped at `merge-conflict`:
+
+1. Check the end of the log with `cdg task logs <task-id> -w <workflow>{:sh}`. `Incoming source task:` names the upstream task being merged in, and the conflicted files are listed under `Conflict summary:`.
+2. Find where to work with `cdg task status <task-id> -w <workflow>{:sh}`. The `Workspace:` line is the task's workspace, and the `Branch:` line is its task branch. Run the same command on the upstream task to get the name of the branch to merge in.
+3. In that workspace, throw away the half-finished edits, merge the upstream task's branch again, resolve the conflicts, and commit:
+
+   ```bash title="Terminal"
+   git reset --hard
+   git merge cdg/<workflow-name>/t<upstream-task-id>-<title>
+   # After you resolve the conflicts
+   git add -A
+   git commit
+   ```
+
+   The automatic merge happens before the task starts its own work, so `git reset --hard` discards only what this merge left half finished. If `git merge` says that untracked files would be overwritten, the earlier merge also left newly created files behind. Remove them first with `git clean -fd`. With clone replicas, the upstream task's branch exists only in the replica that ran it, and it isn't in the `codedag-mirror` remote either. If the branch isn't in the current workspace, fetch it from the replica that ran the task, for example with `git fetch ../my-app-clone-1 cdg/<workflow-name>/t<upstream-task-id>-<title>{:sh}`, and then run `git merge FETCH_HEAD{:sh}` in place of the `git merge` above.
+4. Once `git status` is clean, run `cdg task recover <task-id> -w <workflow>{:sh}`. CodeDAG sees that this upstream result is already in the task branch, goes on to merge the remaining upstream tasks (conflicts still go to an agent first), and then starts the task itself. If the merge isn't committed yet and Git is still in the middle of a merge, the task stays at `on-hold`.
+
+When a workflow is stopped at `integration-merge-conflict`, the procedure is the same, except that you work in the workspace that holds the integration branch, and the branch you merge into is the integration branch. The `Integration Workspace:` and `Integration Branch:` lines of `cdg dag status <workflow>{:sh}` tell you which they are. Run `git reset --hard` there, and then merge in the task branches that passed review (`accepted` or `auto-accepted`) one at a time until the conflict is resolved. You can see each task's review result in `cdg dag status <workflow>{:sh}`. Finally, run `cdg dag recover <workflow>{:sh}`, and CodeDAG merges the results that are still left.
+
+<Callout type="warn">`git reset --hard` discards all uncommitted changes in the workspace. Before you run it, make sure the workspace doesn't hold changes of your own that you still want to keep. If you're not sure, save them first with `git stash -u`.</Callout>
+
+### Agent session problems [#hold-agent-session]
+
+These reasons mean that something went wrong with the task agent's session, or that something meant for the session couldn't be delivered, and CodeDAG can't tell whether the task can safely continue. In most cases, do what the `Diagnostic:` line says and then run `cdg task recover{:sh}`. The task resumes in its original session.
+
+| Reason | Meaning | What to do |
+|---|---|---|
+| `agent-session-ended` | The task's session, or CodeDAG's background process, ended unexpectedly while the task was running, for example because the computer restarted. | Run `cdg task recover{:sh}`. CodeDAG reopens the original session and has the agent continue. See [After a machine restart or process crash](#after-restart). |
+| `agent-session-input-unavailable` | The session never reached a state where it can accept input. Usually it's sitting at a screen that requires a response. | Enter the session with `cdg task view{:sh}`, deal with that screen, exit, and then run `cdg task recover{:sh}`. If the task can't be recovered, stop it with `cdg task kill{:sh}`. |
+| `agent-api-error` | The session was interrupted by an API error, most often a usage or rate limit. | See [Agent usage limits or rate limits](#agent-usage-limits). |
+| `agent-lifecycle-state-unavailable` | CodeDAG can't confirm how far the session got or whether it's done. | If a Codex task stops here as soon as it starts, Codex is most likely still at a startup screen that needs a person to respond, such as sign-in. See [A task stops right after it starts](#agent-start-failed). In other cases, first retry with `cdg task recover{:sh}`. If that still doesn't work, stop the task with `cdg task kill{:sh}`, check its changes, and then give a decision as you would when reviewing any other task. This can also happen when the Claude Code version is newer than the range CodeDAG has verified. See [Version problems](#versions). |
+| `agent-subagent-incomplete` | Not all the subagents dispatched by a Codex task have ended. | Take a look with `cdg task view{:sh}`, and then run `cdg task recover{:sh}`. If the `Diagnostic:` line marks a subagent as `state=unconfirmed`, verify that there are no unexpected changes or leftover processes, and then use [`--acknowledge-unconfirmed`](/docs/reference/cli/control#acknowledge-unconfirmed). |
+| `agent-worker-liveness-unknown` | CodeDAG can't confirm whether the original worker process has ended. | First enter the original session with `cdg task view{:sh}` and see whether it's still working. If the command reports `Cannot reach the existing session of task …`, the original session can no longer be reached. In that case, follow [`--force-owner-release`](/docs/reference/cli/control#force-owner-release). |
+| `agent-version-unsupported` | The Claude Code version is lower than the minimum version CodeDAG supports. | Upgrade Claude Code, and then run `cdg task recover{:sh}`. See [Version problems](#versions). |
+| `agent-bypass-permissions-unaccepted` | A Claude Code task is set to run with full access, and the warning for that mode has never been accepted on this computer. | Accept the warning, and then run `cdg task recover{:sh}`. See [Accept Claude Code's full-access warning in advance](/docs/guides/agents-and-permission-modes#accept-bypass-warning). |
+| `continuation-dispatch-failed` | The request you made with `request-changes` or `rework` couldn't be handed to the task agent. | Run `cdg task recover{:sh}`, and CodeDAG delivers the same request again. |
+
+For any other reason that starts with `agent-` or `codex-` and isn't in the table, do the same: read `Diagnostic:`, look at the session with `cdg task view{:sh}`, and then run `cdg task recover{:sh}`. If the task can't be recovered, stop it and wrap up by following [A workflow is partway through and hard to continue](#start-over).
+
+### Downstream tasks or workflows put on hold [#downstream-hold]
+
+When the reason is `downstream-hold`, you canceled or deferred something in a review and used `--downstream hold` to put what's downstream on hold until you decide whether it should still run. Both tasks and workflows can carry this reason. For the values of `--downstream`, see the [`--downstream` section of the review reference](/docs/reference/cli/review#downstream).
+
+When tasks are on hold, what you reviewed was their upstream task. If you still want them to run, release them with `cdg task recover{:sh}`. They're scheduled again based on the latest upstream review results and start once their conditions are met. If you no longer need them, end them with `cdg task review cancel{:sh}` or `defer`.
+
+When workflows are on hold, what you reviewed was a workflow ahead of them in the queue. Every workflow behind it that hasn't started stops at `[pending] [on-hold]`. `cdg status{:sh}` shows `(downstream-hold)` at the end of their lines, and the `Reason:` line of `cdg dag status <workflow>{:sh}` shows `Held by an earlier workflow's review with --downstream hold (downstream-hold)`. If you still want a workflow to run, release it with `cdg dag recover <workflow>{:sh}`, and name the workflow explicitly. The command releases only the workflows you name, and the rest stay on hold. Without a workflow name, it acts only on the one at the head of the queue. A released workflow goes back to waiting in the queue and starts running when its turn comes. If you no longer need a workflow, end it with `cdg dag review cancel <workflow>{:sh}` or `defer`.
+
+### Account and credits gate [#startup-gate]
+
+When a workflow's `Reason:` line shows `Startup gate blocked before execution (startup-gate-blocked)`, the workflow's turn came, but it didn't get through the account and credits check, so it hasn't started running. The `Startup gate failure:` line right after it gives the specific cause, and the `Action:` line suggests what to do:
+
+| `Startup gate failure:` | Cause | What to do |
+|---|---|---|
+| `insufficient_credits` | Your CodeDAG credits for the current period are used up. | Restore usable credits by following [Not enough credits or no subscription](/docs/account/credits-and-subscription#insufficient-credits). |
+| `no_subscription` | The account has no active subscription. | Same as above. |
+| `login_required` | The CLI isn't signed in on this computer. | Run `cdg auth login{:sh}` and sign in to the account that submitted the workflow. |
+| `account_mismatch` | The account that's signed in isn't the one that submitted the workflow. | Switch back to the original account. See [Sign out, use multiple computers, and switch accounts](/docs/account/login-and-account#sign-out). |
+| `billing_service_unavailable` | The CodeDAG service can't be reached for the moment. | Wait for the service to come back. See [When the service is unavailable](/docs/account/login-and-account#service-unavailable). |
+| `grant_persist_failed` | The credits were deducted, but the authorization for this run couldn't be saved on this computer. | There's nothing to fix first. Just recover. If it keeps happening, the `Details:` line gives the specific reason the save failed. |
+
+After you've dealt with the cause, run `cdg dag recover <workflow>{:sh}`. The workflow tries to start again, and credits aren't deducted a second time. Until the gate is cleared, `cdg task recover{:sh}` and both `unpause` commands refuse to run and report `Workflow is blocked by the startup gate. Run 'cdg dag recover' to resolve it before resuming.` When you see this error, first find the failure code with `cdg dag status <workflow>{:sh}`, deal with it according to the table above, and then recover the workflow.
+
+When the failure code is `idempotency_replay_expired` or `invalid_usage_grant`, the charge authorization for this run can no longer be restored, and `cdg dag recover{:sh}` refuses to run as well. Use the three commands on the `Action:` line to end this run and submit again. Resubmitting is a new run, and credits are deducted based on the number of tasks when it starts running.
+
+### Sync repository unavailable [#mirror-unavailable]
+
+When the reason is `mirror-unavailable`, CodeDAG failed to read from or write to the sync repository. With clone replicas, CodeDAG passes branches between workspaces through a sync repository on this machine. The remote named `codedag-mirror` in the primary repository and in each clone points to it.
+
+Check that there's enough disk space, that CodeDAG's global directory (`~/.codedag` by default) is writable, and that the `codedag-mirror` remote in the workspace hasn't been pointed at a different URL. If the workflow stopped here as it was starting to run, the `Diagnostic:` line of `cdg dag status <workflow>{:sh}` gives the raw error for this failure, usually an error from Git, which tells you which of these to check. If the remote points somewhere else, remove it in that workspace with `git remote remove codedag-mirror{:sh}`, and CodeDAG adds it back with the correct URL. Then run `cdg task recover{:sh}` or `cdg dag recover{:sh}`, depending on where the reason appeared.
+
+## A task is stuck at done [#stuck-in-done]
+
+A task stopped at `done` has finished running and is waiting for your review. Until you give a decision, the downstream tasks that depend on it don't start. In `cdg dag status <workflow>{:sh}`, the task shows as `[done] [done]`, and the workflow may show as `[pending] [blocked]`. That looks like waiting, but the workflow won't continue on its own. See [Workflow status and substatus](/docs/reference/states#shared-substatus).
+
+A task stops here for one of two reasons:
+
+- Its review policy is `none`, which requires manual review. This can come from the task's `autoAccepted`, the workflow's `taskAutoAccepted`, the project settings, or `--task-auto-accepted none` at submission.
+- It ran in isolated-branches mode and left no changes at all. CodeDAG doesn't auto-accept a task like this, and `cdg dag status{:sh}` adds `— zero output, awaiting manual review` at the end of its line.
+
+Either way, you do the same thing: check the result, and then review it. `cdg task status <task-id> -w <workflow>{:sh}` gives you the three things you need for the check. `Workspace:` is the task's workspace, `Branch:` is its task branch, and `Base Commit:` is the commit from before it started, so `git -C <Workspace> diff <Base Commit>{:sh}` shows everything the task changed. If the result is what you expected, for example from a task that was only ever meant to check something and not change files, accept it with `cdg task review accept <task-id> -w <workflow>{:sh}`, and its downstream tasks start right away. If it should have left changes and didn't, use `request-changes` to have it keep working or `rework` to have it redo the work. See [Choose an action based on your assessment](/docs/guides/review-tasks#choose-action). For the auto-accept rules and why zero-output tasks aren't auto-accepted, see [Auto-accept](/docs/concepts/review-gates#auto-accept).
+
+Leaving a task waiting for review holds up more than its downstream tasks. In isolated-branches mode, a task stopped at `done` also keeps its workspace, so other tasks may be left waiting for a free one.
+
+If a task is designed not to modify files but has to run in isolated-branches mode, have its prompt tell it to write its conclusions to an agreed-on file. That way it doesn't stop for zero output.
+
+When the whole workflow is stopped at `[done] [done]` and every task has been reviewed, the workflow-level review policy is `none` (`dagAutoAccepted: none`). Give a decision with `cdg dag review accept <workflow>{:sh}` or one of the other review commands.
+
+## Later workflows in the queue don't start [#queue-waiting]
+
+Workflows in the same project wait in the queue in the order they were submitted, and only the one at the head of the queue runs. The next one starts only after that workflow's review is finished and it leaves the queue. So when a later workflow doesn't start, the cause is always the workflow at the head of the queue. Run `cdg status{:sh}` to see which workflow that is and what state it's in:
+
+- `[in-progress]`: It's still running. Wait for it to finish.
+- `[done] [done]`, or `[pending] [blocked]` with no task running: It's waiting for your review. See [A task is stuck at done](#stuck-in-done).
+- `[stopped] [paused]` or `[stopped] [killed]`: It was paused or killed and won't continue on its own. Get it going again with `cdg dag recover <workflow>{:sh}`, or end it with a review command if you no longer need it.
+- `[pending] [on-hold]`: It's on hold. See [A task or workflow is on hold](#on-hold).
+
+A later workflow may itself have been stopped. If you ran `pause` or `kill` on a workflow while it was still waiting in the queue, it doesn't start when its turn comes. It stops at the head of the queue instead. And if you used `--downstream hold` when you reviewed an earlier workflow, the workflows behind it show as `[pending] [on-hold]`, with `(downstream-hold)` at the end of the line. See [Downstream tasks or workflows put on hold](#downstream-hold). In both cases, release the workflow with `cdg dag recover <workflow>{:sh}`.
+
+If you don't want to wait for the workflow at the head of the queue, end it directly with `cdg dag review cancel <workflow>{:sh}` or `defer`, adding `-k` if tasks are still running. Once you end it, its results don't stay on the integration branch, and the next workflow starts right away.
+
+## A task stops right after it starts [#agent-start-failed]
+
+Before an agent accepts normal input, it may show a screen that needs a person to respond. Nobody is at the terminal when a task starts, so the agent just sits there. The directory trust prompt doesn't stop a task, because CodeDAG chooses to trust the directory for you. See [Questions CodeDAG answers for you](/docs/guides/agents-and-permission-modes#auto-answered).
+
+Two kinds of screens are left for you to decide. CodeDAG recognizes them but doesn't press any keys for you:
+
+- **Claude Code's full-access warning.** When a task runs with `bypassPermissions` (or its CodeDAG alias, `yolo`) and the warning for that mode has never been accepted on this computer, the task stops at `[pending] [on-hold]` with the reason `agent-bypass-permissions-unaccepted`. The `Diagnostic:` line tells you how to accept the warning in a terminal. For the steps to accept the warning and recover the task, see [Accept Claude Code's full-access warning in advance](/docs/guides/agents-and-permission-modes#accept-bypass-warning).
+- **Codex sign-in and other startup screens.** When Codex isn't signed in, it stops at its sign-in screen, and the task stops at `[pending] [on-hold]` with the reason `agent-lifecycle-state-unavailable`. The `Diagnostic:` line includes the current screen so that you can recognize where it stopped. Enter the session with `cdg task view <task-id> -w <workflow>{:sh}`, sign in there, exit, and then run `cdg task recover{:sh}`. Alternatively, stop the task with `cdg task kill{:sh}`, run `codex{:sh}` on its own in a terminal to sort it out, and then run `cdg task recover{:sh}` to start the task again.
+
+An agent can also stop at a screen CodeDAG doesn't recognize, and then the task shows no hold reason. If a task is stopped during startup and your prompt doesn't appear in its log, start the agent by hand once in that workspace, get past the confirmation screen it shows, and then run `cdg task recover{:sh}`.
+
+After you `kill` a task that's stopped at a startup screen, fix the problem and run `recover`. You don't need to end the run and resubmit. The task hasn't established a recoverable session yet, so `recover` puts it back to waiting, prepares it again, and starts a new session. The output says `No recoverable Agent session was established; the task will be prepared and started again.`
+
+## The agent is waiting for your approval or answer [#approval-waiting]
+
+The task shows `working`, but its log ends at the agent's confirmation prompt. For example, Claude Code asks whether to create a file, with options such as `1. Yes` and `3. No` listed below it and an `Esc to cancel` hint. This means the task agent is waiting for someone to approve an operation. It looks the same when the agent asks you a question and waits for your answer. If nobody responds, it keeps waiting.
+
+In a real terminal, enter the session with `cdg task view <task-id> -w <workflow>{:sh}`, make your choice or answer the question in the agent's native interface, and then press Ctrl+C to exit. The task carries on. In an environment without an interactive terminal, such as an agent's shell tool, this step needs tmux. That's how an orchestrating agent responds. See [What the orchestrating agent does](/docs/get-started/let-your-agent-orchestrate#what-it-does).
+
+For this run, each task's permission mode is already fixed, so you still have to respond to later approval requests one at a time. To have future workflows run to the end unattended, explicitly set a full-access `mode` on every task in the workflow file, such as `bypassPermissions` for Claude Code or `yolo` for Codex. For the tradeoffs, see [Decide between unattended and attended runs](/docs/guides/agents-and-permission-modes#unattended-or-attended). Even with full access, Claude Code still insists on asking about a few operations, such as tools you've explicitly set to ask in your permission rules, questions the agent asks you on its own initiative, and deletion of critical paths such as the root or home directory. For details, see [Permission modes](https://code.claude.com/docs/en/permission-modes) in the Claude Code documentation.
+
+## A task is "done" but did nothing [#empty-result]
+
+The task shows as done, or even as auto-accepted, but the changes it should have made aren't there. Either its task branch has no new commits (in isolated-branches mode), or a file it was supposed to write is missing or empty. Start by reading the agent's final reply with `cdg task logs <task-id> -w <workflow>{:sh}`. It usually explains why it didn't do the work.
+
+There are three common causes:
+
+- **The runtime environment blocked what it needed to do.** Codex's `workspace-write` sandbox denies network access by default, so a task that needs to install dependencies or reach the network fails, and the agent reports that it can't complete the work and ends its turn. If the task needs network access, set `sandbox=workspace-write,network_access=true` in `mode`. For the syntax, see [Codex permission mode syntax](/docs/reference/workflow-file#mode-codex).
+- **It didn't have enough permissions.** The permission mode or sandbox doesn't let it run the commands it needs or write where it needs to. Here too, it reports the problem and ends its turn.
+- **The prompt led it to conclude there was nothing to do.** For example, it couldn't find the thing the prompt describes. Make the goal, the location, and the completion criteria more specific. See [Write prompts: let a fresh session finish on its own](/docs/guides/designing-tasks-and-prompts#write-prompts).
+
+In isolated-branches mode, a task that left no changes stops at `done` and waits for your review instead of being auto-accepted. See [A task is stuck at done](#stuck-in-done). So a task that's done but did nothing shows up mostly in shared-workspace mode. There, a zero-output task is auto-accepted as usual. The only signs are a `— zero output` mark at the end of its status line and a warning written to the task log. If other tasks running at the same time changed the shared workspace, even that mark may be missing.
+
+Once a task has been accepted, the decision can't be taken back. Fix the `mode` or the prompt in the workflow file, and then either put the unfinished work into a new workflow (see [An accepted result has a problem](#accepted-result)) or clear the review and resubmit the whole workflow (see [Clear the review and resubmit](/docs/reference/cli/review#clear-and-resubmit)).
+
+## Agent usage limits or rate limits [#agent-usage-limits]
+
+On a long run, a task agent can hit Claude Code's or Codex's own usage limits, such as the 5-hour window. The task then stops at `[pending] [on-hold]` with the reason `agent-api-error`. For a Claude Code task, the task log shows `Claude API stopped the current turn due to rate limiting.`, followed by information about the reset time. For a Codex task, the `Diagnostic:` line says that its turn ended with an error.
+
+A limit doesn't affect just one task. Tasks that start next and use the same agent run into it quickly too. So limit the damage first, and finish the run after the limit resets.
+
+1. **Limit the damage.** If all the workflow's tasks use the same agent, or the tasks still to come can't avoid it, stop the whole workflow with `cdg dag kill <workflow>{:sh}`. Running tasks are killed and their sessions are kept, tasks that haven't started become `paused`, and no new tasks start. If the workflow mixes the two agents and the other one isn't limited, stop only the tasks that use the limited agent. `cdg task kill <task-id...> -w <workflow>{:sh}` accepts several tasks at once. Any of them that haven't started become `paused`, and the workflow's other tasks keep going as usual.
+2. **Check the tasks that ended around the time the limit hit.** While you wait for the reset, look over the tasks that ended shortly before or after the limit hit, and make sure their results are complete. If a task's result is incomplete but has already been accepted, that result has already gone downstream. See [An accepted result has a problem](#accepted-result).
+3. **Recover.** After the limit resets (the reset information in the Claude Code log tells you roughly when), run `cdg dag recover <workflow>{:sh}`, or use `cdg task recover{:sh}` to recover only the tasks that stopped. Killed tasks and tasks on hold resume in their original sessions, and paused tasks go back to waiting to be scheduled. This step doesn't use any more CodeDAG credits.
+
+The more tasks run at once, the faster the agent's usage is consumed and the more likely you are to hit a limit. For how to plan concurrency around the limits, see [Concurrency and usage limits](/docs/account/cost-control#concurrency).
+
+## After a machine restart or process crash [#after-restart]
+
+CodeDAG runs workflows as background processes on your computer, so closing the terminal doesn't affect them. But when the computer restarts or a process crashes, those background processes and the task agents' sessions all end, and the workflow doesn't continue on its own.
+
+Start with `cdg status{:sh}` or `cdg dag status <workflow>{:sh}`. Interrupted tasks show as `[in-progress] [working (stale owner)]`, and the output has a separate `Diagnostic:` line that says which tasks have lost the process that was running them and gives the command to recover them. The same is true when you look at a single task with `cdg task status <task-id> -w <workflow>{:sh}`. Some tasks may show as `on-hold` instead, with the reason `agent-session-ended`.
+
+Recover the whole workflow as the message says:
+
+```bash title="Terminal"
+cdg dag recover <workflow>
+```
+
+Interrupted tasks reopen their original sessions and continue, tasks that haven't started go back to waiting to be scheduled, and the workflows behind this one in the queue then run in turn. If the CodeDAG service can't be reached at that moment, the workflow may stop at `on-hold`. See [When the service is unavailable](/docs/account/login-and-account#service-unavailable). If a task's session can't be resumed, stop the task and wrap up by following [A workflow is partway through and hard to continue](#start-over).
+
+The queue and each task's state are stored in CodeDAG's global directory (`~/.codedag` by default). Editing the files there by hand can leave the queue unrecoverable. When a state looks wrong, deal with it using `recover`, `kill`, and the review commands.
+
+## Submission rejected [#submit-rejected]
+
+When `cdg dag submit{:sh}` fails, the workflow isn't added to the queue and no credits are used. Find the row that matches the message in the output:
+
+| Message in the output | Cause | What to do |
+|---|---|---|
+| `✗ Validation failed`, followed by a list of `[type] description` entries | The workflow file has errors. | Fix them one by one as described. For how to read the output, see [the Validate section of Write a Workflow File](/docs/guides/writing-workflows#validate). For how to write each field, see [Workflow File Reference](/docs/reference/workflow-file). |
+| `[unsupported-location]` | The file isn't under the `.codedag/dags/` directory. | Move the file into `.codedag/dags/` or one of its subdirectories. See [File location and format](/docs/reference/workflow-file#file-location). |
+| `uses unavailable agent` | `availableAgents` in the project settings limits which agents can be used, and the agent the task uses isn't among them. The error says which settings file the field is in. | As the error suggests, add the agent to [`availableAgents`](/docs/reference/settings#available-agents) in that file, or remove the field entirely. |
+| `[agent-not-installed]`, with `is not installed on this machine` in the description | The agent a task needs isn't installed on this computer: the `claude` or `codex` command isn't in `PATH`. The error's `Used by:` lists the tasks that use it. In isolated-branches mode, the merge-conflict agent is listed as `mergeConflictAgent`. | Install the agent and make sure you can run it directly in the same terminal, or switch those tasks to an agent that's installed. If it's also the project's default agent, the error also explains how to change the default agent for this computer. |
+| `[workspace-not-found]` | The directory of a registered workspace that this workflow would use no longer exists. If all of them are missing, it's an error. If only some are missing, it's a warning, and the workflow runs as usual in the remaining workspaces. | Run `cdg init{:sh}` again to update the registered workspaces. See [Register the replicas with CodeDAG](/docs/guides/parallel-workspaces#register). |
+| `Submit anyway?`, or `Submission cancelled` | Validation passed but with warnings, and you need to confirm. | Read the warnings and then confirm, or add `-y` to confirm automatically. The warning that an explicit `branchName` conflicts with an existing branch cancels the submission outright when there's no interactive terminal. |
+| `[duplicate] Workflow already in queue` | The same workflow file is already in the queue. | Wait until it's done running and its review is finished. To change a submitted run, see [Modify a submitted workflow](/docs/reference/cli/validate-and-submit#modify-submitted). |
+| `is in reviewed phase, not planning` | This workflow's previous run has already been reviewed. | As the message says, run `cdg dag review clear <workflow>{:sh}` first, and then submit. This is a new run, and it uses credits again. |
+| `Workflow has review snapshot state`, labeled `[review-snapshot]` when you submit several workflows at once | The workflow carries review records for individual tasks: before submitting, you reviewed some of its tasks with `accept`, `cancel`, or `defer` through `cdg task review{:sh}`. | As the message says, run `cdg dag review clear <workflow>{:sh}` first to clear those records, and then submit. For the rules, see [Task review records in a workflow that hasn't been submitted](/docs/reference/cli/review#unsubmitted-task-reviews). |
+| `Not enough credits for this submission.` or `No active paid subscription found for this account.` | You don't have enough credits, or you have no active subscription. | See [Not enough credits or no subscription](/docs/account/credits-and-subscription#insufficient-credits). |
+| `Sign-in failed:` | Submitting requires you to be signed in, and sign-in didn't complete. | See [Sign-in fails or you keep being asked to sign in](#sign-in-problems). |
+| `Precheck failed:` | An error occurred while CodeDAG was checking your credits with the CodeDAG service before submission. The text after the colon is the cause this time. | If the service can't be reached or had an error on its side, wait for it to come back and submit again. See [When the service is unavailable](/docs/account/login-and-account#service-unavailable). If the service rejected the request (for example, because the workflow's content exceeds a server-side limit), retrying unchanged gives the same result. Deal with the cause the service gives in the error, and then submit. If you had to sign in again partway through the check and sign-in didn't complete, see [Sign-in fails or you keep being asked to sign in](#sign-in-problems). |
+
+## Concurrency is only 1 [#concurrency-one]
+
+If tasks run one after another, work through the list below in order, and move on to the next item only once the previous one is settled.
+
+- **The tasks depend on each other.** Only tasks that don't depend on one another can run at the same time. First make sure the workflow's dependencies really do allow tasks to run in parallel.
+- **There aren't enough workspaces available.** In the default isolated-branches mode, every task running at the same time takes up one workspace. The primary repository counts as one, and the rest come from registered replicas. With only the primary repository registered, concurrency is 1. [Set up replicas](/docs/guides/parallel-workspaces#prepare-replicas) and register them with `cdg init{:sh}`. Workspaces excluded by the workflow's [`excludeWorkspaces`](/docs/reference/workflow-file#exclude-workspaces) don't count either.
+- **`maxConcurrency` wasn't updated to match.** The concurrency limit comes from [`maxConcurrency`](/docs/reference/workflow-file#max-concurrency) in the workflow file. If that isn't set, it comes from the project settings, and if neither sets it, it's 1. The first time you run `cdg init{:sh}`, it sets the value to 1 plus the number of replicas. When you run `cdg init{:sh}` again after adding replicas and it finds that the effective limit is lower than the number of workspaces, it asks whether to change the limit to the new number. The default is to change it, and you can also pass `--max-concurrency{:sh}` to set it directly. When the limit is set only in the team's shared settings, `.codedag/settings.jsonc`, initialization treats it as the team's decision and doesn't ask. If you chose not to change it at the time, or you want to override the team's value, set `maxConcurrency` in the workflow file or edit `.codedag/local/settings.local.jsonc`. See [`maxConcurrency` in the project settings](/docs/reference/settings#max-concurrency).
+- **Workspaces are held by tasks that have already started.** In isolated-branches mode, once a task starts, it holds its workspace and concurrency slot until its review is finished. That includes tasks stopped at `done` waiting for review and tasks that are paused or killed. The workspace is freed only when you let the task finish and review it, or end it with `cdg task review cancel{:sh}` or `defer`.
+
+Project settings are read at submission, so changing them affects only workflows you submit afterward. Shared-workspace mode doesn't need replicas, and the number of tasks running at once is determined by `maxConcurrency` alone.
+
+## The primary repository was switched to another branch [#branch-switched]
+
+In the default isolated-branches mode, this is expected. The primary repository is a workspace too, so during a run CodeDAG switches it to the task branch assigned to it. When the workflow finishes, it's left on the integration branch, `cdg/<workflow-name>/integration`, and isn't switched back to your original branch. Your main branch itself hasn't been changed. For why, see [Task branches, the integration branch, and the base](/docs/concepts/workspaces-and-branches#branches).
+
+After the workflow finishes, run `git checkout main` yourself to go back to your main branch. This step also determines where the next workflow starts. If you don't switch back and the workflow file doesn't set `baseRef`, the next workflow starts from this integration branch's results.
+
+To keep developing in the primary repository while a workflow runs, set `excludeWorkspaces: ["."]` in the workflow file. Tasks then run only in replicas, provided at least one replica is registered. See [Keep developing while a workflow runs](/docs/guides/parallel-workspaces#keep-main-repo). Shared-workspace mode doesn't create branches and doesn't switch the primary repository's branch.
+
+## task view can't connect or doesn't respond [#task-view-problems]
+
+`cdg task view{:sh}` attaches your current terminal to the task agent's native session, so it depends on both the terminal environment and the stage the task is at. Go by what you see:
+
+- **The display is garbled, or keys don't respond.** The command isn't running in a real interactive terminal. For example, it's running in a script, in CI, or in an agent's shell tool. Switch to a real terminal, or run it inside tmux.
+- **The message is `Task has not started yet.`** The task has no session to enter yet. It's still waiting to be scheduled, it's stopped for a hold reason that comes up before startup (a dirty workspace, a branch problem, and so on), or it was paused or killed before it ever started. Wait for it to start, or deal with the hold reason by following [A task or workflow is on hold](#on-hold).
+- **The message is `Session ID not found. Please provide --session-id`.** The session has ended, and the command needs to reopen it, but no session ID was recorded. Find the session ID in the agent's own records and supply it with `--session-id`. For the syntax, see [cdg task view](/docs/reference/cli/control#task-view).
+- **The message is `Session socket not found` or `Connection refused`.** The command can't connect to the task's session right now, for example because the task just started and the session isn't ready yet. Wait a moment and try again. If it still fails, check with `cdg task status{:sh}` whether the task has already stopped, and then go by its state.
+
+When a task has been killed and its session isn't running either, entering the session requires recovering the task first. The command explains this and then asks. The default is not to recover, and the command recovers and connects only if you choose Yes. When there's no interactive terminal to answer in (for example, when you run it directly in an agent's shell tool), the command reports an error and exits with code 1. To recover, add `--recover`. If you only want to see what the task did, read its log with `cdg task logs{:sh}`.
+
+Press Ctrl+C to exit the session, and the task carries on. Exit promptly once you're done talking to the agent. Staying attached can keep the task from ending normally for a long time. See [Enter a session, make changes, and exit](/docs/guides/intervene-and-control#task-view).
+
+## Initialization and settings [#init-and-settings]
+
+- **`cdg init{:sh}` reports `Neither CLI was detected on this machine.`** CodeDAG can't find `claude` or `codex` in the current terminal's `PATH`. Install Claude Code or Codex, make sure you can run it directly in the same terminal, and then run `cdg init{:sh}` again.
+- **When you run `cdg init{:sh}` again, it reports `File conflicts detected.` and asks what to do with files that already exist.** Choose Keep to hold on to your own edits, or Overwrite to go back to the initialization template. Files already committed to the `.codedag` repository are kept automatically, and you aren't asked about them. For what each option means, see [The six choices for each file](/docs/reference/cli/init#file-conflicts).
+- **You run `cdg init{:sh}` in a clone replica.** If the clone is already registered as a replica of a project, CodeDAG recognizes it, tells you so before it asks anything, and then continues initializing against that project's primary repository. It doesn't create `.codedag/` in the replica. A clone that hasn't been registered is treated as a separate new project, which is normal behavior. To use it as a replica, go back to the primary repository and run `cdg init{:sh}` to register it. See [Where to run it](/docs/reference/cli/init#where-to-run).
+- **The message is `Failed to parse project settings file` or `Invalid project settings file`.** The settings file, `.codedag/settings.jsonc` or `.codedag/local/settings.local.jsonc`, isn't valid JSONC, or one of its fields has an invalid value. Fix the file according to the `Location:` and `Reason:` in the output. A misspelled field name in a settings file doesn't produce an error. It's simply ignored. So if you changed a setting and nothing happened, check the field name first. See [File format and errors](/docs/reference/settings#format).
+
+## Sign-in fails or you keep being asked to sign in [#sign-in-problems]
+
+- **The message is `Sign-in failed:`, or `cdg auth status{:sh}` reports `Failed to show auth status:`, for example after a timeout, after you denied authorization in the browser, or when the service can't be reached.** Just run the command again. When a sign-in triggered by `cdg init{:sh}` or `cdg dag submit{:sh}` fails, the original command exits too, and you need to run it again.
+- **The message is `Configured URL is not an approved CodeDAG auth endpoint.`** The environment variable `CODEDAG_AUTH_BASE_URL` is set in the current terminal. The CLI connects only to `https://app.codedag.com`, and as long as this variable has a value, sign-in and every command that requires sign-in ends with this error. Unset it (`unset CODEDAG_AUTH_BASE_URL{:sh}`) and run the command again.
+- **The message is `Failed to save credentials to the local secure storage.`** Sign-in completed in the browser, but the credentials couldn't be saved on this computer, so the sign-in didn't take effect. Make sure CodeDAG's global directory (`~/.codedag` by default) is writable and there's enough disk space, and then sign in again.
+- **You can't sign in from a remote SSH session, a container, or a server without a graphical interface.** Sign-in has to be completed in a browser on the same computer that runs `cdg`, so for now you can't sign in from these environments. See [Without a desktop browser](/docs/account/login-and-account#no-browser). Support for these environments is planned for a later release.
+- **You're asked to sign in again after a while.** A sign-in expires when it goes unused for a long time. Copying the credentials to another computer and using them there also invalidates this account's sign-ins on every computer. See [How long you stay signed in](/docs/account/login-and-account#credentials) and [Sign out, use multiple computers, and switch accounts](/docs/account/login-and-account#sign-out).
+- **You end up signed in to a different account.** If the web console in your browser is still signed in to another account, CLI sign-in simply uses that account. See [Sign out, use multiple computers, and switch accounts](/docs/account/login-and-account#sign-out).
+- **A queued workflow is stopped at `on-hold` because of your sign-in state.** See [Account and credits gate](#startup-gate).
+- **The CodeDAG service is temporarily unavailable.** See [When the service is unavailable](/docs/account/login-and-account#service-unavailable).
+
+## Version problems [#versions]
+
+**The CodeDAG CLI version is too old.** The CodeDAG service requires a minimum CLI version. When yours is too old, operations that need to connect to the service tell you to upgrade. Upgrade with `brew upgrade codedag{:sh}` and try again. See [Installation and login](/docs/get-started/installation).
+
+**The Claude Code version is too old.** The minimum Claude Code version CodeDAG supports is 2.1.196. When `cdg init{:sh}` detects Claude Code on this machine, it checks the version and warns you if the version is too old or can't be determined. Initialization still completes as usual. If you ignore the warning, the problem surfaces when a task runs: the task stops at `on-hold` with the reason `agent-version-unsupported`, and the log contains `Claude CLI <version> is unsupported for reliable lifecycle detection.` Upgrade with `claude update{:sh}`, and then run `cdg task recover{:sh}`. If recovering still reports that the version is unsupported, the `claude` in your current terminal is still the old version.
+
+**The Claude Code version is newer than the verified range.** CodeDAG has been verified up to Claude Code 2.1.292, and newer versions usually work fine too. In rare cases, CodeDAG can't tell whether a task is done, and the task stops at `agent-lifecycle-state-unavailable`, with the log noting that the version is newer than the verified range. The work is most likely complete and hasn't been lost. Handle it as described for this reason in [Agent session problems](#hold-agent-session). You can also pin or roll back the Claude Code version, or upgrade CodeDAG.
+
+**The CodeDAG Guide plugin and CLI versions don't match.** Run `cdg plugin status{:sh}` and follow the `Action:` line in the output. Usually that means running the `cdg plugin update{:sh}` command it gives. See [Update the plugin](/docs/guides/guide-plugin#update). For the compatibility rules between the plugin and the CLI, see [Version compatibility](/docs/reference/cli/plugin#compatibility).
+
+## You find a problem after a task already has a review decision [#after-conclusion]
+
+A task has been accepted, canceled, or deferred, and only afterward do you find that its result is wrong or that the decision was a mistake. A final decision can't be changed within this run, whether you gave it or the task was auto-accepted. For why, see [Review decisions can't be changed](/docs/concepts/review-gates#no-undo). What you can fix is the code, not the review decision. In isolated-branches mode, the task's changes are all still on branches. Wait for this run to finish, deal with them in Git, and then continue in a new workflow.
+
+Hold off on the Git work until this run has finished. During a run, a downstream task gets the upstream result as it was at the moment the upstream task got its decision. If you change the upstream task branch after that, downstream tasks don't get the change. And changing the integration branch can stop the workflow or cause a review to fail with an error. Shared-workspace mode has none of these branches. The files a task wrote stay in the workspace, and after the workflow finishes you can edit them directly or undo them with Git.
+
+### An accepted result has a problem [#accepted-result]
+
+If the workflow is still running, first decide whether to let it finish. If the unfinished tasks don't depend on this result, let it finish. If they all build on this result, continuing is wasted work, so stop the workflow now and keep the results that are already done. For the steps, see [A workflow is partway through and hard to continue](#start-over).
+
+After the run finishes, deal with the task's changes according to the kind of problem:
+
+| Situation | What to do |
+|---|---|
+| It can be fixed on top of the existing result | Fix it by hand, or add a task to a new workflow to complete it |
+| It has to be removed, and later tasks haven't changed much on top of it | Revert its commit on the integration branch |
+| It has to be removed, and later tasks all build on it | Assemble a separate branch that doesn't include it, and put it and its downstream tasks into a new workflow to redo them |
+
+Do the revert on the integration branch, which is where the primary repository is left after the workflow finishes. A task's commit is usually the one whose commit message is the task title:
+
+```bash title="Terminal"
+git log --oneline --no-merges main..cdg/<workflow-name>/integration
+git revert <commit>
+```
+
+When later tasks have already changed a lot on top of it, a revert is likely to conflict, and their old results are still on the integration branch as well. In that case, assemble a separate branch instead. Each task branch contains only the results of that task and its upstream tasks. So if you create a new branch from this workflow's base and merge in the task branches that don't depend on that task, you get the result without that task and its downstream tasks.
+
+```bash title="Terminal"
+# Create a new branch from this workflow's base, which is main here
+git checkout -b <new-branch> main
+# Merge the task branches that don't depend on that task, one by one
+git merge cdg/<workflow-name>/t<task-id>-<title>
+```
+
+For how to list task branches, and where to find the branches of tasks that ran in clone replicas, see [Take the results of only a few tasks](/docs/guides/finish-and-merge#pick-tasks).
+
+Write the tasks that need to be completed or redone into a new workflow, and have it start from the result you've sorted out. If you worked on the integration branch, see [Run only a few of the tasks](/docs/guides/finish-and-merge#continue-remaining) for how to write it. If you assembled a separate branch, set `baseRef: <new-branch>` in the new workflow. If you don't want any of the results, there's no need to tidy up branches. Clear the review and resubmit the whole workflow. See [Run the workflow again](/docs/guides/finish-and-merge#run-again).
+
+### A task was canceled or deferred by mistake [#ended-by-mistake]
+
+By default, the changes of a canceled or deferred task are saved in a snapshot branch, so they aren't lost. But downstream tasks in this run can't get them. All they get is the results of that task's upstream tasks, and that's still true for downstream tasks you put on hold with `--downstream hold` at the time and release later. So don't release the downstream tasks that still need this result. Cancel or defer them too. After the workflow's review is finished, restore the changes from the snapshot branch onto the integration branch (see [Restore the parts you need](/docs/reference/branches-and-files#restore-changes)), and then write those downstream tasks into a new workflow. For downstream tasks that already ran without it, use the previous section to decide whether to redo them.
+
+## A workflow is partway through and hard to continue [#start-over]
+
+When a run has become hard to fix in place, it's better to keep the results that are already done and continue the rest in a new workflow than to keep patching. This fits several situations. The same cause keeps coming back after you deal with it. The workspace has been edited by hand so much that you can no longer tell which changes are task results. The problem lies in how the workflow is split into tasks or in the prompts themselves, and a submitted run can only follow the definition it was submitted with. Or an accepted result has a problem, and the unfinished tasks all build on it.
+
+In isolated-branches mode, you can finish the run with these steps:
+
+1. Stop the workflow with `cdg dag kill <workflow>{:sh}`. Running tasks are killed immediately. To let them finish their current turn first, use `cdg dag pause <workflow>{:sh}` instead, and wait until the workflow no longer shows `in-progress`.
+2. Go through the tasks that have started but have no review decision, one by one. If a task's result is incomplete, cancel it with `cdg task review cancel <task-id> -w <workflow> --downstream cascade{:sh}`. By default, this saves the task's existing changes to a snapshot branch, so you can still restore them later. Its result isn't passed downstream, and its downstream tasks that haven't started won't start in this run either.
+3. End the whole workflow with `cdg dag review accept <workflow>{:sh}`. The remaining tasks that are done running are accepted along with it, the results that passed review are merged into the integration branch, `cdg/<workflow-name>/integration`, and the primary repository is left on that branch. Tasks that never started get no review result.
+4. Write the remaining work and the tasks you just canceled into a new workflow, and submit it. The primary repository is on the integration branch, so a new workflow without `baseRef` starts from these results. You can also set `baseRef: cdg/<workflow-name>/integration` to say so explicitly. The new workflow uses CodeDAG credits separately, based on its number of tasks.
+
+Step 3 accepts every task that has run and has no decision yet, so make sure you've dealt with every task whose result is incomplete in step 2. If the result of a task that was already accepted has a problem, its changes go into the integration branch. Before you submit the new workflow, handle it as described in [An accepted result has a problem](#accepted-result). For how to merge the results into your main branch afterward, see [Merge into the main branch](/docs/guides/finish-and-merge#merge).
+
+If you don't want any of this run's results, end it with `cdg dag review cancel <workflow>{:sh}` instead, and the integration branch returns to this run's base. Shared-workspace mode has no task branches or integration branch. The changes that were already made simply stay in the workspace, so after you end the workflow, continue in a new one.
+
+## Collect information to get help [#get-help]
+
+If you've worked through this page and the problem still isn't solved, gather the following information before you contact us:
+
+- The output of `cdg --version{:sh}`, the version of the agent you're using (`claude --version{:sh}` or `codex --version{:sh}`), and your operating system.
+- The output of `cdg dag status <workflow>{:sh}` for the workflow that has the problem.
+- The output of `cdg task status <task-id> -w <workflow>{:sh}` for the task that has the problem. The `Reason:` and `Diagnostic:` lines matter most.
+- The end of that task's log, for example the output of `cdg task logs <task-id> -w <workflow> -n 100{:sh}`.
+- The commands you ran before the problem appeared, and the parts of the workflow file that relate to it.
+
+Logs contain the task agent's output, which may include your code, paths, or secrets. Review them before you send them, and remove anything that shouldn't be shared.
+
+When it's ready, email us at <Email user="hi" />. If the problem is fine to discuss in public, you can also open an issue on [GitHub](https://github.com/CodedagAI/codedag-home/issues).

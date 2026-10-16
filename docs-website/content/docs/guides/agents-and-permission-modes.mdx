@@ -1,0 +1,216 @@
+---
+title: Choose Agents, Models, and Permission Modes
+description: Choose an agent, a model, and a reasoning effort for each task, and pick a permission mode based on whether the run is unattended or attended.
+icon: ShieldCheck
+---
+
+For each task in a workflow, the `agent` field sets which agent runs it, `model` and `effort` set which model it uses, and `mode` sets whether it can act without your approval while it runs. `mode` deserves the most thought. Once a [task agent](/docs/concepts/tasks-and-sessions#task-agent) stops to request approval, it waits until someone responds, so `mode` determines whether a workflow can run to completion with nobody watching, and how much risk you take on in exchange.
+
+## Choose an agent [#choose-agent]
+
+Set `agent` to `claude` to run the task with Claude Code, or to `codex` to run it with Codex. When you omit it, the task goes to the project's default agent. The default agent is set when you run `cdg init{:sh}`. To change it later, edit [`defaultAgent`](/docs/reference/settings#default-agent) in project settings. To split work between the two in one workflow, for example with one implementing and the other reviewing, see [Mix Claude Code and Codex](/docs/guides/mixing-agents).
+
+A task that sets `mode` should set `agent` explicitly too. The two agents use different `mode` syntax, and validation checks `mode` against the agent the task actually uses. The default agent is usually stored in each machine's own local settings. On a machine with a different default agent, a task without `agent` in the same workflow file is run by the other agent, and a `mode` written for the original one usually fails validation.
+
+If project settings define [`availableAgents`](/docs/reference/settings#available-agents), tasks can use only the agents it lists. If a task uses the one that isn't on the list, validation reports an error and tells you which file the field is in.
+
+## Choose a model and reasoning effort [#model-and-effort]
+
+`model` sets the model and `effort` sets the reasoning effort. CodeDAG passes both to the agent as is. When you omit them, the task uses the default model and reasoning effort configured in the agent itself. Most tasks don't need either field. When you want to control cost or quality, the usual approach is to give mechanical tasks a cheaper configuration and save strong models and higher reasoning effort for tasks that call for judgment, such as review and synthesis. For the cost side, see [Choose a model per task](/docs/account/cost-control#model-per-task).
+
+Both fields go directly under the task, for example `model: opus` and `effort: high`. Each agent decides which values are valid:
+
+- **Claude Code:** `model` accepts the aliases `sonnet`, `opus`, and `haiku`, which point to models in the Sonnet, Opus, and Haiku families, or a full model name.
+- **Codex:** `model` takes a model name, such as `gpt-6.1-sol`. For the models currently available, check Codex's `/model` menu.
+- **Reasoning effort:** Which `effort` levels are available depends on the model. `low`, `medium`, and `high` are the most common. Higher levels such as `xhigh` and `max` are supported only by some models.
+
+CodeDAG doesn't check the values of these two fields. A misspelled name still passes validation, and the agent reports the error only when the task runs. Models and effort levels change as the agents are updated. For the current ones, see Claude Code's [model configuration documentation](https://code.claude.com/docs/en/model-config) and Codex's [models documentation](https://learn.chatgpt.com/docs/models). There's one more thing to watch when you choose a model for a Claude Code task: the `auto` permission mode is available only on some models. See [Modes for Claude Code](#claude-code).
+
+## Decide between unattended and attended runs [#unattended-or-attended]
+
+`mode` determines which operations the task agent can perform right away while it runs and which ones it has to stop and get your approval for. That in turn determines whether the workflow can finish with nobody watching. Once a task agent requests approval, it keeps waiting until someone enters its session and responds, and all that time the task still shows as `working`. For how to spot this, see [Is it stuck?](/docs/guides/run-and-monitor#is-it-stuck). For an unattended run, choose full access, or hand approvals to the agent's built-in automatic review. The level where you respond to approvals yourself suits only the times when you're nearby. Here's how to write the three levels for each agent:
+
+| Access level | Claude Code | Codex |
+|---|---|---|
+| Full access: no approvals | `bypassPermissions`: skips Claude Code's permission checks, so operations run right away | `yolo`: doesn't request approval and doesn't use a sandbox, so reading and writing files, running commands, and accessing the network are all unrestricted |
+| Moderate access, approvals go to automatic review | `auto`: Claude Code's safety classifier reviews operations in the background, safe ones run right away, and risky ones are blocked; in a few cases it still stops and asks you for approval | `approve-for-me`: requests approval as needed inside the workspace-write sandbox, and Codex's automatic review decides each request without stopping to wait for a person |
+| Moderate access, approvals go to you | `acceptEdits`: file edits and common filesystem commands run right away, and all other commands, such as running tests or builds, need your approval | `ask-for-approval=on-request,sandbox=workspace-write,network_access=true`: reading files, writing to the workspace, running commands, and accessing the network all happen right away, and Codex asks for your approval when it needs to go outside the sandbox |
+
+**Full access** lets a workflow run all the way through while you're away. It's the level that the [second workflow](/docs/get-started/second-workflow) tutorial uses. It suits tasks you trust: you wrote the prompt yourself, the material the task reads comes from trusted sources, and the machine holds nothing you'd rather the agent didn't touch. The cost is that the agent's operations no longer go through permission checks. The callout below describes the consequences.
+
+**Moderate access** puts limits on operations. Claude Code lets through only the operations its classifier considers safe, and Codex runs commands in a sandbox that allows writes only to the task's workspace. It suits tasks that touch things you don't want the agent to have free rein over, such as a shared database, a remote repository, or production credentials. It also suits the first run of a workflow you don't know well yet. A blocked operation needs approval before it can go ahead, and who handles that approval determines whether this level can still run unattended.
+
+**When approvals go to automatic review**, the task doesn't stop to wait for a person. Codex's `approve-for-me` sends every approval request to Codex's own automatic review, which decides whether to allow or deny it. With Claude Code's `auto`, the classifier also decides in the background, but in a few cases it still stops and asks you for approval, so someone needs to keep an eye on it. The [quickstart](/docs/get-started/quickstart) uses this level.
+
+**When approvals go to you**, every single request stops the task, and the downstream tasks that depend on it and the workflows behind it in the queue wait along with it. This level suits only the times when you're nearby or checking in regularly, not overnight runs. For how to respond, see [Respond to an approval request](/docs/guides/intervene-and-control#approval). If an agent orchestrates for you, you can also agree that the orchestrating agent responds on your behalf within a certain scope. See [Three things to agree on before it submits](/docs/get-started/let-your-agent-orchestrate#confirm-before-submit).
+
+`mode` is set per task, so different tasks in the same workflow can have different access levels. But if even one of them might stop to wait for approval, the whole workflow needs someone keeping an eye on it.
+
+<Callout type="warn">
+Full access skips the agent's own permission checks, and CodeDAG doesn't check anything in their place. The task agent can delete files outside the repository, access the network, and push to remote repositories, and malicious instructions that it reads in external content such as web pages or issues aren't blocked either. Isolated-branches mode only keeps a task's code changes on its task branch. It has no control over the consequences of these operations. The official documentation for both Claude Code and Codex recommends using modes like this only in isolated environments such as containers or virtual machines.
+</Callout>
+
+### When you omit `mode` [#mode-omitted]
+
+When you omit `mode`, CodeDAG passes no permission settings to the agent, and the task agent starts with its own configuration, such as `permissions.defaultMode` in Claude Code's settings file or Codex's `~/.codex/config.toml`. If none of those are set, it uses the agent's built-in default. None of this configuration is visible in the workflow file, and an agent's built-in default can change from version to version. The same workflow can therefore go from running straight through to stopping frequently after you move it to another machine or upgrade the agent. If you set `mode` explicitly on every task, the file itself states each task's access level and no longer depends on the configuration of each machine.
+
+### Which sessions `mode` covers [#mode-scope]
+
+`mode` is fixed at submission along with the rest of the workflow definition, and every session the task starts in that run uses it. When you have the task keep working with `request-changes` or redo its work with `rework` during review, it keeps the same `mode`. If you reenter the task's session with `cdg task view{:sh}` after it finishes, whatever you ask it to do there also runs at that access level.
+
+In isolated-branches mode, one kind of session doesn't follow the task's `mode`: the agent session that CodeDAG starts to resolve a conflict in an automatic merge. There's no way to respond to an approval request in that session, so it always runs with full access (`yolo`) and can finish the merge with nobody watching. This is true even when the task's `mode` is one that requires your approval. To give the conflict session a different access level, or to always have the same agent resolve conflicts, set [`mergeConflictAgent`](/docs/reference/workflow-file#merge-conflict-agent) in the workflow.
+
+## Unattended doesn't mean ungated [#gates]
+
+Full access removes only the step-by-step approvals while a task runs. You can build the checks on results into the workflow itself: close the review gate at key nodes, add a verification task, or add a task that only reviews and doesn't change code. The workflow below is suited to running while you're away. All three tasks use full access, and the check comes at the end:
+
+```yaml title=".codedag/dags/overnight-tests.yaml"
+tasks:
+  - id: 1
+    title: Add unit tests
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      Find three functions in this repository that lack unit tests, write unit tests for them, and run those tests until they pass.
+      In docs/notes/new-tests.md, record which tests you added and which file each one is in.
+      Add or modify only test files and this record.
+
+  - id: 2
+    title: Review the new tests
+    dependencies: [1]
+    agent: claude
+    mode: bypassPermissions
+    model: opus                # Review takes judgment, so use a strong model
+    effort: high
+    prompt: |
+      Read docs/notes/new-tests.md and the test files it lists.
+      Check whether the tests really verify each function's behavior and whether any edge cases are missing,
+      and list each issue you find in docs/notes/test-review.md. Don't modify any code or tests.
+
+  - id: 3
+    title: Fix the issues and run all tests
+    dependencies: [2]
+    agent: claude
+    mode: bypassPermissions
+    autoAccepted: none         # Stop when done so you can confirm the result
+    prompt: |
+      Read docs/notes/test-review.md and fix each issue it points out.
+      Then run all of the project's tests and fix the failures until everything passes.
+      In docs/notes/test-report.md, record which checks you ran, what you changed, and what still doesn't pass.
+```
+
+Task 2 only reads code and writes the issues to a file, and task 3 fixes them. Task 3 is the verification task: it runs all the tests and writes the results up as a report. It sets `autoAccepted: none`, so it stops when it finishes and waits for you. Read `docs/notes/test-report.md`, then decide whether to accept the result or have the task keep working on it. You still need this gate even with a verification task, because CodeDAG doesn't read test results. A verification task that can't get the tests to pass becomes `done` all the same, and with the gate open it would be auto-accepted. See [Verification tasks](/docs/concepts/review-gates#verification-task). For other nodes worth setting up this way, see [Which nodes are worth closing the gate on](/docs/concepts/review-gates#when-to-close).
+
+To run it with Codex, change `agent` to `codex` and `mode` to `yolo`, and remove `model` and `effort` or replace them with Codex values.
+
+A gate controls whether a result is passed downstream. It has no say over which commands the agent runs during a task, so you still have to contain the risk of full access by running tasks you trust in an environment you control.
+
+## Confirmations before an agent's first run [#agent-first-run]
+
+Agents have a few confirmation dialogs that appear only the first time. Two of them you have to answer yourself, and both belong to Claude Code: the [full-access warning](#accept-bypass-warning) and the [question about reading files outside the working directory](#allow-outside-reads). They decide how much the agent is allowed to do. That authorization is yours to give for this computer, so CodeDAG doesn't respond on your behalf, and a task that runs into one in the background stops and waits for you. You can take care of both in a terminal before you submit, and they won't appear on this computer again. The dialogs that ask you to confirm that a directory and the rule files in it can be trusted are [answered by CodeDAG on your behalf](#auto-answered).
+
+### Accept Claude Code's full-access warning in advance [#accept-bypass-warning]
+
+If a Claude Code task is going to run in the full-access mode `bypassPermissions` (including its alias `yolo`) and you haven't yet accepted that mode's warning on this computer, do it once in a terminal before you submit: run `claude --permission-mode bypassPermissions{:sh}`, choose "Yes, I accept", and then exit. Once you've accepted it, the warning doesn't appear again in any directory on this computer. It asks you to confirm that you accept the consequences of skipping permission checks, and CodeDAG doesn't confirm that for you. Codex has no such step when it runs with full access.
+
+If you didn't accept it in advance, you can still do it afterward. The task stops at `on-hold` with the reason `agent-bypass-permissions-unaccepted`. The diagnostic in `cdg task status <task-id> -w <workflow>{:sh}` explains how to accept the warning in a terminal. Follow it, then run `cdg task recover <task-id> -w <workflow>{:sh}`, and the task starts over from the beginning.
+
+### Allow Claude Code to read files outside the working directory in advance [#allow-outside-reads]
+
+If a Claude Code task runs in `auto` mode and needs to read files outside the repository, and you've never answered the question "Allow this read outside the working directories?", answer it once in a terminal before you submit. The question doesn't appear at startup. It appears partway through a task, the first time Claude Code needs to read a file outside the working directory, and CodeDAG doesn't choose for you here either.
+
+1. In the repository root, run `claude --permission-mode auto{:sh}` and send the prompt below. You can replace the path with any other file outside the repository.
+
+   ```text title="Prompt"
+   Use the Read tool to read the first 10 lines of the most recently modified .jsonl file under ~/.claude/projects/.
+   ```
+
+2. When "Allow this read outside the working directories?" appears, choose "Yes, and keep allowing any reads outside the working directories". The choice applies to every project on this computer, and Claude Code doesn't ask again. If the question doesn't appear, you've already allowed it before.
+3. Exit Claude Code.
+
+If you didn't allow it in advance, you can still do it afterward. The task stops at this question and waits for you. Enter the task's session and make your choice, and the task carries on. See [The agent is waiting for your approval or answer](/docs/troubleshooting/troubleshooting#approval-waiting).
+
+### Questions CodeDAG answers for you [#auto-answered]
+
+**Directory trust.** The first time either agent starts in a directory, it asks whether you trust that directory. Tasks run in workspaces that you registered yourself, so CodeDAG chooses to trust the directory on your behalf, and it does the same when you move to another repository or create new replica directories for parallel execution. The agent records the choice itself: Claude Code records it per directory, and Codex records it per Git repository root in its `config.toml`.
+
+**External CLAUDE.md imports.** When a CLAUDE.md in the project or one of its parent directories uses `@` to import a file from outside the working directory, Claude Code asks "Allow external CLAUDE.md file imports?" the first time it starts. The imported files are rule files that you configured yourself for this project or this computer, so CodeDAG chooses to allow the imports on your behalf. Like directory trust, this choice is recorded per startup directory, and in a new repository or a new replica directory created for parallel execution, CodeDAG answers it when the task starts, too.
+
+## Modes for Claude Code [#claude-code]
+
+For a Claude Code task, `mode` is the name of a permission mode, and CodeDAG passes it to Claude Code as `--permission-mode`. For unattended runs, write `bypassPermissions` or its alias `yolo`, which CodeDAG provides. For attended runs, write `auto`, or `acceptEdits` if the task's model doesn't support auto mode.
+
+```yaml title=".codedag/dags/fix-lint.yaml"
+tasks:
+  - id: 1
+    title: Fix lint issues
+    agent: claude
+    mode: auto      # Attended; for unattended runs, change to bypassPermissions
+    model: sonnet   # auto needs a model that supports it
+    prompt: |
+      Run the project's lint command and fix every issue it reports until lint passes.
+      Modify only the files that the lint report mentions.
+```
+
+`auto` mode comes with conditions. The task's model has to support it: that's the task's `model`, or Claude Code's default model when `model` is omitted. Older models such as Haiku 4.5 don't. An organization administrator can also turn auto mode off. When the conditions aren't met, Claude Code starts in Manual mode (`default`), and the task stops at the first edit or command that needs approval. See [I set `auto`, but the task stops to wait for approval](#auto-unavailable). If you switch to `acceptEdits`, file edits and common filesystem commands such as `mkdir`, `mv`, and `cp` run right away, while all other commands, such as running tests or builds, need approval, so the task stops far more often. For the other mode names and aliases, see [Permission mode syntax](/docs/reference/workflow-file#mode-claude-code).
+
+`bypassPermissions` and `auto` each have one dialog that appears only the first time and that you have to answer yourself: the [full-access warning](#accept-bypass-warning) when `bypassPermissions` starts, and the [question](#allow-outside-reads) the first time a task in `auto` mode reads a file outside the working directory. If you haven't answered them yet, the task stops there and waits for you, so take care of them in a terminal before you submit.
+
+Even in `bypassPermissions` mode, Claude Code still stops to ask you about a few operations, such as tools that your permission rules set to ask, questions the agent asks you on its own initiative, and commands that delete a critical path such as the root directory or your home directory. In those cases, the task stops there too.
+
+Claude Code defines the mode names and the exact behavior of each mode, and both can change between versions. Treat `claude --help{:sh}` and the official [permission modes documentation](https://code.claude.com/docs/en/permission-modes) as the source of truth.
+
+## Modes for Codex [#codex]
+
+For a Codex task, `mode` takes one of two forms: a single shorthand for the whole value, or a comma-separated list of `key=value` pairs. There are two shorthands. `yolo` is full access, and `approve-for-me` (which can also be written `auto`) is the automatic review level. To respond to approvals yourself, write `ask-for-approval=on-request,sandbox=workspace-write,network_access=true`, which lets Codex work freely inside the sandbox and ask for your approval when it needs to go outside it.
+
+```yaml title=".codedag/dags/fix-lint.yaml"
+tasks:
+  - id: 1
+    title: Fix lint issues
+    agent: codex
+    # Approvals go to you: runs right away inside the sandbox, asks for your approval to go outside it
+    # For unattended runs, change to approve-for-me (automatic review) or yolo (full access)
+    mode: "ask-for-approval=on-request,sandbox=workspace-write,network_access=true"
+    prompt: |
+      Install the project's dependencies, run the project's lint command, and fix every issue it reports until lint passes.
+      Modify only the files that the lint report mentions.
+```
+
+`yolo` has Codex skip approval requests and the sandbox, and it turns on live web search. It's equivalent to Codex's own `--dangerously-bypass-approvals-and-sandbox` plus `--search`.
+
+`approve-for-me` has Codex work inside the workspace-write sandbox and raise an approval request as usual when it needs to go outside it. But each request goes to Codex's own automatic review for a decision instead of waiting for a person, so this level can run unattended too. A denied operation doesn't run. After the denial, the agent adjusts on its own and carries on with a different approach. This shorthand has to be the entire `mode` value and can't be combined with keys such as `sandbox` or `search`.
+
+After automatic review denies several requests in a row within the same turn, Codex interrupts the turn, and the task stops at `on-hold` with the reason `agent-lifecycle-state-unavailable`. The diagnostic in `cdg task status <task-id> -w <workflow>{:sh}` includes the explanation Codex gave for the interruption. Deal with the cause it states, then run `cdg task recover <task-id> -w <workflow>{:sh}` to let the task continue. See [Agent session problems](/docs/troubleshooting/troubleshooting#hold-agent-session).
+
+In the key-value form, `ask-for-approval` sets when Codex requests approval, `sandbox` sets which locations commands can read and write, and `approvals_reviewer` sets who decides approval requests. For all keys and values, see [Permission mode syntax](/docs/reference/workflow-file#mode-codex). If you write a value outside the allowed set, `cdg dag validate{:sh}` reports an error right away, instead of leaving the task to fail when it starts.
+
+When the key-value form leaves out `approvals_reviewer`, the setting in each computer's `~/.codex/config.toml` decides who handles approval requests. The same workflow might therefore go to automatic review on one computer and stop to wait for a person on another. Set `mode` to `approve-for-me`, or include `approvals_reviewer` in the key-value form (`user` sends requests to you, and `auto_review` sends them to automatic review), and the behavior is the same on every computer.
+
+If you don't want automatic review letting operations through for you but still need an unattended run, you can set `ask-for-approval` to `never`, for example `ask-for-approval=never,sandbox=workspace-write,network_access=true`. Operations the sandbox allows run right away, operations it doesn't allow fail immediately, and the task doesn't stop to wait for a person. The tradeoff is that nobody approves the blocked operations after the fact, so the task may end without finishing its work. It's best to pair this with a verification task or a review gate.
+
+<Callout type="info">
+The `workspace-write` sandbox lets Codex read files anywhere but write only to the task's workspace, and by default it doesn't let commands access the network. Tasks that need the network, for example to install dependencies, download data, or reach a test service, need `network_access=true` in `mode`, and `sandbox=workspace-write` must be written explicitly along with it. Without network access, those commands fail, and the task may look complete without having finished its work. See [A task is "done" but did nothing](/docs/troubleshooting/troubleshooting#empty-result).
+</Callout>
+
+## Common questions
+
+### What do I do when a task stops to wait for approval?
+
+Run `cdg task view <task-id> -w <workflow>{:sh}` to enter the task agent's session, make your choice in its native interface, and then press Ctrl+C to exit. The task carries on from there. To confirm that a task really is waiting for approval, see [Is it stuck?](/docs/guides/run-and-monitor#is-it-stuck). The `mode` for this run is already fixed, so you still have to respond to each later approval request one by one. To keep future runs from stopping, change `mode` in the workflow file. It takes effect the next time you submit.
+
+### I set `auto`, but the task stops to wait for approval [#auto-unavailable]
+
+Most likely, auto mode isn't available for this task and Claude Code fell back to Manual mode. The most common cause is that the task's model doesn't support auto, for example because `model` names an older model such as Haiku 4.5. The same thing happens when an organization administrator has turned auto mode off or when auto mode is temporarily unavailable. In these cases, the task log shows the notices from Claude Code's status bar, such as `auto mode unavailable for this model` and `⏸ manual mode on`. Even when auto is available, Claude Code temporarily goes back to asking about each operation if the classifier blocks several operations in a row.
+
+For a task that has already stopped, enter the session and respond. For later workflows, switch the task to a model that supports auto, such as `sonnet` or `opus`. Or switch to `acceptEdits`, though it stops on more commands. If you can accept the risk of full access, switch to `bypassPermissions`.
+
+### Are the two agents' usage limits separate?
+
+Yes. When one agent hits its limit, tasks on the other keep running. CodeDAG credits don't depend on which agent or which model you choose: every task costs 1 credit. For how to use this to spread tasks across the two agents, see [The two usage limits are independent](/docs/guides/mixing-agents#usage-limits).
+
+## Related
+
+- [Intervene and Control](/docs/guides/intervene-and-control): When a task stops to wait for approval, enter its session to respond or to correct its course.
+- [Mix Claude Code and Codex](/docs/guides/mixing-agents): Have the two agents divide the work or review each other in one workflow.
+- [Workflow File Reference](/docs/reference/workflow-file): All values and defaults for `agent`, `mode`, `model`, and `effort`.

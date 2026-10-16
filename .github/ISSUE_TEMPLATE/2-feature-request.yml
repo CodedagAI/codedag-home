@@ -1,0 +1,34 @@
+name: Feature request
+description: Suggest a new feature or an improvement to CodeDAG.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues are public. Don't paste API keys, tokens or private code.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the [existing issues](https://github.com/CodedagAI/codedag-home/issues?q=is%3Aissue) and didn't find this suggestion.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you're trying to do, and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What you'd like CodeDAG to do. A sketch of the command or the workflow file is welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Workarounds you use now, or other approaches you've thought about.

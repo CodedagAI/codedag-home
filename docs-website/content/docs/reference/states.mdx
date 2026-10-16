@@ -1,0 +1,99 @@
+---
+title: State Meanings
+description: What each phase, status, substatus, and review result means, and whether to wait or act when you see it.
+icon: CircleDot
+---
+
+`cdg status{:sh}`, `cdg dag status{:sh}`, and `cdg task status{:sh}` describe the current state of workflows and tasks with a phase, a status, a substatus, and a review result. When you see `blocked`, `working`, or `draining`, you usually only need to wait. Tasks that are `on-hold`, `paused`, or `killed`, and tasks stopped at `done` waiting for your review, don't continue on their own and need you to act. For what to do, see [When you need to act](#what-to-do).
+
+## Phases [#phases]
+
+A [phase](/docs/concepts/how-it-works#phases) tells you whether a workflow or task has been submitted and whether it has been reviewed. Phases advance in the order `planning`, `submitted`, `reviewed`. The status board groups workflows and tasks by phase.
+
+| Phase | Meaning |
+|---|---|
+| `planning` | Not submitted yet, and doesn't run. A workflow that's been written but not submitted is in this phase. After you clear the review, workflows and tasks also return here and can be submitted again. |
+| `submitted` | Submitted, with no final review decision yet. The workflow is waiting in the queue, running, or waiting for review. Only workflows and tasks in this phase have a status and substatus. |
+| `reviewed` | Has a final review decision, and no longer runs. A workflow leaves the queue. Whether a task's result goes downstream depends on its [review result](#review-results). |
+
+Tasks and workflows each have a phase of their own. Tasks are submitted together with their workflow but reviewed one by one, so while a workflow is still `submitted`, any of its tasks that have already been reviewed are `reviewed`, and `cdg dag status{:sh}` lists them under `Reviewed Tasks`.
+
+`reviewed` means only that the review has reached a decision, not that the results are in your main branch. In isolated-branches mode, accepted results stay on the integration branch, `cdg/<workflow-name>/integration`. In shared-workspace mode, the results are uncommitted changes in the workspace. Merging into the main branch is up to you. See [Finish, Merge, and Clean Up](/docs/guides/finish-and-merge).
+
+## Task status and substatus [#task-status]
+
+Between submission and review, a task's current state is given by its [status and substatus](/docs/concepts/how-it-works#status). The status board shows them as a pair, such as `[pending] [blocked]`, where the first is the status and the second is the substatus. There are seven combinations:
+
+| Status | Substatus | Meaning |
+|---|---|---|
+| `pending` | `blocked` (waiting for upstream) | Not started yet. The task starts automatically once its conditions are met. Either it's waiting for every upstream task it depends on to finish and pass review, or its upstream tasks have all passed review but the number of tasks running at once has reached the concurrency limit, for example when no workspace is free at the moment in isolated-branches mode. While a workflow is still waiting in the queue, all of its tasks show this combination too. |
+| `pending` | `on-hold` | On hold. The task can't continue until you deal with the cause, which is shown on the `Reason:` line of `cdg task status{:sh}`. This can happen before the task starts, for example when the workspace has uncommitted changes or when a conflict from merging upstream results couldn't be resolved automatically. It can also happen partway through a run, for example when the Claude Code session stops because of an API error, and the task returns to `pending` in that case too. A downstream task also stops here when you choose to put downstream tasks on hold while reviewing its upstream task. |
+| `in-progress` | `working` | The task agent is working. The task also shows as `working` while the agent is waiting in its session for you to approve an operation. |
+| `in-progress` | `draining` (finishing its current step) | The task has been paused, but CodeDAG doesn't interrupt a task agent that's working. When the agent finishes its current turn, the task becomes `paused`. Until then, the agent may still modify files. |
+| `stopped` | `paused` | Paused. The task stays where it stopped and doesn't continue on its own. Running `kill` on a task that hasn't started also results in `paused`. |
+| `stopped` | `killed` | Killed. The task agent's current output is interrupted immediately, and the session is kept, so the task can resume in its original session later. |
+| `done` | `done` | Done running and waiting for review. By default the task is auto-accepted and enters `reviewed` right away, so this combination appears only for a moment. When the task's [review policy](/docs/reference/workflow-file#auto-accept-values) is `none`, the task stops here and waits for your review. In isolated-branches mode, a task that left no changes also stops here even when auto-accept is set, and `cdg dag status{:sh}` adds `zero output, awaiting manual review` at the end of its line. In shared-workspace mode, such a task is auto-accepted as usual and is marked only with `zero output`. |
+
+## Workflow status and substatus [#workflow-status]
+
+A workflow's status summarizes all of its tasks that haven't been reviewed yet. As long as any task is running, the workflow is `in-progress`. It shows as `pending`, `stopped`, or `done` only when no task is running. So to find out whether the whole workflow has stopped, first check whether its status is `in-progress`.
+
+### Some tasks are paused or killed [#partly-stopped]
+
+The three substatuses below exist only for workflows. They appear when you've paused, killed, or recovered only some of a workflow's tasks. In all three, the status is `in-progress`, which means the workflow hasn't fully stopped:
+
+| Status | Substatus | Meaning |
+|---|---|---|
+| `in-progress` | `draining-with-working` | Some tasks have been paused and are finishing their current step. The other tasks are still running normally. |
+| `in-progress` | `paused-with-active` | Some tasks are paused. The other tasks are still running or finishing their current step. |
+| `in-progress` | `killed-with-active` | Some tasks have been killed. The other tasks are still running or finishing their current step. |
+
+The paused or killed tasks don't continue on their own. The remaining tasks run as usual, and their downstream tasks start as usual too. Once no task is still running, the workflow becomes `[stopped] [paused]` or `[stopped] [killed]` and stays there, and the workflows behind it in the queue also wait until you recover or review it. To stop the whole workflow, run `cdg dag pause{:sh}` or `cdg dag kill{:sh}` on the workflow. For how the two differ, see [Control command syntax and applicable states](/docs/reference/cli/control#syntax).
+
+### Substatuses shared with tasks [#shared-substatus]
+
+The remaining substatuses have the same names as task substatuses and the same meanings, except that they describe the tasks in the workflow. For example, `[stopped] [paused]` means that no task is running and at least one task is paused. A few of these combinations carry extra meaning for a workflow:
+
+- `[pending] [blocked]`: No task is running, and some tasks are still waiting to start. A workflow that was just submitted and is waiting in the queue shows this combination. Partway through a run, if all the remaining tasks are waiting for an upstream task that's stopped at `done` waiting for your review, the workflow shows this combination as well, and in that case it doesn't continue on its own.
+- `[pending] [on-hold]`: No task is running, and at least one task is on hold. It can also mean that the workflow itself is on hold, for example because there aren't enough CodeDAG credits for it to start, or because the merge into the integration branch after all of its tasks ended produced a conflict that couldn't be resolved automatically. When the workflow itself is on hold, the reason is shown on the `Reason:` line of `cdg dag status{:sh}`, and `cdg status{:sh}` also lists it in parentheses after the workflow's file name.
+- `[done] [done]`: No task is waiting to start, running, or stopped, but review isn't necessarily over. Some tasks may be stopped at `done` waiting for your review. And when every task has been reviewed and the review policy for the workflow as a whole is `none` (`dagAutoAccepted: none`), the workflow stops here and waits for your decision on the whole workflow.
+
+A workflow's substatus can reflect only one kind of task. Running tasks take precedence over tasks on hold, so a workflow that shows `[in-progress] [working]` may still have tasks stopped at `on-hold`. In the same way, a `[stopped] [paused]` workflow may also have tasks on hold. For the actual state of each task, go by its line in `cdg dag status{:sh}`.
+
+## How done differs from reviewed [#done-vs-reviewed]
+
+`done` is a status: the task agent has finished its work, but the result hasn't been signed off on yet. `reviewed` is a phase: the review has reached a decision. Between the two stands a [review gate](/docs/concepts/review-gates#review-gate). By default the gate lets results through automatically, so `done` often appears only for a moment. A task or workflow that's stopped at `done` is waiting for your decision. Until you give one, the downstream tasks that depend on the task don't start, and a `[done] [done]` workflow stays in the queue, so the workflows behind it don't start either.
+
+In `cdg dag status{:sh}`, the two appear in different groups. A task at `done` is still under `Submitted Tasks`, shown as `[done] [done]`. A task that has entered `reviewed` moves to `Reviewed Tasks`, where only its review result is shown.
+
+## Review results [#review-results]
+
+Every task and workflow that enters `reviewed` carries a review result, which records the final decision. Accepted results remain available for use, while canceled or deferred results aren't passed downstream.
+
+| Result | Meaning |
+|---|---|
+| `accepted` | Accepted with `accept`. A task's result goes downstream. In isolated-branches mode, a workflow's results stay on the integration branch. |
+| `auto-accepted` | Accepted automatically by CodeDAG, according to the auto-accept settings. The effect is the same as `accepted`. |
+| `cancelled` | Canceled with `cancel`, meaning you don't want this result. In isolated-branches mode, a canceled task's result isn't passed downstream or merged into the integration branch. When a workflow is canceled, the integration branch returns to this workflow's base. |
+| `deferred` | Deferred with `defer`, meaning this step is left unfinished for now, to be dealt with later. The result is handled the same way as with `cancelled`. |
+
+If you choose to cascade the decision downstream when you review (`--downstream cascade`), the same `cancelled` or `deferred` result also goes to the downstream tasks that depend on the reviewed task, directly or indirectly, and haven't started yet, or to the workflows behind the reviewed workflow in the queue, even though they never ran.
+
+When you give a decision on a whole workflow, tasks that have started running but haven't been reviewed get the same result as the workflow. Tasks that haven't started get no review result. They enter `reviewed` together with the workflow without ever being reviewed individually. `cdg dag status{:sh}` lists them under `Unreviewed Tasks`, and the `Disposition:` line of `cdg task status{:sh}` shows `unreviewed`. Both places keep the status and substatus the tasks had when they stopped.
+
+In isolated-branches mode, what happens to the changes a canceled or deferred task has already made depends on the `--code` option you give in the review: they can be saved to a snapshot branch, committed, or discarded. Shared-workspace mode has no task branches. The changes stay in the workspace, downstream tasks still see them, and dealing with them is up to you. For the option's values and defaults, see [`--code`](/docs/reference/cli/review#code).
+
+A review result can't be changed directly to another one. To change the decision or run the workflow again, first clear its review, which returns the workflow to `planning`, and then submit it again. See [Clear the review and resubmit](/docs/reference/cli/review#clear-and-resubmit).
+
+## When you need to act [#what-to-do]
+
+With `blocked`, `working`, and `draining`, you usually only need to wait, because they move on to the next state on their own. The cases below need you to act. Otherwise the task, the workflow, and even the workflows behind it in the queue stay stopped:
+
+| What you see | What to do |
+|---|---|
+| A task or workflow is `on-hold` | First check the `Reason:` line with `cdg task status <task-id> -w <workflow>{:sh}`. When the workflow itself is on hold, check the `Reason:` line of `cdg dag status{:sh}`. Deal with the cause, then run `cdg task recover{:sh}` or `cdg dag recover{:sh}`. For the steps for each reason, see [A task or workflow is on hold](/docs/troubleshooting/troubleshooting#on-hold). |
+| A task is `paused` or `killed`, or a workflow is `stopped` or in one of the `-with-active` combinations | Use `unpause` or `recover` to let the stopped tasks continue. If you no longer need them, you can also end them directly with `cancel` or `defer`. For the command syntax, see [Control and Intervene](/docs/reference/cli/control). For how to choose among these operations, see [Intervene and Control](/docs/guides/intervene-and-control). |
+| A task is stopped at `done`, or a workflow is stopped at `[done] [done]` waiting for a decision | Check the result, then give a decision with `cdg task review{:sh}` or `cdg dag review{:sh}`. See [Review Tasks and Workflows](/docs/guides/review-tasks). For why a task stops here, see [A task is stuck at done](/docs/troubleshooting/troubleshooting#stuck-in-done). |
+| A task or workflow stays `blocked` for a long time | Find out what it's waiting for. For a task, look at the upstream tasks it depends on. For a queued workflow, look at the workflow at the head of the queue. If those are sitting at `done`, `on-hold`, or `stopped`, deal with them, and whatever was waiting continues automatically. For how to troubleshoot a queued workflow, see [Later workflows in the queue don't start](/docs/troubleshooting/troubleshooting#queue-waiting). In isolated-branches mode, a task stopped at `done` waiting for review still holds its workspace, which can also leave other tasks waiting for a free workspace. |
+| A task stays `working`, but its log has had no new output for a long time | The task isn't necessarily stuck. The agent may have dispatched subagents that are working in the background, or it may be waiting in its session for you to approve an operation. To tell which, see [Is it stuck?](/docs/guides/run-and-monitor#is-it-stuck). |
+| The substatus shows `working (stale owner)` | The task is still recorded as running, but the process that was running it is gone, for example after the machine restarted. The queue view of `cdg status{:sh}` doesn't show individual tasks, so in this case it only adds a `Diagnostic:` line below the workflow's row. Status commands only show information and don't restart scheduling. The task resumes in its original session only after you recover it as the `Diagnostic:` line says. See [After a machine restart or process crash](/docs/troubleshooting/troubleshooting#after-restart). |

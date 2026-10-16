@@ -1,0 +1,21 @@
+{
+  "title": "Guides",
+  "icon": "Compass",
+  "pages": [
+    "---Write Workflows---",
+    "writing-workflows",
+    "designing-tasks-and-prompts",
+    "agents-and-permission-modes",
+    "parallel-workspaces",
+    "mixing-agents",
+    "---Run and Observe---",
+    "run-and-monitor",
+    "intervene-and-control",
+    "---Review and Finish---",
+    "review-tasks",
+    "finish-and-merge",
+    "---Extend and Team---",
+    "guide-plugin",
+    "team-sharing"
+  ]
+}

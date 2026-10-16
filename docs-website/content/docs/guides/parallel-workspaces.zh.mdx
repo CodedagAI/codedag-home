@@ -1,0 +1,160 @@
+---
+title: 并行执行与工作区
+description: 准备 worktree 或 clone 副本并登记到 CodeDAG，让多个任务同时执行，也可以把主仓库留给自己继续开发。
+icon: Copy
+---
+
+在默认的隔离分支模式下，每个正在执行的任务独占一个[工作区](/zh/docs/concepts/workspaces-and-branches#workspaces)，所以想让几个任务同时执行，就要有几个工作区：主仓库算一个，其余靠你准备的副本。副本要你自己用 git worktree 或 git clone 创建、装好依赖，再运行 `cdg init{:sh}` 登记；CodeDAG 不会替你创建副本，也不会自己发现新增的副本。不编译、不运行测试的任务可以改用[共享工作区模式](/zh/docs/concepts/workspaces-and-branches#execution-modes)，它不需要副本。
+
+## 选 worktree 还是 clone [#worktree-or-clone]
+
+副本可以用 git worktree 创建，也可以用 git clone 创建，但一个项目只能选其中一种。大多数项目用 worktree 更省事：它共用主仓库的 Git 数据，任务分支在所有工作区里都能直接看到。
+
+clone 留给不适合用 worktree 的项目，例如带 submodule 的项目，[Git 文档](https://git-scm.com/docs/git-worktree#_bugs)不建议对它做多个 worktree 检出。用 clone 时有两点与 worktree 不同：
+
+- **任务分支只留在执行它的那个 clone 里。** 每个 clone 各有自己的分支，CodeDAG 在它们之间传递任务结果，但在某个 clone 里执行的任务，它的任务分支在主仓库里看不到。
+- **工作区里会多出一个名为 `codedag-mirror` 的远程。** 工作流开始执行后，它出现在主仓库和每个 clone 里，指向 CodeDAG 在本机维护的一个同步仓库，用来在各个 clone 之间传递分支，与你的远程仓库无关。保持它原样即可，改动它的地址会让任务停在 `on-hold`，处理办法见[同步仓库不可用](/zh/docs/troubleshooting/troubleshooting#mirror-unavailable)。
+
+## 准备副本 [#prepare-replicas]
+
+副本要事先用 Git 创建好，再像对待一份刚 clone 下来的项目那样装好依赖、复制本地配置，任务才能在里面正常执行。准备几个，按工作流里最多能同时开始的任务数来定：主仓库算一个，所以想同时执行三个任务，就再准备两个副本；打算把主仓库留给自己时（见[想在工作流运行时同时手动开发](#keep-main-repo)），要准备三个。同时执行的任务越多，Agent 的用量也消耗得越快，见[并发与限额](/zh/docs/account/cost-control#concurrency)。
+
+下面以 worktree 为例，在主仓库旁边准备两个副本。这两步也可以交给你的 Claude Code 或 Codex 去做，告诉它要几个副本、放在哪里、怎样安装依赖、要复制哪些文件即可。
+
+### 1. 创建副本
+
+在主仓库根目录运行下面的命令，把 `my-app` 换成你的项目目录名：
+
+```bash title="Terminal"
+git worktree add ../my-app-wt-1 -b wt-1
+git worktree add ../my-app-wt-2 -b wt-2
+```
+
+每个 worktree 检出一条自己的占位分支，任务开始时，CodeDAG 会把它切换到任务分支上。副本要放在主仓库目录之外：放在里面的话，主仓库的 `git status{:sh}` 会多出一个未跟踪的目录，CodeDAG 会因此认为主仓库不干净，分配到主仓库的任务就会停在 `on-hold`。
+
+用 clone 时，改为在主仓库根目录运行 `git clone . ../my-app-clone-1{:sh}`，每个副本运行一次。
+
+### 2. 让副本能运行项目
+
+照你平时的方式在每个副本里安装依赖，例如 `node_modules` 或 Python 虚拟环境，再把 `.env` 这类没有提交的本地配置文件复制过去，任务 Agent 在副本里构建和运行测试时要用到它们。
+
+装好之后，在每个副本里运行一次 `git status{:sh}`，确认它是干净的。CodeDAG 只在干净的工作区里切换分支，依赖目录或复制过来的文件如果没有被 `.gitignore` 忽略，就会被当作未提交的改动，分配到这个副本的任务会停在 `on-hold`。
+
+## 登记到 CodeDAG [#register]
+
+副本准备好之后，在主仓库根目录运行 `cdg init{:sh}`，把它们登记为这个项目的工作区。CodeDAG 不会自己发现新增或移除的副本，所以以后每次增减副本，都要重新运行一次。
+
+交互方式直接运行：
+
+```bash title="Terminal"
+cdg init
+```
+
+第一个问题 `Select your repository setup method` 决定副本的类型：
+
+- 用 worktree 时，选 `1. I have set up git worktrees for this project`。命令接着列出主仓库之外的 worktree，由你勾选要登记的那些，不需要输入路径。Claude Code 和 Codex 为自身会话创建的 worktree 默认不勾选，其余默认勾选；被勾选的 worktree 会用来执行任务，分支也会被切换，不想交给 CodeDAG 的用空格键取消，见[勾选要登记的 worktree](/zh/docs/reference/cli/init#select-worktrees)。
+- 用 clone 时，选 `2. I have cloned this repository into multiple directories`。先确认主仓库的路径，再输入各个 clone 的路径，用空格分隔。
+
+完成后，输出的开头在 `Associated Replica Repositories` 下列出登记的副本。
+
+非交互方式用参数直接给出路径，worktree 与 clone 的写法相同，路径都写绝对路径：
+
+```bash title="Terminal"
+cdg init --primary-workdir /Users/you/my-app --replica-workdirs /Users/you/my-app-wt-1 /Users/you/my-app-wt-2
+```
+
+每运行一次，登记的副本都会整体换成这次给出的列表，所以要把仍要使用的副本全部写上。其他选项见[初始化项目的选项](/zh/docs/reference/cli/init#options)。
+
+并发上限 `maxConcurrency` 要跟上工作区数，任务才会真的同时执行。第一次初始化时，`cdg init{:sh}` 把它写成 1 加副本数。项目已经初始化过、保留了原来的本机设置时，比如跑过快速开始，`cdg init{:sh}` 发现其中的并发上限低于工作区数，会问 `Update maxConcurrency to 3?`，默认 Yes，回车即可；非交互方式不询问，只输出警告，在命令里加上 `--max-concurrency 3` 就直接写入。重新初始化时已有文件怎样处理，见[重新初始化与保留已有配置](/zh/docs/reference/cli/init#reinitialize)。
+
+移除副本时，先用 `git worktree remove{:sh}` 删除它，再重新运行 `cdg init{:sh}` 更新登记。登记里还留着已经删掉的目录时，工作流不会因此停下：校验为它用得到的每个缺失目录给出一条警告，说明这个工作流会在其余工作区运行，并提示重新初始化，提交时按警告确认即可。只有这个工作流用得到的工作区目录全都不存在了，校验才报错；已经提交的工作流遇到这种情况会停在 `on-hold`，重新运行 `cdg init{:sh}` 之后用 `cdg dag recover{:sh}` 继续。
+
+## 同时执行几个任务由什么决定 [#concurrency]
+
+同时执行的任务数受两个限制：并发上限 `maxConcurrency`，以及可用的工作区数，实际取两者中较小的一个。所以并发上限设成 4 而只有两个工作区时，同时执行的任务最多两个。
+
+并发上限按下面的顺序取值，前面的有值就不再往后看：
+
+| 顺序 | 来源 | 说明 |
+|---|---|---|
+| 1 | 工作流文件顶层的 `maxConcurrency` | 只对这个工作流生效。 |
+| 2 | 项目设置中的 `maxConcurrency` | 工作流没写时使用。`cdg init{:sh}` 把它写在本机设置 `.codedag/local/settings.local.jsonc` 里；共享设置 `.codedag/settings.jsonc` 也可以写，两处都有时以本机设置为准，见项目设置的 [`maxConcurrency`](/zh/docs/reference/settings#max-concurrency)。 |
+| 3 | 默认值 1 | 以上都没有时，任务逐个执行。 |
+
+项目设置在提交时读取，改了设置只对之后提交的工作流生效。
+
+可用的工作区是登记过的主仓库和副本，减去工作流用 `excludeWorkspaces` 排除的那些。在隔离分支模式的工作流里写 `maxConcurrency: 0`，表示不另设上限，有几个可用工作区就同时执行几个，以后增减副本也不用再改它。共享工作区模式是个例外：所有任务都在同一个工作区里执行，同时执行的任务数只看 `maxConcurrency`，写 0 会让所有可以开始的任务一起开始，见 [`maxConcurrency`](/zh/docs/reference/workflow-file#max-concurrency)。
+
+例如，一个项目登记了主仓库和两个 worktree，一共三个工作区；工作流 `four-notes` 里有四个互不依赖的任务，写了 `maxConcurrency: 4`。这些任务互不相连，校验时会给出一条 `disconnected-dag` 警告，提醒你检查是否漏写了依赖；确认没有漏写，提交时对 `Submit anyway?` 选 Yes 即可。提交之后，`cdg dag status four-notes{:sh}` 显示：
+
+```bash title="Terminal"
+[TZ: -04:00] 2026-09-30 11:24:31
+
+Workflow: .codedag/dags/four-notes.yaml
+  Phase: 📤 submitted
+  Queue Position: 1
+  Status: 🟢 in-progress
+  Substatus: working
+
+Submitted Tasks (4):
+  🟢 [in-progress] [working]  Task 1: Write note one
+  🟢 [in-progress] [working]  Task 2: Write note two
+  🟢 [in-progress] [working]  Task 3: Write note three
+  🔘 [pending]     [blocked]  Task 4: Write note four
+
+Progress: 0/4 tasks completed (0%)
+```
+
+前三个任务各占一个工作区同时执行。任务 4 没有任何依赖，却显示为 `[pending] [blocked]`，因为它在等一个空出来的工作区。任务 1 完成并被自动接受后，主仓库空了出来，任务 4 随即在主仓库里开始。
+
+工作区从任务开始一直占用到它审核结束。停在 `done` 等你审核的任务，以及被暂停、被中断或停在 `on-hold` 的任务，都还占着自己的工作区，在它们结束之前，后面的任务只能等待。工作流里设了人工审核的节点越多，越需要及时审核，或者多准备一个副本。
+
+## 想在工作流运行时同时手动开发 [#keep-main-repo]
+
+在工作流文件顶层写上 `excludeWorkspaces: ["."]`，把主仓库排除在外，任务就只在副本里执行，所以项目至少要登记一个副本。主仓库不会被切换分支，你在里面留着的未提交改动也不会挡住工作流，你可以一边等结果，一边在主仓库里照常开发。
+
+```yaml title=".codedag/dags/my-workflow.yaml"
+excludeWorkspaces: ["."]   # 不使用主仓库，任务只在副本里执行
+baseRef: main              # 从工作流开始执行时 main 所指的提交出发
+# tasks 照常编写
+```
+
+排除主仓库时，最好同时写上 `baseRef`。没写 `baseRef` 时，起点是第一个副本在工作流开始那一刻检出的提交；副本执行过任务之后，会停在某条任务分支或集成分支上，起点就会落在那里，而不是你以为的 `main`。
+
+`baseRef` 在工作流开始执行时才解析。写了 `baseRef: main`，起点就是那一刻 `main` 所指的提交，与你在主仓库里切到了哪个分支无关；你在排队期间提交到 `main` 的改动也会包括在内，想固定在某个版本，就写标签或提交 ID，写法见 [`baseRef`](/zh/docs/reference/workflow-file#base-ref)。用 clone 时，`baseRef` 在第一个 clone 里解析，`main` 指的是那个 clone 自己的 `main`，要先在那个 clone 里把它更新到你想要的提交。
+
+工作流结束后，集成分支建在第一个副本里，也由那个副本检出。用 worktree 时，这条分支在主仓库里同样可见，在主仓库里直接运行 `git merge cdg/<工作流名>/integration{:sh}` 就能合入；用 clone 时，它在那个 clone 里，需要从那里取回。检查与合入的做法见[检查集成分支上的结果](/zh/docs/guides/finish-and-merge#inspect)和[合入主分支](/zh/docs/guides/finish-and-merge#merge)。
+
+反过来，也可以留一个副本给自己用，让主仓库照常参与执行：把那个副本的路径写进 `excludeWorkspaces`，相对路径以主仓库根目录为基准，例如 `excludeWorkspaces: ["../my-app-wt-2"]`，写法见 [`excludeWorkspaces`](/zh/docs/reference/workflow-file#exclude-workspaces)。
+
+## 在副本目录里运行命令 [#run-from-replica]
+
+在任何一个已登记的工作区里运行 `cdg`，操作的都是同一个项目：工作流名字解析到主仓库的 `.codedag/dags/`，提交进的是同一个队列，看到的也是同一份状态。任务在哪个工作区执行、从哪个提交开始，只由工作流的配置决定，与你在哪个目录运行命令无关；在副本里提交时，命令会多打印一段以 `Warning: You submitted this workflow from a registered replica/worktree.` 开头的提示，提醒的正是这一点。
+
+副本里没有 `.codedag/` 目录，工作流文件要到主仓库的 `.codedag/dags/` 下编辑。还没登记的副本不属于任何项目，在里面运行命令会提示 `Cannot find initialized CodeDAG project.`，按[登记到 CodeDAG](#register) 回到主仓库重新运行 `cdg init{:sh}` 即可。
+
+`cdg init{:sh}` 也一样落在同一个项目上：在已登记的副本里运行它，初始化的仍是这个副本所属的项目，副本里不会多出一份 `.codedag/`，见[在哪个目录运行](/zh/docs/reference/cli/init#where-to-run)。
+
+## 常见问题
+
+### 并发一直是 1
+
+最常见的原因有三个：只登记了主仓库；新增副本后重新初始化时，对更新并发上限的询问选了 No，本机设置里的 `maxConcurrency` 还是 1；任务之间有依赖，本来就不能同时执行。前两个按[登记到 CodeDAG](#register) 处理，完整的排查顺序见[并发只有 1](/zh/docs/troubleshooting/troubleshooting#concurrency-one)。
+
+### 主仓库的分支被切走了
+
+在隔离分支模式下这是预期的行为：主仓库也是一个工作区，运行期间会被切到任务分支上，工作流结束后停在集成分支上，你的主分支本身没有改动，见[工作流结束后，仓库停在哪](/zh/docs/guides/finish-and-merge#where-repo-stays)。不想让主仓库参与执行，就按[想在工作流运行时同时手动开发](#keep-main-repo)把它排除在外。
+
+### 副本里的任务测试失败，主仓库里却正常
+
+多半是副本里缺依赖或本地配置文件。按[准备副本](#prepare-replicas)的第 2 步，在每个副本里装好依赖、复制配置，并确认 `git status{:sh}` 是干净的。任务还在执行时，装好之后可以用 `cdg task view{:sh}` 进入会话，让它重新运行测试，见[进入会话、修改与退出](/zh/docs/guides/intervene-and-control#task-view)；任务已经完成、停在审核处时，可以[让它在现有结果上接着改](/zh/docs/guides/review-tasks#request-changes)。
+
+### 需要自己把并行任务的分支合并给下游吗
+
+不需要。在隔离分支模式下，CodeDAG 会在下游任务开始之前，自动把它依赖的上游已接受的结果合并进它的任务分支，冲突也先由 Agent 解决，所以工作流里不用另加合并任务，见[汇聚节点的合并与冲突](/zh/docs/concepts/workspaces-and-branches#merge-and-conflicts)。
+
+## 相关
+
+- [工作区与分支](/zh/docs/concepts/workspaces-and-branches)：工作区为什么是并行的前提，任务分支与集成分支怎样组织。
+- [第二个工作流：让它改代码](/zh/docs/get-started/second-workflow)：用主仓库加一个 worktree 跑通两个任务并行的完整过程。
+- [初始化项目](/zh/docs/reference/cli/init)：`cdg init` 的全部选项与重新初始化的规则。

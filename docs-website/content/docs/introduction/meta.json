@@ -1,0 +1,6 @@
+{
+  "title": "Introduction",
+  "icon": "Telescope",
+  "defaultOpen": true,
+  "pages": ["overview", "when-to-use", "design-philosophy"]
+}

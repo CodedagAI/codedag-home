@@ -1,0 +1,144 @@
+---
+title: Privacy Policy
+description: What CodeDAG collects and why, what stays on your computer, who processes data for us, and how to make a data request.
+---
+
+This Privacy Policy explains how Zillion AI LLC ("Zillion AI", "we", "us") handles personal data when you use CodeDAG: the command-line tool (the "CLI"), the web console at app.codedag.com and the website at codedag.com (together, the "Service"). Zillion AI is responsible for this data as its controller. This policy is part of our [Terms of Service](/terms).
+
+## The short version [#summary]
+
+- CodeDAG runs on your computer. The code in your repository, your run logs and your agents' sessions stay there.
+- When you submit a workflow and when it starts, the CLI sends us the workflow file, including its prompts, so that we can count credits. We discard the file after counting and keep only a checksum.
+- Claude Code and Codex talk to their model providers directly from your computer. That traffic doesn't pass through us.
+- The CLI and the web console contain no usage analytics. The website counts visits anonymously, without cookies.
+- We don't sell personal data or use it for advertising.
+
+## What we collect [#what-we-collect]
+
+### Account information [#account]
+
+You sign in with Google. From Google we receive your name, email address, profile picture and Google account ID, and we store them with your CodeDAG account, together with the sign-in tokens Google issues. We use them to create and identify your account and to show who is signed in.
+
+When you sign in to the web console, we record the session's IP address and browser user agent. When you sign in from the CLI, we issue tokens that keep that computer signed in; they expire after 90 days without use.
+
+### Payment information [#payment]
+
+Payments are handled by Stripe. You enter your card details on Stripe's checkout page and they go to Stripe; we never receive or store your full card number. To create your customer record at Stripe, we send Stripe your CodeDAG account ID, name and email address.
+
+Stripe sends us records of checkout, subscription and invoice events, which we keep as billing records. They include your Stripe customer and subscription IDs, plan, billing interval, subscription status, billing period dates and amounts, and may include the name, email address and billing details entered at checkout.
+
+### Usage and billing data [#usage]
+
+The CLI contacts our servers at two moments: when you submit a workflow, to check that you have enough credits, and when the workflow is about to start, to deduct them. Each request contains:
+
+- the full contents of the workflow file, including its prompts and any code written in it, plus its path relative to the repository and its format;
+- the IDs of the tasks to run;
+- the CLI version, your operating system and your processor architecture.
+
+**What we discard:** we read the workflow file only to count its tasks and compute a checksum. Its contents and path are then discarded. They aren't written to our database or to our logs.
+
+**What we keep:** for each workflow that starts, we keep a billing record with your account ID, the subscription charged, a SHA-256 checksum of the workflow file (the file can't be recovered from it), the task IDs, the number of credits deducted, the credit period, the time, the CLI version, operating system and processor architecture, and technical identifiers that prevent the same run from being charged twice. Your credit balance and current credit period are kept with your subscription. The check at submission leaves no record.
+
+### Waitlist [#waitlist]
+
+The waitlist form is hosted by Tally. It asks for your email address and, optionally, which coding agents you use and what you want to use CodeDAG for. It also records the language of the page you came from and which link brought you to the form. Your answers are stored in Tally. We use your email address only to invite you to the beta and to tell you when CodeDAG launches.
+
+### Server logs [#logs]
+
+Our hosting provider logs basic information about each request to codedag.com and app.codedag.com, such as the time, the address requested, the response status, and your IP address and user agent (for the CLI, the user agent includes its version). Our servers also log errors. We use these logs to run the Service, investigate problems and protect it from abuse. We don't log the contents of requests, so workflow files don't end up in logs.
+
+### Emails and feedback [#communications]
+
+When you write to us, we keep the correspondence, including your email address, your message and any attachments, to answer you and to keep a record. If you open an issue in our public GitHub repository, it's visible to everyone and handled under GitHub's terms.
+
+## What we don't collect [#not-collected]
+
+- **The code in your repository.** We don't collect your repository's source code. The workflow file is the one exception: as described above, it's sent with billing requests, including its prompts and any code you write into it. If a task needs a secret, put it in a local file and have the prompt tell the agent which file to read. Only the file path is then uploaded.
+- **Run logs and agent sessions.** Task logs, agent session content and agent output stay on your computer.
+- **Product usage analytics.** The CLI and the web console contain no usage analytics or telemetry. The CLI contacts our servers only for sign-in, account status and credits.
+- **Your agents' traffic.** Claude Code and Codex send code and context to their model providers directly from your computer, under those providers' terms. This traffic doesn't pass through CodeDAG's servers.
+
+## Website analytics [#analytics]
+
+codedag.com uses Vercel Web Analytics to understand how the site is used. It doesn't use cookies or store any identifier on your device. When you browse the site, information about your visit is sent as follows.
+
+- **Recipient:** Vercel Inc., which processes the data on our behalf.
+- **Information sent:** the address of the page you view (with filtered query parameters), the referring page, your operating system, browser and device type with their versions, an approximate location derived from your IP address (country, region and city), and the time. When you click the waitlist button or certain links to the documentation and the pricing page, the event name and the position of the link on the page (for example, `home-hero`) are also sent, with no personal information.
+- **Purpose:** to see, in aggregate, which pages are visited and which links are used, so that we can improve the site.
+- **How visitors are counted:** Vercel counts visitors with a hash of the request that is reset every day, so you can't be recognized across days or across other websites. Vercel states that the data it records isn't tied to an individual or to an IP address. We don't share these statistics with anyone else.
+
+## Cookies and local storage [#cookies]
+
+codedag.com doesn't set cookies. It remembers display preferences, such as the light or dark theme, in your browser's local storage, which stays on your device. app.codedag.com uses only the cookies needed to keep you signed in. We use no advertising or analytics cookies. Stripe's checkout and customer portal, and Tally's forms, are run by those providers, which may use their own cookies under their own policies.
+
+## How we use data [#use]
+
+We use personal data to:
+
+- provide the Service: sign-in, your account, credits and subscriptions;
+- process payments, prevent duplicate charges and reconcile our billing records with Stripe;
+- answer your emails and requests, including refund and data requests;
+- invite waitlist members to the beta and announce the launch;
+- keep the Service secure and investigate errors and abuse;
+- meet legal obligations, such as tax and accounting.
+
+Where the law requires a legal basis, we process account, usage and payment data to perform our contract with you; logs and website statistics on the basis of our legitimate interest in running and securing the Service and improving the site; records we're required to keep in order to meet legal obligations; and waitlist emails with your consent, which you can withdraw at any time.
+
+We don't sell personal data, share it for advertising, or use your workflow files, prompts or code to train AI models.
+
+## Service providers [#providers]
+
+We share personal data only with the providers that help us run the Service, and only what each of them needs:
+
+| Provider | What they do for us |
+|---|---|
+| Vercel | Hosts codedag.com and app.codedag.com; website analytics; server logs |
+| A managed database provider | Hosts our database of accounts, subscriptions and billing records |
+| Google | Sign-in with Google |
+| Stripe | Payments, subscriptions and invoices |
+| Tally | Waitlist forms |
+| A business email provider | Hosts our email inboxes |
+
+Each provider handles data under its own terms and privacy policy. We may also disclose personal data when the law requires it, or to protect the rights and safety of our users or the Service. If Zillion AI is involved in a merger, acquisition or sale of assets, personal data may be transferred as part of that transaction, and this policy will continue to apply to it.
+
+## International transfers [#transfers]
+
+Zillion AI is based in the United States, and our providers process data in the United States and in other countries where they operate. When you use the Service, your data is transferred to and processed in these countries, whose data protection rules may differ from those where you live.
+
+## How long we keep data [#retention]
+
+- **Account, subscription and billing records:** while your account exists. After your account is deleted, we keep billing records only as long as accounting, tax or other legal obligations require.
+- **Workflow file contents and paths:** not kept; they're discarded as soon as credits are calculated.
+- **Server logs:** kept for up to 30 days, then deleted. We may keep specific logs longer when needed to investigate a security incident or abuse, or to meet a legal obligation.
+- **Website analytics:** stored only as anonymous statistics; the daily visitor hash is discarded.
+- **Waitlist entries:** until we no longer need them for invitations and launch announcements, or until you ask us to remove them.
+- **Emails:** as long as needed to handle your request and keep a record of it.
+
+## Your rights [#rights]
+
+You can ask us to:
+
+- give you a copy of the personal data we hold about you, including in a portable format;
+- correct data that's inaccurate;
+- delete your account and personal data, or remove you from the waitlist;
+- restrict or object to certain processing, or withdraw a consent you've given.
+
+Depending on where you live, for example in the European Economic Area, the United Kingdom, California or Japan, you may have these rights by law. Send requests to <Email user="privacy" /> from the email address of your CodeDAG account, so that we can confirm the account is yours. We handle these requests by email; the web console doesn't offer self-service for them yet. If you want your account deleted and have an active subscription, cancel the subscription first so that it doesn't renew. Billing records we're required to keep are retained as described above.
+
+We won't treat you differently for exercising these rights. You can also complain to the data protection authority where you live.
+
+## Security [#security]
+
+Connections to our servers are encrypted with HTTPS, and we keep only the data described in this policy. No method of transmission or storage is completely secure. If a breach affects your personal data, we'll notify you as the law requires.
+
+## Children [#children]
+
+The Service is meant for people aged 18 or older (see the [Terms of Service](/terms#accounts)). We don't knowingly collect personal data from children. If you believe a child has given us personal data, write to us and we'll delete it.
+
+## Changes to this policy [#changes]
+
+We may update this policy. We'll post the new version on this page with a new effective date. If a change materially affects how we handle your data, we'll also tell you by email or in the web console before it takes effect.
+
+## Contact [#contact]
+
+For questions about this policy or your data, write to <Email user="privacy" />.

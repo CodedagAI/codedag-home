@@ -1,0 +1,121 @@
+---
+title: 团队共享
+description: 把 .codedag 仓库推到远程，与团队共享工作流和共享设置，并让新成员接入。
+icon: Users
+---
+
+工作流文件和项目设置都放在主仓库根目录的 `.codedag/` 里。它是项目的[边车仓库](/zh/docs/concepts/how-it-works#sidecar-repo)，一个独立于项目仓库的 Git 仓库，推送项目仓库时不会带上它，所以想让团队复用你写好的工作流，要把 `.codedag` 单独推到一个远程仓库。共享的只是工作流文件和共享设置：每位成员的队列、工作区、执行状态和日志都只在自己的电脑上，工作流也由各人用自己的账号提交、各自运行。
+
+## 共享什么，不共享什么 [#what-to-share]
+
+`.codedag/` 里除了 `local/` 目录，其余文件都可以提交共享。`local/` 里只有属于这台电脑的内容，`cdg init{:sh}` 生成的 `.codedag/.gitignore` 已经把它排除在版本管理之外。
+
+| 路径 | 内容 | 是否共享 |
+|---|---|---|
+| `dags/` | 工作流文件 | 共享 |
+| `settings.jsonc` | 共享设置，即团队的默认值 | 共享 |
+| `context/` | 多个工作流共用的背景材料，如需求、约定；目录由你自己创建，用法见[多个任务共用的背景](/zh/docs/guides/designing-tasks-and-prompts#shared-context) | 共享 |
+| `.gitignore`、`templates/` | `cdg init{:sh}` 生成的忽略规则和空白工作流模板 | 随其他文件一起提交 |
+| `local/` | 本机设置 `settings.local.jsonc`、工作流日志 `logs/` 等只属于这台电脑的文件 | 不共享 |
+
+## 把 `.codedag` 推到远程 [#push]
+
+`.codedag` 是一个普通的 Git 仓库，共享它和共享任何仓库一样：先提交，再添加远程，然后推送。CodeDAG 不会在这个仓库里提交、推送或拉取，什么时候同步由你决定。
+
+先在你们使用的代码托管平台上建一个空仓库，名字可以用 `<项目名>-codedag`，比如 `my-app-codedag`，一看就知道它配合哪个项目。然后在项目根目录执行下面的命令；`.gitignore` 已经排除了 `local/`，`git add -A` 只会加入可以共享的文件：
+
+```bash title="Terminal"
+cd .codedag
+git add -A
+git commit -m "Share CodeDAG workflows and settings"
+git remote add origin git@github.com:your-org/my-app-codedag.git
+git branch -M main
+git push -u origin main
+```
+
+之后谁修改了工作流或共享设置，就在 `.codedag` 里提交并推送，其他人拉取。拉取到的新版本只影响之后用 `cdg dag submit{:sh}` 提交的工作流；已经在排队或执行的那一次，仍按它提交时的定义执行。
+
+## 新成员接入 [#onboarding]
+
+新成员先把团队的 `.codedag` 仓库克隆到项目根目录，再运行 `cdg init{:sh}`。克隆来的文件都已经提交在 `.codedag` 仓库里，初始化把它们原样保留、不再逐个询问，仓库的远程地址和提交历史也保持原样；这台电脑自己的设置另外生成在 `local/` 里。
+
+开始之前，按[安装与登录](/zh/docs/get-started/installation)装好 CodeDAG 并登录账号。团队工作流里指定的 Agent 也要装好；初始化之后才装上的 Agent 直接就能用，不必重新初始化。
+
+### 1. 克隆项目仓库和 `.codedag`
+
+```bash title="Terminal"
+git clone git@github.com:your-org/my-app.git
+cd my-app
+git clone git@github.com:your-org/my-app-codedag.git .codedag
+```
+
+### 2. 初始化项目
+
+在项目根目录运行：
+
+```bash title="Terminal"
+cdg init
+```
+
+它会依次询问：
+
+1. **副本方式（`Select your repository setup method`）：** 按你自己电脑上的情况选，副本登记只在这台电脑上有效，不随 `.codedag` 共享。还没有准备副本时，选 `4. I don't need concurrent tasks, only sequential execution`；之后想让任务并行，再按[并行执行与工作区](/zh/docs/guides/parallel-workspaces)准备副本并重新运行 `cdg init{:sh}`。
+2. **默认 Agent：** Claude Code 和 Codex 都装了才会问，你的选择只影响这台电脑。团队在共享设置里写了 `defaultAgent` 时，团队的那一项标着 `(team default)` 排在第一位；选它，以后团队改了共享设置，你这里也跟着改。
+3. **CodeDAG Guide 插件：** 还没装过插件的 Agent 各问一次是否安装，各个安装范围的区别见[选择安装范围](/zh/docs/guides/guide-plugin#scopes)。
+
+### 3. 接受 Claude Code 的完全授权警告
+
+团队的工作流用完全授权（`bypassPermissions`）执行 Claude Code 任务，而你还没有在这台电脑上接受过这个警告时，要由你本人接受一次：在项目根目录运行 `claude --permission-mode bypassPermissions{:sh}`，选择 `Yes, I accept` 后退出，说明见[提前接受 Claude Code 的完全授权警告](/zh/docs/guides/agents-and-permission-modes#accept-bypass-warning)。
+
+### 4. 校验团队的工作流
+
+挑一个团队的工作流校验一下，把命令里的 `review-changes` 换成它的名字：
+
+```bash title="Terminal"
+cdg dag validate review-changes
+```
+
+看到以 `✔ Validation passed:` 开头的输出，就说明这台电脑能运行这个工作流。提示 `is not installed on this machine` 时，工作流用到的 Agent 还没装在你的电脑上，装好它再校验一次即可。
+
+### 已经初始化过这个仓库时 [#already-initialized]
+
+你之前已经在这个仓库里运行过 `cdg init{:sh}` 时，`.codedag` 已经存在，第 1 步的克隆会失败。先把原来的 `.codedag` 移到项目仓库之外，例如运行 `mv .codedag ../my-app-codedag-old{:sh}`，再克隆团队的仓库，并按第 2 步重新初始化。
+
+重新初始化会生成新的本机设置，你以前手动改过的地方，对照旧目录 `local/` 里的文件改回来。自己写过的工作流，复制到新的 `.codedag/dags/` 里就能继续使用。
+
+## 共享设置放什么 [#shared-settings]
+
+团队要统一的规则，比如审核策略，写进共享设置 `.codedag/settings.jsonc`；某位成员要和团队不同的取值，比如这台电脑上的默认 Agent 和并发数，写进本机设置 `.codedag/local/settings.local.jsonc`。两个文件都写了同一个字段时，以本机设置为准。
+
+审核策略 `taskAutoAccepted` 和 `dagAutoAccepted` 与各人的电脑无关，写进共享设置，就是所有成员的默认值。`defaultAgent` 和 `maxConcurrency` 写进共享设置，是团队的默认值：成员初始化时没有另选默认 Agent、另定并发上限，就一直用团队的值，团队之后改了，成员那边也跟着改。`availableAgents` 只在要限制项目能用哪些 Agent 时才写。例如，团队约定每个工作流的整体结果都要有人确认之后才算结束（见[审核门禁](/zh/docs/concepts/review-gates#review-gate)）：
+
+```jsonc title=".codedag/settings.jsonc"
+{
+  // 全部任务审核完成后，工作流停在工作流级审核门禁，等人给出结论
+  "dagAutoAccepted": "none"
+}
+```
+
+共享设置只是团队的默认值，并不强制执行。成员在本机设置里写了同名字段、工作流文件里写了对应的字段，或者提交时加了 `--dag-auto-accepted` 选项，都会覆盖它，完整的优先顺序见[默认值与覆盖顺序](/zh/docs/reference/workflow-file#precedence)，每个字段的取值见[项目设置](/zh/docs/reference/settings)。
+
+## 让共享的工作流在每台电脑上都能运行 [#portable-workflows]
+
+同一个工作流文件会在每位成员的电脑上各自运行，文件里凡是依赖本机情况的写法，换一台电脑就可能出错。最常见的是 Agent 和路径这两处。
+
+共享的工作流最好给每个任务都写明 `agent`，写了 `mode` 的任务更要如此，写法见[选 Agent](/zh/docs/guides/agents-and-permission-modes#choose-agent)。没写 `agent` 的任务交给项目的默认 Agent 执行：团队在共享设置里写了 `defaultAgent` 时，它是每位成员的默认值；没写时，默认 Agent 是每个人初始化时各自选的，同一个任务在你这里由 Claude Code 执行，到了同事那里可能换成 Codex。两家的 `mode` 写法又不相同，比如 `mode: bypassPermissions` 是 Claude Code 的写法，默认 Agent 是 Codex 的成员校验这个工作流时，会看到 `Invalid codex mode 'bypassPermissions'`。
+
+每位成员的任务都要读的材料，在工作流开始之前提交到项目仓库里最稳妥，任务在哪个工作区里都能用相对路径读到。prompt 里的绝对路径只在你自己的电脑上成立，放在 `.codedag/context/` 里的材料最容易遇到这个问题：`.codedag/` 只存在于主仓库，在副本里执行的任务要用指向主仓库的路径才能读到它，这样的路径无论写成相对路径还是绝对路径，都依赖本机的目录布局（见[多个任务共用的背景](/zh/docs/guides/designing-tasks-and-prompts#shared-context)）。
+
+## 多人各自运行 [#running-separately]
+
+每个人的队列、工作区和执行状态都只在自己的电脑上，几个人同时运行同一个工作流，彼此互不影响；成员之间共享的只是工作流文件和共享设置。你提交的工作流只排在你自己的队列里，只在你登记的工作区里执行，不会等待同事的工作流；它的状态、日志和审核结果也只保存在你的电脑上，同事看不到。
+
+执行的结果同样留在本地。CodeDAG 按工作流的名字给分支命名，两个人运行同一个工作流，各自的仓库里会出现同名的 `cdg/<工作流名>/` 分支。它们在本地互不干扰，但如果原样推到团队的项目远程，就会和同事推送的同名分支冲突；先把结果合入你自己的分支再推送，就不会撞名，合入的做法见[合入主分支](/zh/docs/guides/finish-and-merge#merge)。
+
+CodeDAG 额度按账号计算。工作流消耗的是提交它的账号的额度，每位成员用自己的账号提交，就各自消耗自己的额度。
+
+## 相关
+
+- [工作原理：边车仓库](/zh/docs/concepts/how-it-works#sidecar-repo)：`.codedag/` 为什么是一个独立的 Git 仓库。
+- [项目设置](/zh/docs/reference/settings)：共享设置与本机设置的每个字段、取值和覆盖规则。
+- [管理 CodeDAG Guide 插件](/zh/docs/guides/guide-plugin)：让团队成员的 Claude Code 与 Codex 学会使用 CodeDAG。

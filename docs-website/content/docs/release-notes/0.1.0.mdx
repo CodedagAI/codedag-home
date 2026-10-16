@@ -1,0 +1,71 @@
+---
+title: 0.1.0
+description: Release date to be determined
+icon: PartyPopper
+---
+
+0.1.0 is the first public release of CodeDAG, and anyone can sign up and use it during the public beta. It's built for developers who already write code with Claude Code or Codex. It suits multi-step, time-consuming development work that you don't want to babysit from a terminal: you write the work as a workflow and hand it to CodeDAG to run. Tasks run on your own computer and use the agents you've already installed and signed in to. If you're new to CodeDAG, start with the [Overview](/docs/introduction/overview).
+
+## Key capabilities
+
+### Orchestration
+
+You describe a set of development tasks in a workflow file. After you submit it, CodeDAG starts the tasks according to the dependencies between them. A task starts only after the tasks it depends on have finished and been accepted, and tasks that don't depend on one another can run at the same time. Workflow files are written in YAML or JSON and go in the project's `.codedag/dags/` directory. Each task spells out the prompt given to the agent and lists the tasks it depends on in `dependencies`. For how to write one, see [Write a Workflow File](/docs/guides/writing-workflows).
+
+`cdg dag validate{:sh}` checks a file's structure, dependencies, and fields before you submit. `cdg dag submit{:sh}` puts workflows in the project's queue, and you can submit several at once. Workflows in the same project run one after another in the order they were submitted, and the next one starts automatically when the one before it finishes, so you can line up several before you step away. For the rules of the queue, see [Submission and the queue](/docs/concepts/how-it-works#queue). Workflows run in the background, and closing the terminal doesn't affect them. To follow the progress and logs in your current terminal, add `--attach` when you submit.
+
+### Isolation and merging
+
+In the default isolated-branches mode, each task runs on its own task branch. CodeDAG merges the results step by step, and they end up on an integration branch dedicated to that workflow. Your main branch isn't modified. Before a downstream task starts, CodeDAG merges the accepted upstream results into its branch. Merge conflicts are handed to an agent to resolve, and if it can't resolve them, the task stops and waits for you to deal with them. The integration branch is named `cdg/<workflow-name>/integration`, and results are merged into it only after all tasks have been reviewed. When to merge into the main branch, and whether to merge directly or open a pull request, is your decision and yours to carry out. For how, see [Finish, Merge, and Clean Up](/docs/guides/finish-and-merge).
+
+Every task's changes come with a safety net. When you cancel, defer, or rework a task, the changes it has already made are saved to a snapshot branch by default, and you can still restore them later.
+
+To run tasks at the same time, you need to prepare worktree or clone replicas for the project as additional workspaces, and each task running at the same time occupies one workspace. See [Run in Parallel with Workspaces](/docs/guides/parallel-workspaces). For how branches and workspaces relate, see [Workspaces and Branches](/docs/concepts/workspaces-and-branches).
+
+For lightweight tasks that don't compile code or run tests, such as writing docs, translating, or doing research, you can set `executionMode` to `shared-workspace` in the workflow file and use shared-workspace mode instead. All tasks then run in the same workspace, with no branches, no merges, and no commits.
+
+### Review gates
+
+When a task finishes, its result has to be accepted before it goes to downstream tasks. Results are auto-accepted by default, so a workflow runs all the way to the end without stopping partway. You can also turn off auto-accept on any task or on the workflow as a whole, so that the process stops there and waits for your review. Three fields control auto-accept: `autoAccepted` on a task, `taskAutoAccepted` on a workflow, which applies to all of its tasks, and `dagAutoAccepted` for the workflow itself. Setting one to `none` makes the process stop and wait for a person. You can also override them temporarily at submission with `--task-auto-accepted` and `--dag-auto-accepted`. To decide where it's worth stopping for a person to review, see [Which nodes are worth closing the gate on](/docs/concepts/review-gates#when-to-close).
+
+Review actions fall into two groups. `accept`, `cancel`, and `defer` give a final decision. `revise`, `request-changes`, and `rework` call for more changes: with `revise` you make them yourself, with `request-changes` the agent keeps working on the existing result, and with `rework` the task is redone from the clean baseline it had before it started. You review a task with `cdg task review{:sh}` and a whole workflow with `cdg dag review{:sh}`, which has only the three final actions. For usage, see [Review Tasks and Workflows](/docs/guides/review-tasks).
+
+### Monitoring and control
+
+After you submit, you can check progress at the project, workflow, and task levels, and you can pause, kill, and recover execution at any time. `cdg status{:sh}` shows the project's queue, `cdg dag status{:sh}` shows the status of every task in a workflow, and `cdg task status{:sh}` shows the details of a single task. All three take `--watch` to keep refreshing. `cdg dag logs{:sh}` and `cdg task logs{:sh}` let you look back through the execution logs. Add `-f` to keep following them, or `-n` to see only the last few lines. For usage, see [Submit, Monitor, and Read Logs](/docs/guides/run-and-monitor).
+
+`cdg task view{:sh}` takes you into the task agent's native session, where you can watch what it's doing, talk to it directly, correct its course, or respond to approval requests. `pause`, `unpause`, `kill`, and `recover` work at both the workflow level and the task level. For a running agent task, `kill` only interrupts the current output and keeps the session, and a later `recover` continues in that same session. For when to use each one, see [Intervene and Control](/docs/guides/intervene-and-control).
+
+When CodeDAG runs into something it can't handle by itself, such as uncommitted changes in a workspace, a merge conflict that couldn't be resolved, or not enough CodeDAG credits when a workflow's turn comes to start running, the task or workflow stops at `on-hold` and reports the reason. After you've dealt with it, recover the task or workflow with `recover`. For how to handle each reason, see [A task or workflow is on hold](/docs/troubleshooting/troubleshooting#on-hold).
+
+### Agent integration
+
+Every task can be given to Claude Code or Codex, with its own agent, permission mode, model, and reasoning effort. Set `agent` to `claude` or `codex`. If you leave it out, the project's default agent is used. `mode` takes the chosen agent's own permission mode values, and it determines whether the task agent can run commands and modify files without your approval. `model` and `effort` are passed to the agent as is. For how to set these for unattended runs and for attended runs, see [Choose Agents, Models, and Permission Modes](/docs/guides/agents-and-permission-modes).
+
+A single workflow can mix the two agents, for example by having Claude Code implement and Codex review, or by having each write a version and then synthesizing the two. You can use `mergeConflictAgent` to specify which agent resolves merge conflicts. For common ways to divide the work, see [Mix Claude Code and Codex](/docs/guides/mixing-agents).
+
+### CodeDAG Guide plugin
+
+The CodeDAG Guide plugin teaches Claude Code and Codex how to use `cdg`. Once it's installed, you describe your goal in natural language, and the agent splits it into tasks, writes the workflow, submits it, and tracks progress. For how, see [Let Your Agent Orchestrate](/docs/get-started/let-your-agent-orchestrate). You can install the plugin as part of `cdg init{:sh}`. After that, use `install`, `status`, `update`, and `uninstall` under `cdg plugin{:sh}` to install it, check on it, update it, and uninstall it. See [Manage the CodeDAG Guide Plugin](/docs/guides/guide-plugin).
+
+## Known limitations
+
+0.1.0 can't do the following yet. For workarounds for conditional branching and loops, adding or removing tasks during a run, and the lack of a graphical interface, see [Current limitations](/docs/introduction/when-to-use#limitations).
+
+- **No conditional branching or loops, and no adding or removing tasks during a run.** A workflow's structure is fixed when you submit it, and the run uses the file as it was at that moment.
+- **No task timeouts.** A task that makes no progress for a long time isn't stopped automatically. You have to judge from its status and logs whether it's stuck. For how, see [Is it stuck?](/docs/guides/run-and-monitor#is-it-stuck).
+- **No graphical interface.** You view the status and logs of workflows and tasks on the command line.
+- **Only two agents are supported: Claude Code and Codex.**
+- **You can sign in only with a Google account, and you need a browser.** Sign-in has to be completed through a browser on the computer that runs CodeDAG. Environments without a desktop browser can't sign in for now, and so can't initialize projects or submit workflows. See [Without a desktop browser](/docs/account/login-and-account#no-browser). Support for these environments is planned for a later release.
+- **No credit top-up packs.** After your free credits run out or expire, you have to subscribe to keep submitting workflows. Subscription credits reset every month, and once you've used up the month's credits, you have to wait for the next reset. See [Credits, Subscription, and Charges](/docs/account/credits-and-subscription).
+- **Windows isn't supported during the public beta.**
+
+## Platforms and installation
+
+0.1.0 supports macOS and Linux, with builds for both Apple silicon and Intel Macs and for both x64 and arm64 Linux. All of them are installed and upgraded through Homebrew. CodeDAG is distributed as a standalone binary, so you don't need to install Node.js.
+
+Besides CodeDAG itself, you need Git and at least one of Claude Code or Codex. Claude Code must be version 2.1.196 or later, and the latest version verified with 0.1.0 is 2.1.292. For the installation, sign-in, and upgrade steps, see [Installation and Sign-In](/docs/get-started/installation).
+
+## Feedback
+
+If you run into a problem or have a suggestion while using 0.1.0, email us at <Email user="hi" /> or open an issue on [GitHub](https://github.com/CodedagAI/codedag-home/issues). Before you report a problem, try looking it up by symptom in [Troubleshooting](/docs/troubleshooting/troubleshooting). For what information to include when you ask for help, see [Collect information to get help](/docs/troubleshooting/troubleshooting#get-help).

@@ -1,0 +1,214 @@
+---
+title: 审核任务与工作流
+description: 任务或工作流停下等你审核时，怎样检查结果、选择审核动作，以及对整个工作流给出结论。
+icon: UserCheck
+---
+
+任务或工作流停在[审核门禁](/zh/docs/concepts/review-gates#review-gate)前时，流程会一直等你给出结论，依赖它的下游也跟着等。你的选择不只是接受或不接受：结果大体可用，可以自己改几处，或者让原来的会话接着改；方向错了，可以让一个全新的会话从头重做；确实不要的结果，改动默认也会存进快照，之后还能取回。
+
+页中的例子都用一个名为 `feature` 的工作流：任务 1 为新函数 `sub` 写接口契约，任务 2、3 都依赖任务 1，分别实现这个函数和编写测试。
+
+## 什么时候需要你审核
+
+默认情况下，任务和工作流完成后都会被自动接受，流程不会停下。只有下面三种情况，流程会停在门禁前等你：
+
+- **任务级门禁设为关。** 任务的审核设置为 `none` 时，它完成后停在 `done`。这个设置可能来自任务的 `autoAccepted`、工作流的 `taskAutoAccepted`、项目设置，或者提交时的 `--task-auto-accepted none`。
+- **任务没有留下任何改动。** 在隔离分支模式下，Agent 任务完成时一个文件都没改，即使门禁设为开，也会停下等你确认。
+- **工作流级门禁设为关。** 工作流设了 `dagAutoAccepted: none` 时，全部任务都有了结论、结果合并到集成分支之后，整个工作流停下等你，做法见[给整个工作流作审核决定](#dag-review)。
+
+哪个任务在等你，用 `cdg dag status{:sh}` 就能看出来。下面是 `cdg dag status feature{:sh}` 的输出：任务 1 设了 `autoAccepted: none`，已经完成，停在 `[done] [done]`；依赖它的任务 2、3 停在 `[pending] [blocked]`，等它的结论。因为没有留下改动而停下的任务，所在那一行的末尾还会多出 `— zero output, awaiting manual review`。
+
+```bash title="Terminal"
+[TZ: -04:00] 2026-09-30 11:07:25
+
+Workflow: .codedag/dags/feature.yaml
+  Phase: 📤 submitted
+  Queue Position: 1
+  Status: 🔘 pending
+  Substatus: blocked
+
+Submitted Tasks (3):
+  🔵 [done]        [done]  Task 1: 写接口契约
+  🔘 [pending]     [blocked]  Task 2: 实现 sub 函数
+  🔘 [pending]     [blocked]  Task 3: 编写 sub 的测试
+
+Progress: 1/3 tasks completed (33%)
+```
+
+提交时加了 [`--attach`](/zh/docs/guides/run-and-monitor#attach) 的话，跟随日志的终端会在这时停下，直接给出审核菜单。
+
+## 审核前先看结果 [#check-results]
+
+审核之前，先看任务留下的改动和它对自己工作的说明：改动在任务的工作区里，说明在任务日志的末尾；还有疑问时，可以进入它的会话追问。下面的做法针对默认的隔离分支模式；共享工作区模式下的检查方式见[共享工作区模式下审核有什么不同](#shared-workspace)。
+
+任务停在门禁前时，它的工作区仍然停在它的任务分支上。现场在哪里，由 `cdg task status 1 -w feature{:sh}` 的输出给出：`Workspace:` 是任务执行所在的目录，`Branch:` 是它的任务分支，`Base Commit:` 是它的[干净起点](/zh/docs/concepts/workspaces-and-branches#fallback)，也就是上游结果已经合并、任务还没动手的那个提交。
+
+任务留下的未提交改动，要等你接受任务时才由 CodeDAG 提交到任务分支上。所以任务 Agent 没有自己提交时，在这个工作区里用 `git status` 和 `git diff` 看到的就是这个任务的全部改动；它自己提交过时，拿 `Base Commit` 比较，一次就能看全，上游任务的结果不会混在里面：
+
+```bash title="Terminal"
+git -C <Workspace> diff <Base Commit>
+```
+
+想知道它做了什么、为什么这样做，看任务日志的末尾，任务 Agent 结束之前通常会总结自己的工作：
+
+```bash title="Terminal"
+cdg task logs 1 -w feature -n 50
+```
+
+看完仍有疑问，可以用 `cdg task view 1 -w feature{:sh}` 进入这个任务的会话，直接问它，进入与退出的方法见[进入会话、修改与退出](/zh/docs/guides/intervene-and-control#task-view)。
+
+## 按你的判断选择动作 [#choose-action]
+
+审核动作分两类：`accept`（接受）、`cancel`（取消）、`defer`（推迟）给出最终结论，任务进入 `reviewed`，就此结束；`revise`（自行修订）、`request-changes`（要求修改）、`rework`（重做）不给结论，任务接着改，改完回到门禁前。按你对结果的判断，这样选择：
+
+| 你对结果的判断 | 动作 | 之后会怎样 |
+|---|---|---|
+| 满意 | `accept` | 任务结束，结果交给下游 |
+| 大体可用，想自己改几处 | 直接在工作区里改，改完 `accept` | 你的修改和 Agent 的改动一起提交，结果交给下游 |
+| 大体可用，想让 Agent 接着改 | `request-changes` | 原来的会话在现有结果上接着改，改完回到门禁前 |
+| 方向错了，想从头再来 | `rework` | 当前结果存进快照，全新的会话从干净起点重做，做完回到门禁前 |
+| 不要这个结果了 | `cancel` | 任务结束，它的改动不交给下游，下游怎么办由你选择 |
+| 这一步这次先不做 | `defer` | 与 `cancel` 相同，但默认连同下游一起推迟 |
+
+命令的写法是 `cdg task review <动作> <任务 ID> -w <工作流>{:sh}`，也可以省去 `review`，例如 `cdg task accept 1 -w feature{:sh}`。
+
+### 满意：accept
+
+`accept` 接受结果，任务进入 `reviewed`，依赖它的下游就可以开始，并在这个结果之上工作。
+
+```bash title="Terminal"
+cdg task review accept 1 -w feature
+```
+
+接受时，CodeDAG 把任务工作区里还没提交的改动提交到任务分支上，提交说明默认是任务标题；用 `-m` 写上你的审核说明时，它同时用作提交说明。接受是最终结论，之后不能更改，原因见[审核结论不能更改](/zh/docs/concepts/review-gates#no-undo)；接受之后才发现结果有问题，补救的办法见[任务已经有了审核结论，才发现问题](/zh/docs/troubleshooting/troubleshooting#after-conclusion)。
+
+### 想自己动手改
+
+任务停在门禁前时，直接在它的工作区里修改，改完用 `accept` 接受，你的修改会和任务 Agent 的改动一起提交到任务分支上。修改期间，让这个工作区保持在任务分支上，CodeDAG 接受任务时会检查这一点。
+
+这时不必先执行 `revise`：任务已经停在 `done`，执行它不会改变什么。想先把 Agent 的改动存进快照或直接丢掉、自己从头写时才用它，加上 `--code snapshot` 或 `--code discard`，各取值的含义见 [`--code`](/zh/docs/reference/cli/review#code)：
+
+```bash title="Terminal"
+cdg task review revise 1 -w feature --code snapshot
+```
+
+### 想让它在现有结果上接着改：request-changes [#request-changes]
+
+结果大体可用但还差一些时，用 `request-changes` 把修改要求交给原来的会话，让它在现有结果上接着改；改完之后，任务再次回到门禁前。
+
+```bash title="Terminal"
+cdg task review request-changes 1 -w feature -m "保留现有的函数签名和返回值说明；补充 a、b 不是数字时 sub 的行为，并给出两个调用示例。"
+```
+
+`-m` 的内容会原样交给任务 Agent，写法和写 prompt 一样：说清哪些成果要保留、哪些地方要怎样改、改到什么程度算完成。不写 `-m` 时，CodeDAG 会发一段内置的要求，让 Agent 重读原始任务，自己找出还没满足的地方接着改；你只知道结果不够好、又说不出具体问题时，可以这样用。
+
+提出要求之后，任务的状态变回 `working`。改之前，CodeDAG 默认先把当前改动提交到任务分支上，所以新一轮改了什么，之后用 `git diff` 就能单独看出来；不想先提交，加上 `--code none`。
+
+改完之后，任务重新变为 `done`，按原来的审核设置再审核一次。门禁设为关时，它会再次停下等你，你可以接着提出要求，直到满意为止；门禁设为开、只是因为没有留下改动才停下的任务，这次留下了改动，就会被自动接受。
+
+想和它来回交流着改，也可以进入它的会话直接说，两种方式怎样选见[选择观察与修改方式](/zh/docs/guides/intervene-and-control#choose-intervention)。
+
+### 想推翻重做：rework
+
+`rework` 把当前结果存进快照分支，让任务分支回到任务开始前的干净起点，再开一个全新的会话重做这个任务；你的修改意见会一并交给新会话。
+
+```bash title="Terminal"
+cdg task review rework 2 -w feature -m "上一版顺手改动了已有的函数。这次只新增 sub，按接口契约处理参数，不要改动其他函数。"
+```
+
+干净起点保留了上游任务合并进来的结果，退回的只是这个任务自己的改动，含义见[不满意时的退路](/zh/docs/concepts/workspaces-and-branches#fallback)。新会话收到的是原来的 prompt，加上你在这个任务上提过的全部修改意见；重做开始后，`cdg task view{:sh}` 进入的就是这个新会话。
+
+上一次的结果留在快照分支里，可以用来对照，或者取回其中有用的部分，见[取回快照中的部分改动](/zh/docs/reference/branches-and-files#restore-from-snapshot)；确定不需要留档时，加上 `--code discard` 直接丢弃。
+
+和 `request-changes` 相比，`rework` 不受上一次的思路和对话影响，适合方向错了、在原结果上修补不如重来的情况。重做不额外消耗 CodeDAG 额度，见[在关键节点返工，少整体重跑](/zh/docs/account/cost-control#rework)。`rework` 只能在隔离分支模式下使用。
+
+### 不要这个任务了：cancel [#cancel]
+
+`cancel` 结束任务，不把它的改动交给下游。取消时，还要决定依赖它的下游怎么办。
+
+```bash title="Terminal"
+# 取消任务 1，依赖它的任务 2、3 一并取消
+cdg task review cancel 1 -w feature --downstream cascade
+```
+
+任务有改动时，CodeDAG 默认先把改动存进一条快照分支，名字形如 `cdg/<工作流名>/snapshots/t<任务 ID>-<标题>-<时间>`，再让任务分支退回干净起点。所以取消之后，仓库里会多出这样一条分支，事后改变主意，还能从里面取回改动，见[取回快照中的部分改动](/zh/docs/reference/branches-and-files#restore-from-snapshot)。确定不需要时，加上 `--code discard`，改动直接丢弃，不建快照分支。
+
+下游的处理用 `--downstream` 指定：
+
+- `proceed`（继续）：下游照常执行，就像这个任务不存在一样。它们拿到的是被取消任务的上游结果，不包括它自己的改动。
+- `hold`（搁置）：直接依赖它的下游停在 `on-hold`，等你决定。还要执行时，用 `cdg task recover --below 1 -w feature{:sh}` 放开它们；不要了，就同样取消或推迟，见[下游被搁置](/zh/docs/troubleshooting/troubleshooting#downstream-hold)。
+- `cascade`（级联）：直接或间接依赖它的下游任务全部一并取消，不再执行。
+
+不写 `--downstream`、又有下游依赖这个任务时，命令会在终端里让你选择；在脚本里或让 Agent 执行这类没有交互终端的场合，命令不做任何改动就报错，所以要写明这个选项。
+
+### 先放一放：defer
+
+`defer` 表示这一步这次先不做，留到以后处理。它对代码的处理和 `cancel` 相同，改动默认存进快照分支，不交给下游；不同的是，不写 `--downstream` 时它默认 `cascade`，依赖它的下游全部一并推迟。只想推迟这一个任务、让下游照常执行，就写明 `--downstream proceed`。
+
+除了这个默认值，推迟和取消在这次执行里的效果一样，区别在于记下的结论：`deferred` 表示以后还要做，`cancelled` 表示不要了。之后要接着做被推迟的部分，把它写进新的工作流，见[只补做其中几个任务](/zh/docs/guides/finish-and-merge#continue-remaining)。
+
+## 任务没有停在门禁前时 [#not-at-gate]
+
+审核动作不只用于完成后停在门禁前的任务，下面几种任务也可以直接审核：
+
+- **被中断或暂停的任务：** 不必先恢复，可以直接接受已有的结果、结束它，或者用 `request-changes` 让它带着你的要求接着做。对它执行 `revise`，它会回到 `done`，等你改完再给结论。
+- **还在执行的任务：** 给审核命令加上 `-k`，先中断它再审核；或者加上 `-p`，等它做完当前这一步再审核，见[`-k` 与 `-p` 的说明](/zh/docs/reference/cli/review#stop-before-review)。只是想调整它的方向时，还可以进入它的会话直接说，见[选择观察与修改方式](/zh/docs/guides/intervene-and-control#choose-intervention)。
+- **还没开始就被搁置的任务：** 因为工作区不干净、固定分支名被占用等原因停在启动前准备上的任务，还没有结果可审，但可以直接用 `cancel` 或 `defer` 结束，不必先清理现场，CodeDAG 也不会动那个工作区里的改动。`accept`、`revise`、`request-changes`、`rework` 对它们会被拒绝，要先处理原因、恢复任务，见[任务或工作流停在 on-hold](/zh/docs/troubleshooting/troubleshooting#on-hold)。
+
+## 一次审核多个任务
+
+命令后面可以跟多个任务 ID，也可以用任务选择器按依赖关系圈出一组任务，它们会得到同一个动作和同样的选项。下面两条命令选中的都是任务 2、3：
+
+```bash title="Terminal"
+cdg task accept 2 3 -w feature
+# --below 1 选中任务 1 的全部下游，不含任务 1 本身
+cdg task accept --below 1 -w feature
+```
+
+在审核命令里，除 `--only` 外，每个选择器只能跟一个任务 ID。选中的任务里如果有已经给出结论的，命令会跳过它们，并先询问是否继续处理其余任务。用选择器圈中的任务里有还没开始执行的，`accept` 还会先问你是否不运行就把它们记作已接受，默认不接受；逐个点名的任务不问这一句。没有交互终端作答时，这两种询问都让命令报错，确认过要这样做就加 `-y`。选择器的完整写法见[任务选择器](/zh/docs/reference/cli#task-selectors)。
+
+## 给整个工作流作审核决定：dag review [#dag-review]
+
+工作流级审核对整套结果下结论：用 `accept`、`cancel` 或 `defer` 之后，工作流进入 `reviewed`、离开队列，排在后面的工作流才会开始。它和任务级审核的关系见[审核门禁](/zh/docs/concepts/review-gates#review-gate)。
+
+设了 `dagAutoAccepted: none` 的工作流，在全部任务都有了结论、结果合并到集成分支之后停在门禁前：`cdg status{:sh}` 里它显示为 `[done] [done]`，`cdg dag status{:sh}` 里所有任务都已列在 `Reviewed Tasks` 一组。集成分支上已经是合并好的结果，给出结论之前先在那里检查：`cdg dag status{:sh}` 的输出里有 `Integration Workspace:`（集成分支所在的目录）、`Integration Branch:` 与工作流起点的 `Base Commit:`，据此比较整套改动，做法见[检查集成分支上的结果](/zh/docs/guides/finish-and-merge#inspect)。
+
+| 命令 | 集成分支上的结果 | 不写 `--downstream` 时，队列中后面的工作流 |
+|---|---|---|
+| `cdg dag review accept feature{:sh}` | 保留合并好的结果 | 照常开始 |
+| `cdg dag review cancel feature{:sh}` | 回到本次工作流的起点，默认先把整套结果存进快照分支 | 有后续工作流时，在终端里让你选择 |
+| `cdg dag review defer feature{:sh}` | 与 `cancel` 相同 | 全部一并推迟 |
+
+三个命令都可以省去 `review`，例如 `cdg dag accept feature{:sh}`。这里的 `--downstream` 作用于队列中排在它后面的所有工作流：`proceed` 让它们照常开始；`hold` 让它们停在 `on-hold`，之后用 `cdg dag recover <工作流>{:sh}` 放开；`cascade` 让它们得到同样的结论，不再执行。
+
+<Callout type="warn">`cdg dag review defer{:sh}` 不写 `--downstream` 时，队列中排在它后面的所有工作流都会被一并推迟，不再执行。只想推迟这一个工作流，写明 `--downstream proceed`。</Callout>
+
+共享工作区模式下没有集成分支，工作流级审核的区别见[共享工作区模式下审核有什么不同](#shared-workspace)。
+
+`dag review` 不必等到工作流级门禁才能用，它随时可以结束一次执行。已经有结论的任务保持原来的结论；已经执行过、还没有结论的任务，得到和工作流相同的结论，例如 `cdg dag review accept{:sh}` 会接受它们；还没开始的任务不再执行，也不会得到审核结果。仍有任务在执行时，加 `-k` 先中断它们，或者加 `-p` 等它们做完当前这一步，见[`-k` 与 `-p` 的说明](/zh/docs/reference/cli/review#stop-before-review)。
+
+## 常见问题
+
+### 已经给出结论的任务，还想再改怎么办
+
+结论给出之后，在这次执行里就不能再改。能补救的是代码结果，不是审核结论：等这次执行结束，用 Git 处理任务的改动，再把要重做的部分写进新的工作流，做法见[任务已经有了审核结论，才发现问题](/zh/docs/troubleshooting/troubleshooting#after-conclusion)。
+
+### 提出修改要求之后，任务停在了 on-hold
+
+`request-changes` 或 `rework` 的要求没能交给任务 Agent 时，任务停在 `on-hold`，`cdg task status 1 -w feature{:sh}` 的 `Reason:` 行显示 `continuation-dispatch-failed`。执行 `cdg task recover 1 -w feature{:sh}`，CodeDAG 会重新投递同一个要求，不必再提一次。其他原因的处理见[Agent 会话问题](/zh/docs/troubleshooting/troubleshooting#hold-agent-session)。
+
+### 共享工作区模式下审核有什么不同 [#shared-workspace]
+
+共享工作区模式下没有任务分支，所有任务直接在同一个工作区（默认是主仓库）里写文件，所以审核只决定流程怎样继续，不处理文件：
+
+- 任务级可以用 `accept`、`cancel`、`defer`、`revise`、`request-changes`，不能用 `rework`；任务级和工作流级都不能加 `--code`。
+- 没有留下改动的任务不会停下等你确认，照常自动接受。工作区在它运行期间没有变化时，`cdg dag status{:sh}` 的任务行末尾标上 `— zero output`，任务日志里也写一条警告。它运行期间别的任务或你自己改过这个工作区，这个标注就看不出来；要可靠地拦住没有产出的任务，用隔离分支模式，或者设 `taskAutoAccepted: none` 逐个人工审核。
+- 取消或推迟一个任务，不会撤回它写下的文件，下游照样看得到；需要撤销时，自己用 Git 处理工作区里的改动。
+- 审核前在工作区里用 `git status` 看到的，是所有任务的改动，没法按任务区分，可以对照 prompt 里约定的输出文件逐个检查。
+- 没有集成分支，工作流级审核同样只给出流程上的结论，文件仍留在工作区里，由你检查后自己提交或撤销。
+
+## 相关
+
+- [审核门禁与自动接受](/zh/docs/concepts/review-gates)：审核门禁设在哪里、自动接受怎样设置，以及两类审核动作的区别。
+- [收口、合入主分支与清理](/zh/docs/guides/finish-and-merge)：工作流审核结束之后，怎样检查集成分支、合入主分支和再运行一次。
+- [审核](/zh/docs/reference/cli/review)：审核命令的全部选项、默认值与允许的组合。

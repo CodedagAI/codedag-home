@@ -1,0 +1,188 @@
+---
+title: How CodeDAG Works
+description: How CodeDAG queues a set of tasks written as a workflow, has agents carry them out, and hands the results back to you.
+icon: Workflow
+---
+
+You describe a set of interdependent development tasks in a workflow file and submit it to CodeDAG, which then works through them in the background on your computer. It starts a fresh Claude Code or Codex session for each task in dependency order, and by default each session works on its own branch. A task's result goes to downstream tasks once it passes review, and in the end everything is merged into an integration branch. Your main branch stays untouched. Results pass review automatically by default, so if everything goes to plan, you're needed only for the manual reviews you've set up yourself and for the final merge into the main branch. A project runs only one workflow at a time, and workflows submitted later wait in the queue.
+
+## Workflows [#workflow]
+
+When a goal is too big for a single agent session to do well, you split it into several tasks and give each one to its own session. Those tasks depend on one another, and if you start the sessions by hand, one at a time and in the right order, you have to stay at your terminal the whole time. With CodeDAG, you write the tasks and their dependencies into a file ahead of time, and CodeDAG starts each task as its dependencies allow. The set of tasks described by one such file is a **workflow**. For how big a task should be, see [Why split work into tasks, and how far](/docs/concepts/tasks-and-sessions#why-split).
+
+The word "workflow" means different things in different contexts. One common meaning is the series of steps for completing a single task, often written into a prompt or a skill document. Those steps mostly run one after another, usually in the same session, with nothing isolating one from the next. A CodeDAG workflow differs in two ways. First, it's coarser-grained: the task that an entire workflow of that kind completes is a single node here. How the task gets done internally, including which tools it calls, isn't reflected in the workflow's structure. That's left to the agent running the task. Second, tasks can run in parallel and are isolated from one another: each task is a fresh session that works on its own branch by default, even when one task runs right after another.
+
+Tasks and their dependencies form a directed acyclic graph (DAG), which is where the product name CodeDAG and the `dag` in its commands come from. The docs say "workflow" and the commands say `dag`, but they mean the same thing.
+
+Here's a common diamond-shaped workflow. Task 1 reads the spec and writes a contract that defines the modules and interfaces to implement. Tasks 2 and 3 both depend on task 1: one writes tests from the contract, and the other writes the implementation. Task 4 waits for both to finish, then runs the tests and fixes failures until they all pass.
+
+export const diamondChart = `flowchart LR
+  t1["Task 1<br/>Draft the interface contract"] --> t2["Task 2<br/>Write tests from the contract"]
+  t1 --> t3["Task 3<br/>Implement the contract"]
+  t2 --> t4["Task 4<br/>Make the tests pass"]
+  t3 --> t4`;
+
+<Tabs items={['Diagram', 'Code']}>
+  <Tab value="Diagram">
+    <Mermaid chart={diamondChart} />
+  </Tab>
+  <Tab value="Code">
+    <DynamicCodeBlock lang="mermaid" code={diamondChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+As a workflow file, it looks like this:
+
+```yaml title=".codedag/dags/spec-to-code.yaml"
+tasks:
+  - id: 1
+    title: Draft the interface contract
+    prompt: Read docs/spec.md and write docs/contract.md, defining the modules and interfaces to implement.
+  - id: 2
+    title: Write tests from the contract
+    dependencies: [1]
+    prompt: Write tests for every interface defined in docs/contract.md.
+  - id: 3
+    title: Implement the contract
+    dependencies: [1]
+    prompt: Implement the modules defined in docs/contract.md.
+  - id: 4
+    title: Make the tests pass
+    dependencies: [2, 3]
+    prompt: Run all the tests and fix any failures until they all pass.
+```
+
+This graph captures an arrangement that a straight line can't. Tasks 2 and 3 share only the contract from task 1 and are otherwise unrelated, so they can run at the same time as long as there are free [workspaces](/docs/concepts/workspaces-and-branches#workspaces). A workspace is a checkout of the code that a task runs in. Task 4, on the other hand, has to wait for both of them.
+
+## Who does what [#roles]
+
+Once a workflow is submitted, CodeDAG drives the process, task agents carry out the tasks, and Git holds all the results. If everything goes to plan, a person is needed at only two points: the nodes you've set to wait for your sign-off, and the final merge into the main branch. This clear division of responsibilities is what makes unattended runs possible:
+
+- **You:** Decide what gets done, decide which nodes should stop for a person to sign off, and make the final call on whether to merge the results into the main branch.
+- **Orchestrator:** Whoever operates `cdg`. The orchestrator writes workflows, submits them, tracks progress, and reviews results. That can be you, or it can be Claude Code or Codex with the CodeDAG Guide plugin installed, which takes your description of the goal and operates `cdg` on your behalf. In that case it's called an **orchestrating agent**. An orchestrating agent only orchestrates. The code in the workflow is still written by task agents. To work this way, see [Let Your Agent Orchestrate](/docs/get-started/let-your-agent-orchestrate).
+- **CodeDAG:** Runs in the background on your computer and drives the process. It manages the queue, assigns each task a workspace and a branch, starts the task agent's session, determines when a task is finished, auto-accepts the result or stops for review according to the rules, and merges the results step by step.
+- **Task agent:** The Claude Code or Codex session that carries out the prompt in a task. Every task is a fresh session that knows only its own prompt and the contents of the workspace it runs in. [Tasks and Sessions](/docs/concepts/tasks-and-sessions) explains why.
+- **Git:** In the default isolated-branches mode, each task's changes stay on its own task branch, and the results of the whole workflow are merged into an integration branch. Your main branch stays untouched, and you decide when to merge.
+
+In the default isolated-branches mode, here's everything that happens after a workflow is submitted:
+
+export const rolesChart = `sequenceDiagram
+  participant O as Orchestrator
+  participant C as CodeDAG
+  participant A as Task agent
+  participant G as Git repository
+  O->>C: Submit the workflow
+  Note over C: Waits in the queue,<br/>starts when its turn comes
+  loop Each task whose dependencies are met
+    C->>G: Assign a workspace and a task branch,<br/>merge upstream results
+    C->>A: Start a fresh session<br/>and send the prompt
+    A->>G: Do the work<br/>on the task branch
+    C->>C: Determine that<br/>the task is finished
+    opt Manual review is set<br/>for this task
+      C-->>O: Stop and wait for review
+      O->>C: Review the task
+    end
+  end
+  C->>G: After all tasks are reviewed,<br/>merge into the integration branch
+  opt Manual review is set<br/>for the workflow
+    C-->>O: Stop and wait for review
+    O->>C: Review the whole workflow
+  end
+  Note over C: The workflow leaves the queue<br/>and the next one starts
+  O->>G: You check the integration branch<br/>and merge into the main branch`;
+
+<Tabs items={['Diagram', 'Code']}>
+  <Tab value="Diagram">
+    <Mermaid chart={rolesChart} />
+  </Tab>
+  <Tab value="Code">
+    <DynamicCodeBlock lang="mermaid" code={rolesChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+Each part of the diagram has its own page. [Tasks and Sessions](/docs/concepts/tasks-and-sessions) covers how a fresh session runs a task, [Workspaces and Branches](/docs/concepts/workspaces-and-branches) covers where tasks run and how branches are created and merged, and [Review Gates and Auto-Accept](/docs/concepts/review-gates) covers how a finished result gets its sign-off.
+
+Which nodes wait for your sign-off is up to you. By default, tasks and workflows are both auto-accepted, and the process stops for a person to review only where you've turned auto-accept off. Apart from that, a workflow keeps running on its own until its results are merged into the integration branch. It stops early only when it runs into something CodeDAG can't handle by itself, and the status then tells you where it stopped (see [Status and substatus](#status)). All of this rests on one condition: the task agent doesn't have to ask for your consent at every step. If it does, it stops in its own session and waits for you to approve. For how to choose a permission mode, see [Decide between unattended and attended runs](/docs/guides/agents-and-permission-modes#unattended-or-attended).
+
+## Submission, the queue, and phases [#queue-and-phases]
+
+### Submission and the queue [#queue]
+
+In a single repository, you'll often write several workflows over time, and they all share the same code and the same set of workspaces. Running them at the same time without isolating them would let their files and branches interfere with one another. Adding another layer of isolation for each workflow would multiply the number of workspaces you need and require another round of merging between workflows. And running one at a time with no way to queue would mean someone has to wait around for each workflow to finish and then start the next one by hand.
+
+CodeDAG runs one workflow at a time but lets you **submit** workflows ahead of time: while one is still running, you can submit the ones after it, and they wait. These submitted workflows line up in the order you submitted them, and that line is the **queue**. The workflow at the head of the queue runs, and once it has been reviewed and leaves the queue, the next one starts automatically. You can submit several workflows one after another before you step away and let them run back to back. Parallelism happens only among the tasks within a single workflow.
+
+So submitting a workflow doesn't mean it runs right away. `cdg dag submit{:sh}` puts the workflow in the queue, and it actually starts running only when no unfinished workflow is ahead of it.
+
+"Finished" has a precise meaning here. When all the tasks have run, that only means the agents consider their work done. Whether the results are usable still has to be settled in review. You can do the review yourself, or it can pass automatically according to rules, which is the default. For how to set the gates, see [Review Gates and Auto-Accept](/docs/concepts/review-gates). A workflow leaves the queue and lets the next one start only once its review has reached a decision. This also means that if the workflow at the head of the queue has stopped somewhere that needs you, such as waiting for review, paused, or on hold, the workflows behind it keep waiting.
+
+### Phases [#phases]
+
+Submission and review divide a workflow's lifecycle into three **phases**:
+
+- `planning`: Written but not yet submitted. You can edit the file freely, and nothing runs.
+- `submitted`: In the queue. The workflow is waiting its turn, running, or done running and waiting for review. The run uses the file as it was at the moment you submitted it, and editing the file afterward doesn't change the run you already submitted.
+- `reviewed`: A final review decision has been given. The workflow has left the queue and no longer runs.
+
+Submission and review move a workflow from one phase to the next, always in the same order. Tasks have phases of their own. They're submitted together with their workflow, but each one is reviewed separately, so while a workflow is still `submitted`, any of its tasks that have already been reviewed are `reviewed`.
+
+The project status board that `cdg status{:sh}` shows is grouped by exactly these phases. `Planning Workflows` lists the workflows that haven't been submitted yet, `Submitted Workflows` is the queue, numbered in order, and `Reviewed Workflows` is the history of workflows that have been reviewed.
+
+## Status and substatus [#status]
+
+### Status [#status-definition]
+
+After you submit, you'll most likely step away, and when you come back you need to see at a glance where each task stands. The phase can't tell you that. It says only how far along the task is, and waiting, running, pausing, and finishing all happen within `submitted`. So a submitted task also has a **status**. It describes only the `submitted` phase and tells you whether the task is currently waiting, running, stopped, or finished:
+
+- `pending`: Not running. The task is waiting to start or waiting to be dealt with.
+- `in-progress`: The task agent is working.
+- `stopped`: Paused or killed. The task waits where it stopped until you let it continue.
+- `done`: The task has finished running, and its result still has to go through review.
+
+Statuses have a usual order, which is the lifecycle of a task. A task starts as `pending`, waiting for its upstream tasks and a free workspace. Once it has a workspace, a fresh session runs it and it becomes `in-progress`. When it finishes, it becomes `done`, and after it passes review it enters the `reviewed` phase. Unlike phases, though, statuses don't move in only one direction. Pausing, killing, or recovering a task, or asking for more changes during review, sends the status backward or makes it jump.
+
+### Substatus [#substatus]
+
+Status alone still isn't enough to tell whether you need to do anything. Of two `pending` tasks, one may simply be waiting for upstream and can be left alone, while the other has been put on hold and stays there until you deal with it. So each status is further divided into **substatuses**, which say why the task is in that status. `pending` is either `blocked` (waiting for upstream) or `on-hold`. A `blocked` task is waiting for its upstream tasks to finish and be accepted, or for a free workspace, and it starts on its own when the time comes. (If an upstream task is sitting at `done` waiting for your review, the `blocked` task keeps waiting as well.) An `on-hold` task has been put on hold, for example because uncommitted changes were found in its workspace before it started, or because merging the upstream results produced a conflict that couldn't be resolved automatically. You have to deal with the problem before you can recover it. In the same way, `in-progress` is either `working`, for normal execution, or `draining` (finishing its current step) once the task has received a pause, and `stopped` is either `paused` or `killed`. For every combination and what it means, see [State Meanings](/docs/reference/states).
+
+When you come back to check, `blocked`, `working`, and `draining` need nothing from you. `on-hold` and `stopped` tasks wait for you to deal with them and get them going again. When you run into a specific case, look it up by symptom in [Troubleshooting](/docs/troubleshooting/troubleshooting). A `done` task that's set for manual review waits until you give a decision. See [Auto-accept](/docs/concepts/review-gates#auto-accept).
+
+`cdg status{:sh}`, `cdg dag status{:sh}`, and `cdg task status{:sh}` show phase, status, and substatus at the project, workflow, and task levels, respectively. Where the status board shows a pair such as `[in-progress] [working]`, the first is the status and the second is the substatus. A workflow has a status and substatus of its own, summarizing the overall state of all its tasks, and that's what each row of the queue in `cdg status{:sh}` shows. The specific reason a task is `on-hold` is shown only in `cdg task status{:sh}`.
+
+## Projects [#project]
+
+A single computer often has several repositories that use CodeDAG. Their code and branches have nothing to do with one another, so there's no reason for them to wait on each other. A workflow you submit in one repository shouldn't queue behind a workflow in another. At the same time, a single repository often has more than one checkout so that its tasks can run in parallel. Besides the original repository, there are the extra ones you created with git worktree or git clone, and those should count together with the original.
+
+CodeDAG treats such a group of directories as one unit. The original repository is the **primary repository**, and the `.codedag/` directory is created at its root. The extra checkouts that you created and registered under it are **replicas**. A primary repository together with its replicas is a **project**.
+
+The queue and nearly every `cdg` command are scoped to a project. Each project's workflows wait in their own queue, and projects don't affect one another. Whether you run these commands in the primary repository, in any replica, or in the `.codedag/` directory, they act on the same project and the same queue. Run them in a repository that hasn't been initialized, and you're told to run `cdg init{:sh}` first. When tasks run, the primary repository is one [workspace](/docs/concepts/workspaces-and-branches#workspaces) and each replica is another.
+
+A repository becomes a project when you run `cdg init{:sh}`, and that's also when replicas are registered. You create the replicas yourself with Git beforehand. CodeDAG doesn't create them for you. A project's replicas must be either all worktrees or all clones. For how to choose, prepare, and register them, see [Run in Parallel with Workspaces](/docs/guides/parallel-workspaces).
+
+Workflow files go in `.codedag/dags/`, and the project settings and run logs are in `.codedag/` as well. This directory isn't committed to the project repository along with your code. [Sidecar repository](#sidecar-repo) explains why.
+
+A workflow applies to only one project. When a piece of work spans several repositories, write and run a separate workflow in each one, and arrange the handoffs between the repositories yourself.
+
+## Sidecar repository [#sidecar-repo]
+
+A project's workflow files and settings live in the `.codedag/` directory at the root of the primary repository. It sits right inside the repository, so it looks like something you'd commit to the project repository along with the code. But while a workflow runs, CodeDAG switches branches in your repository and commits each task's changes. If the project repository tracked this directory, the workflow files in it would change whenever the repository switched to another branch, and they'd get mixed into task commits too. Having the project repository simply ignore the directory would keep the files from being affected by branch switches, but it would also leave them with no version history, let alone a way to share them with your team.
+
+So CodeDAG has the project repository ignore `.codedag/` and also sets the directory up as a separate Git repository, so that the two repositories each have their own commit history. This separate repository is the project's **sidecar repository**. The output of `cdg init{:sh}` calls it `sidecar repository`, and the docs also refer to it as the `.codedag` repository.
+
+The project repository ignores it through `.git/info/exclude`, so you don't need to commit `.codedag/` to the project repository, and it doesn't show up in the project repository's `git status`. You manage the sidecar repository yourself. CodeDAG never commits, pushes, or pulls in it. To keep a history of your workflows, go into `.codedag/` and commit with ordinary git commands, as described in [Save workflows and shared configuration separately](/docs/reference/branches-and-files#save-config). To share them with your team, push the sidecar repository to a remote repository as well. See [Share with Your Team](/docs/guides/team-sharing). The local settings and logs in `.codedag/local/` belong to this computer only and aren't under version control.
+
+A project has only one sidecar repository. Replicas have no `.codedag/` of their own, and whichever workspace you run `cdg` in, it uses the one in the primary repository.

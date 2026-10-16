@@ -1,0 +1,106 @@
+---
+title: Control Cost
+description: How each of the two costs of running a workflow is calculated, and how to estimate and reduce them before you submit.
+icon: Coins
+---
+
+Running a workflow with CodeDAG has two costs. One is CodeDAG credits. The other is the task agents' own usage, meaning the subscription usage limits that Claude Code or Codex draws on or the API fees it incurs. You can work out the first by counting tasks, at 1 credit per task. The second depends on the model, the reasoning effort, and the context each task reads and writes. You can't calculate it precisely in advance, so you estimate it with a trial run.
+
+## The two costs [#two-costs]
+
+CodeDAG credits are calculated by task count, regardless of how long a task takes or which model it uses. Agent usage is calculated separately by Anthropic and OpenAI, according to how Claude Code and Codex are signed in on your machine. CodeDAG neither collects payment for it nor displays it.
+
+| | CodeDAG credits | Agent usage |
+|---|---|---|
+| Who calculates it | CodeDAG | Anthropic for Claude Code, OpenAI for Codex |
+| How it's calculated | 1 credit per task, deducted all at once by task count when the workflow starts running | When you sign in with a subscription, usage counts against your plan's usage limits. There are commonly two layers, a 5-hour window and a weekly limit, and the details vary by plan. With an API key, you're billed per token. |
+| What it depends on | Task count only | The model, the reasoning effort, the context each task reads and writes, and the number of conversation turns |
+| Where to check it | `cdg auth status{:sh}` or the web console | `/usage` in Claude Code; `/status` in Codex, or the usage page on the web |
+| When it runs out | New submissions are rejected. A workflow that's already queued stops at `on-hold` when its turn comes. See [Not enough credits or no subscription](/docs/account/credits-and-subscription#insufficient-credits). | A task that hits the limit has to wait for the limit to reset before it can continue working. |
+
+The task agents are the Claude Code or Codex on your own machine, and their usage in tasks counts against the same account as the sessions you open by hand. For the specific rules on limits, each vendor's own documentation is authoritative. See Claude Code's [cost management documentation](https://code.claude.com/docs/en/costs) and Codex's [usage documentation](https://learn.chatgpt.com/docs/pricing).
+
+## Estimate a workflow [#estimate]
+
+For CodeDAG credits, you only need to count the tasks. When the workflow starts running, 1 credit is deducted for each task in the workflow file. The number is fixed the moment the run starts. How long the tasks take, how many times work is redone along the way, and how many tasks actually finish in the end don't change it. Resubmitting is a new run, and when it starts running, it's charged again by that run's task count. For the rules, see [When credits are charged](/docs/account/credits-and-subscription#when-charged).
+
+When several workflows go into the queue one after another, estimate from the sum of their task counts. At each submission, CodeDAG only checks whether you have enough credits for that submission. It doesn't reserve them. Workflows earlier in the queue start first and use up credits first, so a later one may stop for lack of credits when its turn comes.
+
+You can't calculate agent usage precisely in advance, but you can gauge its size from how the work is split into tasks. Every task is a fresh session that has to read the code and documents it needs all over again, so if several tasks read the same set of files, you pay for reading them once per task. Subagents that a task dispatches also count toward usage individually. On the other hand, cramming too much work into one task isn't necessarily cheaper. The longer the session, the more context each request carries, and the more every turn costs. For how to split tasks well, see [Split tasks: one goal per task](/docs/guides/designing-tasks-and-prompts#split-tasks).
+
+For example, say 4 tasks each review the same change from a different angle. That costs 4 CodeDAG credits. On the agent side, 4 sessions each read the change and the related code, so the usage is roughly 4 times that of one session doing a single review. The most reliable way to find out how much a task actually uses is to run a small trial first.
+
+## Run a small trial first [#trial-run]
+
+For a workflow with many tasks that resemble one another, such as applying the same kind of change to twenty modules, you can start by writing the first one or two tasks as a separate workflow and running it. Confirm that the prompt is clear, that `mode` doesn't leave tasks stuck waiting for approval, and that the output is what you expect. Then submit the rest. A trial run consumes only a credit or two. If you submit the whole workflow directly, the credits for all of its tasks are deducted when it starts running. If you then discover a problem with the prompt, those credits aren't refunded automatically, and the agent usage has already been spent.
+
+A trial run is also the most direct way to estimate agent usage. While no other sessions are running on the account, check `/usage` in Claude Code or `/status` in Codex once before the trial and once after it to see roughly how much of your limit one task takes. Multiply that by the task count and compare it with your remaining limit, and you can tell whether the whole workflow can finish within one window.
+
+If you're happy with the trial's results, you can keep them as they are. Write only the remaining tasks in the real workflow. As long as you don't set `baseRef` and haven't switched the primary repository back to another branch, it starts from the trial's results (see [base](/docs/concepts/workspaces-and-branches#branches)). The credits the two runs consume then add up to the same as submitting all the tasks at once.
+
+## Choose a model per task [#model-per-task]
+
+The model and reasoning effort are among the main factors in agent usage, and a workflow can set them for each task individually. Use `model` and `effort` to give mechanical tasks a cheaper configuration, and use a strong model and higher reasoning effort only for tasks that need judgment. CodeDAG credits aren't affected: each task is still 1 credit.
+
+If you leave out these two fields, every task uses the default model and reasoning effort configured in the agent itself. If your usual default is the strongest model, every task in the workflow consumes usage at that rate, including tasks that only search, organize, or apply a plan's changes one at a time.
+
+The workflow below first takes inventory of the TODO comments in a repository, then assesses which ones to do first. The two tasks each use a different configuration:
+
+```yaml title=".codedag/dags/todo-triage.yaml"
+executionMode: shared-workspace   # Both tasks only write report files, so they don't need branches
+tasks:
+  - id: 1
+    title: Inventory TODO comments
+    agent: claude
+    mode: bypassPermissions
+    model: sonnet                 # Mechanical searching and organizing, so use a cheaper model
+    effort: low
+    prompt: |
+      Find every TODO and FIXME comment in the repository (skip dependency
+      directories and build output). Organize them into a table by file, with
+      the file path, line number, and original comment text in each row.
+      Write the table to docs/todo-triage/inventory.md (overwrite it if it
+      already exists). Don't modify any other files.
+  - id: 2
+    title: Assess priorities
+    dependencies: [1]
+    agent: claude
+    mode: bypassPermissions
+    model: opus                   # Needs judgment informed by the code, so use a stronger model
+    effort: high
+    prompt: |
+      Read docs/todo-triage/inventory.md. Taking the related code into account,
+      assess the impact and effort of each TODO, pick the five most worth doing
+      first, and explain why. Write the result to docs/todo-triage/priorities.md
+      (overwrite it if it already exists). Don't modify any other files.
+```
+
+As a rule of thumb, searching against a checklist, tidying up formatting, applying an already written plan one change at a time, and generating documents in a fixed format suit a cheaper configuration. Drafting a plan, reviewing, synthesizing multiple results, and tracking down hard problems are worth a strong model. For how to write the two fields and the values each vendor supports, see [Choose a model and reasoning effort](/docs/guides/agents-and-permission-modes#model-and-effort).
+
+## Concurrency and usage limits [#concurrency]
+
+Concurrency doesn't change CodeDAG credits, and it hardly changes total agent usage either. What it changes is how fast that usage is spent: tasks that run at the same time are separate sessions that all draw on the same account's limit.
+
+The higher the concurrency, the faster you use up a window's limit, and when it runs out, all the tasks that are running stop together. If the whole workflow needs more usage than one window provides, lower `maxConcurrency` to spread the same usage over a longer time. That makes you less likely to hit a short-window limit, such as the 5-hour one, partway through. The tradeoff is that the workflow takes longer to run, and your weekly limit doesn't get any larger. With an API key, higher concurrency also makes you more likely to hit rate limits on requests or tokens per minute.
+
+Mixing Claude Code and Codex spreads usage across two independent limits. When one of them hits its limit, the other's tasks keep running as usual. See [The two usage limits are independent](/docs/guides/mixing-agents#usage-limits).
+
+When you let an agent orchestrate for you, the orchestrating agent's own session also draws on the limit of the account it uses. If it uses the same agent as the tasks, long stretches of monitoring take up part of the limit that could otherwise go to the tasks.
+
+For how to find the affected tasks, limit the damage, and carry on after you hit a limit, see [Agent usage limits or rate limits](/docs/troubleshooting/troubleshooting#agent-usage-limits) in Troubleshooting.
+
+## Rework at key nodes instead of rerunning everything [#rework]
+
+Fixing a result within a run consumes no more CodeDAG credits. Once a result has been let through and your only option is to resubmit the whole workflow, you pay for every task again. So at a node that all later work builds on, closing the review gate costs a little waiting time and spares you the risk of a full rerun.
+
+With the gate closed, a task stops when it finishes and waits for your review. If you aren't satisfied with the result, you can use `request-changes` to have the original session keep revising the existing result, or use `rework` to redo the task from the clean baseline it had before it started. For how to use the two actions, see [Choose an action based on your assessment](/docs/guides/review-tasks#choose-action). Neither kind of rework adds CodeDAG credits. Both consume only agent usage. `rework` opens a fresh session, so its usage is roughly that of running the task one more time.
+
+With the gate open, a result is auto-accepted as soon as it's done, and downstream tasks start on top of it right away. If you find a problem afterward, the decision can no longer be changed. For the reason, see [Review decisions can't be changed](/docs/concepts/review-gates#no-undo). If only a few tasks need to be redone at that point, write them as a separate new workflow and continue from there. That consumes credits for those few tasks only, which is cheaper than clearing the review and resubmitting the whole workflow. For how to do it, see [You find a problem after a task already has a review decision](/docs/troubleshooting/troubleshooting#after-conclusion).
+
+Closing a gate has a cost too. A task that's stopped for review keeps its downstream tasks waiting, and in isolated-branches mode it also keeps occupying its workspace. The more gates you close, the slower the workflow runs. So it's only worth doing at the few nodes where a mistake costs the most. See [Which nodes are worth closing the gate on](/docs/concepts/review-gates#when-to-close).
+
+## Related
+
+- [Credits, Subscription, and Charges](/docs/account/credits-and-subscription): The full description of free credits, subscriptions, and charging rules.
+- [Choose Agents, Models, and Permission Modes](/docs/guides/agents-and-permission-modes): Choose the agent, model, reasoning effort, and permission mode for each task.
+- [Troubleshooting: Agent usage limits or rate limits](/docs/troubleshooting/troubleshooting#agent-usage-limits): What to do after you hit a Claude Code or Codex usage limit.

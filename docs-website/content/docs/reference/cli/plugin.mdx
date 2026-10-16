@@ -1,0 +1,178 @@
+---
+title: Plugin
+description: The options of each cdg plugin subcommand and what it acts on, and how to change the plugin's installation scope.
+icon: Puzzle
+---
+
+`cdg plugin{:sh}` has four subcommands, `install`, `status`, `update`, and `uninstall`, for installing, checking, updating, and uninstalling the CodeDAG Guide plugin. For what the plugin does and how to manage it day to day, see [Manage the CodeDAG Guide Plugin](/docs/guides/guide-plugin).
+
+## Commands and target agents [#targets]
+
+All four subcommands use the same set of options to select which agent's plugin to act on. When you give none of them, the command acts on both Claude Code and Codex.
+
+| Command | Syntax | What it does |
+|---|---|---|
+| Install | `cdg plugin install [target] [-s <scope>]{:sh}` | Installs the plugin for the target agents |
+| Check status | `cdg plugin status [target]{:sh}` | Reports the plugin's installation, enablement, and version status as seen from the current location, and suggests the next step. Doesn't modify any files |
+| Update | `cdg plugin update [target] [--reset-local-changes]{:sh}` | Updates the installed plugin to the latest version, and repairs a broken installation in place |
+| Uninstall | `cdg plugin uninstall [target]{:sh}` | Removes the plugin installations visible from the current location |
+
+`[target]` takes one of these forms:
+
+| Target option | Whose plugin it acts on |
+|---|---|
+| `--claude` | Claude Code |
+| `--codex` | Codex |
+| `-a`, `--all` | Claude Code and Codex |
+| Omitted | Same as `--all` |
+
+`--all` can't be combined with `--claude` or `--codex`. If you combine them, the command reports an error and does nothing.
+
+The commands differ in what they do when a target agent isn't installed on this machine. With `--all` or no target, `install` and `update` skip the agent that isn't installed and act only on the one that is. They report an error only when neither is installed. When you use `--claude` or `--codex` to name an agent that isn't installed, these two commands report an error right away. `status` always lists every agent you specify, and for one that isn't installed, it tells you to install the agent first. `uninstall` doesn't require the agent to still be on this machine. Even after the agent itself has been uninstalled, the command cleans up any plugin configuration that's left, skipping only the uninstall steps that the agent has to carry out itself.
+
+None of these commands require you to be signed in, and the current directory doesn't have to be a project initialized with `cdg init{:sh}`. An installation or update takes effect only in agent sessions opened afterward. To use the new plugin in a session that's already open, exit it and resume it with `claude --resume{:sh}` or `codex resume{:sh}`.
+
+## cdg plugin install [#install]
+
+`cdg plugin install{:sh}` installs the plugin for the target agents. `-s` or `--scope` sets the installation scope, and the default is `user`.
+
+```bash title="Terminal"
+# Install for every agent installed on this machine, at the user scope
+cdg plugin install
+# Install for Codex only, effective only in the current checkout
+cdg plugin install --codex -s local
+```
+
+The three scopes differ in where the configuration is written and whether it's shared along with the repository:
+
+| Scope | Where the configuration is written | Under version control | With multiple worktrees or clones |
+|---|---|---|---|
+| `user` (default) | Claude Code's or Codex's configuration in your home directory. Nothing is written to any repository | No | Every repository and replica on this computer shares this one installation |
+| `project` | The project configuration files in the current checkout | Yes. Commit them to the project repository, not to `.codedag` | Written only to the current checkout. Other worktrees or clones pick up the configuration only after they check out a version that includes this commit |
+| `local` | Configuration files in the current checkout that stay on this machine only. CodeDAG also writes ignore rules so that Git ignores them | No | Belongs to the current checkout only. Install separately in each of the other worktrees or clones |
+
+`project` and `local` install into the checkout where you run the command. The command searches upward from the current directory for the repository root, so you can run it from any subdirectory of the repository. Outside a Git repository, it reports an error. With `user`, you can install from any directory.
+
+The files that the project scope writes into the repository are under version control, so in the default isolated-branches mode, the workspace doesn't count as clean until you commit them. The files that the local scope writes are covered by the ignore rules below and don't affect the workspace. For what to do with these files after installing, and how a project-scope installation takes effect on other members' computers, see [Choose an installation scope](/docs/guides/guide-plugin#scopes).
+
+When the plugin is already installed, `install` doesn't reinstall it or change its scope. As long as this agent's plugin is visible from the current location, at whatever scope, the command only reports that it's already installed and skips it. For example, once you've installed at the user scope, running `cdg plugin install --scope project{:sh}` in any repository has no effect. To change the scope, see [Change the installation scope](#change-scope). The command also skips an agent when it finds configuration left over from a previous installation that wasn't fully cleaned up. In that case, run `cdg plugin uninstall{:sh}` first and then install again.
+
+### Ignore rules written for the local scope [#local-exclude]
+
+When a local-scope installation succeeds, CodeDAG writes a managed block to the repository's `info/exclude` so that Git ignores these machine-only configuration files. You don't need to set up ignore rules yourself, and CodeDAG doesn't touch the version-controlled `.gitignore`. Each plugin has its own block. Reinstalling or repairing an installation replaces the whole block and leaves the rules outside it as they are:
+
+```bash title=".git/info/exclude"
+# BEGIN CODEDAG CLAUDE GUIDE (managed)
+.claude/settings.local.json
+# END CODEDAG CLAUDE GUIDE (managed)
+
+# BEGIN CODEDAG CODEX GUIDE (managed)
+.agents/plugins/marketplace.json
+plugins/codedag/
+# END CODEDAG CODEX GUIDE (managed)
+```
+
+The block goes in the `info/exclude` that Git actually reads. In an ordinary repository, that's `<repository-root>/.git/info/exclude`. A linked worktree uses the `info/exclude` in the repository's shared Git directory, and all of the repository's working directories share that one file. As a result, both agents' plugins can be installed at the local scope in a linked worktree.
+
+Ignore rules have no effect on files that Git already tracks. So when these files have already been committed to the repository, a local-scope installation fails with exit code 1. It changes no files and writes no block, and the error starts with `Failed to install CodeDAG plugin for <agent>:`:
+
+- **Claude Code:** When `.claude/settings.local.json` is already tracked, the reason is `Claude Code local installation is unavailable because .claude/settings.local.json is already tracked by Git. Use user or project scope instead.`
+- **Codex:** When `.agents/plugins/marketplace.json` or `plugins/codedag` is already tracked, the reason is `Codex local installation is unavailable because .agents/plugins/marketplace.json or plugins/codedag is already tracked by Git. Use project scope instead.`
+
+## cdg plugin status [#status]
+
+`cdg plugin status{:sh}` only reads and doesn't change anything. It reports on the installations visible from the current location, printing a set of fields for each target agent:
+
+| Field | Meaning |
+|---|---|
+| `Agent installed` | Whether the agent was found on this computer. When it's `false`, `Action` tells you to install the agent first |
+| `Plugin installed` | Whether a plugin installation was detected from the current location |
+| `Scope` | The installation scope: `user`, `project`, or `local`. `-` when the plugin isn't installed |
+| `Enabled` | Whether the plugin is enabled in the agent. `unknown` when that can't be determined |
+| `Installed version`, `Sync`, and others | The installed plugin version, plus whether the plugin needs an update, whether its skill files have been edited on this machine, and whether the installation is broken |
+| `Path` | Where the plugin is located, for reference when troubleshooting |
+| `Action` | What to do next. When there's something to do, it gives the full command |
+
+Where you run the command determines which installations it checks. In a Git repository, it checks the project-scope and local-scope installations in that checkout, plus the user-scope installation. Outside a Git repository, it checks only the user-scope installation. So to confirm that agent sessions in a particular repository can use the plugin, run the command in that repository.
+
+When the plugin is disabled in the agent, `Action` also says how to re-enable it. This can appear together with a sync suggestion, and the sync suggestion comes first:
+
+```bash title="Terminal"
+  Enabled: false
+  Sync: version record out of date
+  Action: Run `cdg plugin update --codex`. Plugin is disabled. Open `/plugins` in a Codex session to re-enable it
+```
+
+You can re-enable the plugin only on the agent's side. For Claude Code, run `claude plugin enable codedag@codedag{:sh}`. For Codex, open `/plugins` in a session. `cdg plugin update{:sh}` and installation repairs both keep your choice to disable the plugin and don't turn it back on for you.
+
+### Version compatibility [#compatibility]
+
+The plugin and the CLI are upgraded separately, and their version numbers don't have to match. Whether the two are compatible is determined by two CLI versions that the plugin declares: the minimum version it supports and the latest version it has been verified against. `cdg plugin status{:sh}` compares the version of the CLI on this machine with these two versions declared by the installed plugin:
+
+| CLI version on this machine | Result | What to do |
+|---|---|---|
+| Lower than the minimum version the plugin supports | The CLI on this machine may not yet support some of the usage the plugin describes | [Upgrade the CLI](/docs/get-started/installation) as prompted |
+| Between the minimum version and the verified version | Compatible | Nothing |
+| Higher than the version the plugin has been verified against | Still compatible. Shown in the output for information only | Nothing required. Update the plugin when you want the agent to know about the usage the newer CLI adds |
+
+A CLI newer than the verified version doesn't count as incompatible, because a new CLI version keeps the commands, arguments, and meanings that released plugins rely on. Conversely, the latest plugin covers every CLI version that the CodeDAG service still supports. So as long as the service still supports your CLI, updating to the latest plugin doesn't make the two incompatible.
+
+## cdg plugin update [#update]
+
+`cdg plugin update{:sh}` updates the plugin to the latest version within its existing scope. By default, it keeps your edits to the plugin's skill files. The update also keeps your choice of enabled or disabled in the agent, and if the installation is broken, the same command repairs it in place. When a target agent doesn't have the plugin yet, the command only shows the install command and doesn't install it for you. This command has no `--scope` option. To change the scope, see [Change the installation scope](#change-scope).
+
+| Option | Description | When omitted |
+|---|---|---|
+| `--reset-local-changes` | When the plugin's skill files have been edited, replaces them with the latest official content without asking | Keeps the edits. In a terminal, the command first asks whether to keep them or replace them with the official content, and the default is to keep them. When run non-interactively, by a script or an agent, it keeps the edits without asking, and the plugin isn't updated this time |
+
+```bash title="Terminal"
+# Update the plugin for both agents on this machine
+cdg plugin update
+# Update the Codex plugin only, discarding edits to the skill files
+cdg plugin update --codex --reset-local-changes
+```
+
+When an update has to replace the plugin's content, the command first backs up the existing copy of the plugin and gives the backup's directory on the `Previous copy backed up in directory:` line of its completion message. All backups go in CodeDAG's global directory, not in the repository, so `git status` stays clean after you update a project-scope plugin. Backups of the Codex plugin are stored separately by installation scope:
+
+| Installation scope | Backup directory |
+|---|---|
+| `user` | `<CODEDAG_GLOBAL_HOME>/codex-plugins/codedag.bak/` |
+| `project`, `local` | `<CODEDAG_GLOBAL_HOME>/codex-plugins/repo-backups/<checkout-key>/` |
+
+`<checkout-key>` is derived from the path of the checkout's root directory, so each working directory of the same repository has its own backup directory. Each directory keeps only the most recent backup, which is overwritten the next time the content is replaced, so move out any edits you still want before then. Orchestration requirements that you want to keep long term belong in CLAUDE.md or AGENTS.md. For the reason, see [Update the plugin](/docs/guides/guide-plugin#update).
+
+## cdg plugin uninstall [#uninstall]
+
+`cdg plugin uninstall{:sh}` has no `--scope` option. Which installations it removes depends on where you run it. When you run it in a Git repository, the user-scope installation is removed as well.
+
+| Where you run it | Installations removed |
+|---|---|
+| Any directory in a Git repository, including worktree and clone replicas | The project-scope and local-scope installations in that checkout, plus the user-scope installation |
+| Outside any Git repository | Only the user-scope installation |
+
+The command can't uninstall just one of the scopes. After you uninstall inside a repository, sessions in the other repositories on this computer can't use the plugin either. To remove only the user-scope installation, run the command from a directory outside any Git repository. Project-scope and local-scope configuration in other repositories or replicas isn't removed. Uninstall it separately in each of those checkouts.
+
+Uninstalling from the project scope changes version-controlled configuration files in the current checkout, and that change needs to be committed too. Uninstalling a local-scope installation also removes its [managed block](#local-exclude) from `info/exclude`. If another working directory of the same repository is still using the block, it's kept, so that the files there don't turn into untracked files. With `--claude` or `--codex`, only that agent's plugin is uninstalled, and the other agent's plugin and its block aren't affected.
+
+## Change the installation scope [#change-scope]
+
+You can't change the scope of an installed plugin directly. Uninstall it first, install it again with the new `--scope`, and then open a new agent session.
+
+Both commands have to run in the right place. Uninstall from somewhere the old installation is visible. When the old scope is project or local, that's the checkout where the plugin is installed. When the new scope is project or local, the install command has to run in the target checkout too. To change the scope for just one agent, add `--claude` or `--codex` to both commands, and the other agent's plugin stays as it is.
+
+The following commands move the Claude Code plugin from the user scope to the project scope of the repository `~/code/my-app`:
+
+```bash title="Terminal"
+cd ~/code/my-app
+cdg plugin uninstall --claude
+cdg plugin install --claude --scope project
+```
+
+Because the uninstall ran inside a repository, the original user-scope installation has been removed, and the other repositories on this computer no longer have the plugin. Install it there separately if you need it. The newly written configuration files have to be committed to the project repository before your team members can share them.
+
+To go the other way, from the project scope back to the user scope, likewise uninstall in this repository first and then install with `--scope user`. That uninstall removes the project configuration from the repository, and this change has to be committed to the project repository as well.
+
+## Related
+
+- [Manage the CodeDAG Guide Plugin](/docs/guides/guide-plugin): How to choose an installation scope, how to confirm that the plugin has taken effect, and how to customize the way the agent orchestrates without changing the plugin's skill files.
+- [Let Your Agent Orchestrate](/docs/get-started/let-your-agent-orchestrate): With the plugin installed, hand your goal to the agent and have it write the workflow and submit it.

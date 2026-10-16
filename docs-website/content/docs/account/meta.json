@@ -1,0 +1,9 @@
+{
+  "title": "Account, Credits, and Cost",
+  "icon": "CreditCard",
+  "pages": [
+    "login-and-account",
+    "credits-and-subscription",
+    "cost-control"
+  ]
+}

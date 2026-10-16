@@ -1,0 +1,199 @@
+---
+title: FAQ
+description: Short answers to common questions about using CodeDAG, with links to the pages that cover each topic in detail.
+icon: MessageCircleQuestionMark
+---
+
+For a specific failure, such as a task that has stopped, a rejected submission, or a failed sign-in, it's quicker to look up the symptom in [Troubleshooting](/docs/troubleshooting/troubleshooting).
+
+## Concepts
+
+<Accordions type="single">
+<Accordion title="Are workflow, dag, and DAG the same thing?" id="workflow-and-dag">
+
+Yes. The docs say "workflow" and the commands say `dag`, as in `cdg dag submit{:sh}`. The command options `--workflow-file` and `--dag` are interchangeable too. DAG stands for directed acyclic graph, the graph that tasks and their dependencies form. It's where the product name CodeDAG and the `dag` in the commands come from. See [Workflows](/docs/concepts/how-it-works#workflow).
+
+</Accordion>
+<Accordion title="Why don't tasks share conversation context?" id="no-shared-context">
+
+Because every task is a fresh agent session. The longer a session runs, the more unrelated information builds up in its context, and the less reliable the agent's judgment becomes. Starting each task from a clean context lets the agent do one well-bounded piece of work when it's at its most reliable. The cost is that an upstream task's conversation doesn't reach downstream tasks. Only the files it leaves in the repository do. So the upstream task has to write its conclusions to a file, and the downstream prompt has to name that file and tell the agent to read it. For the reasoning, see [Why split work into tasks, and how far](/docs/concepts/tasks-and-sessions#why-split). For how to write this, see [Pass conclusions downstream](/docs/guides/designing-tasks-and-prompts#pass-results).
+
+</Accordion>
+<Accordion title="What is an orchestrating agent?" id="orchestrating-agent">
+
+An orchestrating agent is a Claude Code or Codex session that operates `cdg` on your behalf. It has the CodeDAG Guide plugin installed. After you describe your goal, it writes the workflow, validates and submits it, tracks progress, and handles reviews. The code for each task in the workflow is still written by task agents, the fresh sessions that CodeDAG starts separately for each task. They aren't the same session as the orchestrating agent. For how these roles divide the work, see [Who does what](/docs/concepts/how-it-works#roles). For how to use one, see [Let Your Agent Orchestrate](/docs/get-started/let-your-agent-orchestrate).
+
+</Accordion>
+<Accordion title="My task shows done. Why isn't it finished?" id="done-is-not-final">
+
+`done` only means that the task agent considers its work done. The result still has to pass the review gate. Only after it's accepted does the task enter `reviewed`, and only then do the downstream tasks that depend on it start. Results are auto-accepted by default, so a task usually stays at `done` for only a moment. If the task sets `autoAccepted: none`, or it runs in isolated-branches mode and leaves no changes, it stops at `done` and waits for your review, and its downstream tasks keep waiting too. For what the gates are for, see [Review gates](/docs/concepts/review-gates#review-gate). For how to review, see [Review Tasks and Workflows](/docs/guides/review-tasks).
+
+</Accordion>
+</Accordions>
+
+## Execution and parallelism
+
+<Accordions type="single">
+<Accordion title="Can I run tasks in parallel without worktrees?" id="parallel-without-worktree">
+
+Yes, in two ways.
+
+- **Use clones as replicas.** A replica can be a git worktree or a full clone, but a project has to use one or the other. See [Choose worktrees or clones](/docs/guides/parallel-workspaces#worktree-or-clone).
+- **Switch to shared-workspace mode.** With `executionMode: shared-workspace`, all tasks run in the same directory and no replicas are needed. The number of tasks that run at once is determined by `maxConcurrency` in the workflow file. When that's omitted, the project settings apply, and a project that registers only the primary repository defaults to 1. In this mode, CodeDAG doesn't isolate the tasks' writes from one another, so it suits only tasks that don't compile or run tests and that each write their own files, such as docs, translation, and research. See [Execution modes](/docs/concepts/workspaces-and-branches#execution-modes).
+
+</Accordion>
+<Accordion title="Can two workflows in the same project run at the same time?" id="concurrent-workflows">
+
+No. Workflows in the same project wait in a queue in the order you submitted them, and only the one at the head runs. The next one starts once that workflow has been reviewed and leaves the queue. Parallelism happens only within a single workflow. To work on several unrelated things at once, write them as tasks in the same workflow that don't depend on one another. Each project has its own queue, and projects don't affect one another. See [Submission and the queue](/docs/concepts/how-it-works#queue).
+
+</Accordion>
+<Accordion title="Can one workflow span multiple repositories?" id="multiple-repositories">
+
+No. A workflow applies to only one project, which is one Git repository together with the replicas registered under it. When a piece of work spans several repositories, write and submit a separate workflow in each one, and arrange the handoffs between the repositories yourself. See [Projects](/docs/concepts/how-it-works#project).
+
+</Accordion>
+<Accordion title="Does CodeDAG support conditional branches or loops?" id="conditions-and-loops">
+
+No. The tasks and dependencies in a workflow are fixed at submission. CodeDAG doesn't add or remove tasks based on results, and it doesn't automatically go back and rerun earlier tasks.
+
+When something needs to be handled conditionally, lay out every task you might need ahead of time and state the condition in the prompt. When the condition doesn't hold, have the task do nothing but record the reason in an agreed file. Don't skip that record: in the default isolated-branches mode, a task that changes nothing stops at `done` and waits for manual review. Work that needs repeated attempts can go inside a single task, such as "Run all the tests and fix failures until they all pass," and the task agent repeats it within its session. For the other limitations, see [Current limitations](/docs/introduction/when-to-use#limitations).
+
+</Accordion>
+<Accordion title="Can I set a timeout for tasks that run too long?" id="task-timeout">
+
+No. CodeDAG has no task timeout setting, and it doesn't kill a task just because it has been running for a long time. A long stretch with no new output doesn't necessarily mean the task is stuck, either. The task agent may have dispatched subagents that are working in the background. For how to tell whether it's stuck, how to kill it if it really is, and how to have it continue in its original session afterward, see [A task has no new output for a long time](/docs/troubleshooting/troubleshooting#no-output).
+
+</Accordion>
+<Accordion title="Is there a visual interface for the DAG?" id="visual-interface">
+
+No, there's no graphical interface. You check on a run in the terminal. `cdg status{:sh}` shows the whole project's queue, and `cdg dag status <workflow>{:sh}` lists the status of every task in a workflow. Add `--watch` to either one to keep it refreshing. To see what a task is actually doing, use `cdg dag logs{:sh}` or `cdg task logs{:sh}`. For the dependencies between tasks, go by the workflow file. See [Check what's happening: three levels of status](/docs/guides/run-and-monitor#status).
+
+</Accordion>
+<Accordion title="Can I run a workflow on a schedule?" id="scheduled-runs">
+
+CodeDAG doesn't have scheduling built in yet. But it's a command-line tool, so as long as this computer is signed in to your CodeDAG account and is online, an external scheduler such as cron or launchd can call `cdg dag submit{:sh}` directly to submit a workflow.
+
+A scheduled call has no interactive terminal, so add `-y` to the submit command. For the reason, see [cdg dag submit options](/docs/reference/cli/validate-and-submit#options). To run the same workflow over and over, you have two choices. You can [clear the previous run's review](/docs/reference/cli/review#clear-and-resubmit) before each submission, which requires that the previous run has been reviewed. Or you can [submit under a different file name](/docs/guides/finish-and-merge#new-file-name) each time, which works even when the previous run hasn't been reviewed yet.
+
+</Accordion>
+<Accordion title="If I edit a workflow file after submitting it, do my changes take effect?" id="edit-after-submit">
+
+Not for the run you've already submitted. At submission, CodeDAG saves the workflow definition as it is at that moment, and the run follows it from start to finish. The edited file takes effect only when you resubmit, after this run has been reviewed and you've cleared the review. That's a new run, and it uses credits again by task count. For the steps, see [Modify a submitted workflow](/docs/reference/cli/validate-and-submit#modify-submitted). If you only want to steer one task in a different direction, you don't need to edit the file. You can enter the task's session and talk to the agent directly, or request changes when you review the task. See [Choose how to observe and make changes](/docs/guides/intervene-and-control#choose-intervention).
+
+</Accordion>
+</Accordions>
+
+## Git and results
+
+<Accordions type="single">
+<Accordion title="Why did my current branch change?" id="current-branch-changed">
+
+Because in the default isolated-branches mode, the primary repository is a workspace too. During a run, CodeDAG switches it to the task branch of whichever task is assigned to it, and when the workflow finishes, it's left on the integration branch, `cdg/<workflow-name>/integration`. It isn't switched back to the branch you were on. This is expected, and your main branch itself hasn't been changed. For when you need to switch back yourself and how to keep the primary repository out of the run, see [The primary repository was switched to another branch](/docs/troubleshooting/troubleshooting#branch-switched).
+
+</Accordion>
+<Accordion title="Why aren't the results on main?" id="results-not-on-main">
+
+Because CodeDAG never commits to your main branch. When and how to merge is your decision. In the default isolated-branches mode, each task's changes stay on its own task branch, and the results that pass review end up merged into the workflow's integration branch, `cdg/<workflow-name>/integration`. After you check them, you can merge that branch straight into main, push it and open a pull request, or merge only the branches of the tasks you pick. Shared-workspace mode has none of these branches. The results are left right in the working directory for you to check and commit. For how, see [Finish, Merge, and Clean Up](/docs/guides/finish-and-merge).
+
+</Accordion>
+<Accordion title="Can I delete the cdg/ branches that show up in git branch?" id="delete-cdg-branches">
+
+Yes. Once a workflow has been reviewed and you've merged the results you need, you can delete its task branches, integration branch, and snapshot branches with `git branch -D`. Once you delete a snapshot branch, the changes saved in it can't be restored. For a workflow that's still in the queue or waiting for review, CodeDAG still needs its branches for merging and review, so wait until it has been reviewed before you clean up. For the steps, see [Clean up branches and workspaces](/docs/guides/finish-and-merge#cleanup).
+
+</Accordion>
+<Accordion title="Should I commit the .codedag directory to the project repository?" id="commit-codedag-directory">
+
+No. `.codedag/` is a separate Git repository in its own right, and `cdg init{:sh}` has already made the project repository ignore it, so it doesn't show up in the project repository's `git status`. To keep a history of your workflows or share them with your team, go into `.codedag/` and commit and push with ordinary git commands. For the reason, see [Sidecar repository](/docs/concepts/how-it-works#sidecar-repo). For how to share, see [Share with Your Team](/docs/guides/team-sharing).
+
+</Accordion>
+</Accordions>
+
+## Review
+
+<Accordions type="single">
+<Accordion title="Why is there an extra branch after I cancel a task?" id="cancel-creates-snapshot">
+
+That's a snapshot branch, which preserves the changes you canceled. In isolated-branches mode, `cancel` and `defer` both default to `--code snapshot`. When the task has changes, CodeDAG first saves them to a branch whose name starts with `cdg/<workflow-name>/snapshots/`, then rolls the task branch back to where it was before the task started, so the changes aren't passed downstream. If you change your mind later, you can still restore them from the snapshot. When you're sure you don't need them, add `--code discard` to discard the changes outright, and no branch is created. The workflow-level `cdg dag review cancel{:sh}` keeps a snapshot by default as well. For when to keep a snapshot and when to discard, see [`--code`](/docs/reference/cli/review#code). To restore from a snapshot, see [Restore some of the changes from a snapshot](/docs/reference/branches-and-files#restore-from-snapshot).
+
+</Accordion>
+<Accordion title="Does dag review override my reviews of individual tasks?" id="dag-review-and-task-reviews">
+
+No. Decisions you've already given on individual tasks stay as they are. `dag review` handles only the tasks that don't have a review decision yet. Of those, the ones that have already run get the action you give the whole workflow. For example, `cdg dag review accept{:sh}` accepts them. The workflow-level decision does determine what's finally left on the integration branch, though. In isolated-branches mode, `dag review cancel` or `defer` returns the integration branch to this workflow's base, and the results of tasks that were already accepted don't stay on the integration branch either (by default, a snapshot is saved first). For how the two levels of review relate, see [Review gates](/docs/concepts/review-gates#review-gate). For how to do it, see [Review the whole workflow: dag review](/docs/guides/review-tasks#dag-review).
+
+</Accordion>
+<Accordion title="Can I undo a review?" id="undo-review">
+
+No. `accept`, `cancel`, and `defer` are final decisions. Once given, they can't be changed within that run, and an accepted result may already have been merged into downstream tasks. For the reason, see [Review decisions can't be changed](/docs/concepts/review-gates#no-undo). So if you still want changes made to the task, use `revise`, `request-changes`, or `rework` before you give a final decision. They give no decision, and work on the task continues. For how to choose among them, see [Choose an action based on your assessment](/docs/guides/review-tasks#choose-action). If you find a problem with the result only after the decision is given, what you can fix is the code, not the review decision. For how, see [You find a problem after a task already has a review decision](/docs/troubleshooting/troubleshooting#after-conclusion).
+
+</Accordion>
+</Accordions>
+
+## Agents
+
+<Accordions type="single">
+<Accordion title="What happens if I omit mode?" id="mode-omitted">
+
+CodeDAG doesn't set a permission mode for the task, and the task agent uses its own configuration, such as the default permission mode in Claude Code's settings or the approval and sandbox settings in Codex's configuration. None of that configuration is visible in the workflow file. If it requires approval for file edits or commands, the task stops and waits for someone to respond, and an unattended workflow gets stuck there. So we recommend setting `mode` explicitly on every task. For exactly what happens when it's omitted, see [When you omit `mode`](/docs/guides/agents-and-permission-modes#mode-omitted). For how to choose, see [Decide between unattended and attended runs](/docs/guides/agents-and-permission-modes#unattended-or-attended). For the syntax, see [Permission mode syntax](/docs/reference/workflow-file#mode-syntax).
+
+</Accordion>
+<Accordion title="Is full access safe?" id="full-access-safety">
+
+Not really. It trades the agent's own permission checks for the ability to run unattended. With full access, the task agent no longer asks before it runs commands or reads and writes files, and CodeDAG doesn't check anything in the agent's place. The official documentation for both Claude Code and Codex advises caution with modes like this. Isolated-branches mode keeps code changes on task branches and away from your main branch, but it has no control over files outside the repository, other resources on your machine, or network access. So full access suits repositories and tasks you trust. To keep some checks in place while running unattended, add manual review nodes or verification tasks to the workflow. For how, see [Unattended doesn't mean ungated](/docs/guides/agents-and-permission-modes#gates).
+
+</Accordion>
+<Accordion title="Can I mix Claude Code and Codex in one workflow?" id="mix-agents">
+
+Yes. Each task picks `claude` (Claude Code) or `codex` (Codex) separately with the [`agent`](/docs/reference/workflow-file#tasks-agent) field. A common split is for one to implement and the other to review. The two agents use different `mode` syntax, so when you mix them, write each task's `mode` for the agent that task uses. For how, see [Mix Claude Code and Codex](/docs/guides/mixing-agents).
+
+</Accordion>
+<Accordion title="Why is there an extra runtime plugin in my plugin list?" id="runtime-plugin">
+
+That's an internal plugin that CodeDAG loads automatically, and you don't need to manage it. The `codedag-runtime` plugin you see in a Claude Code task's session, for example after you enter it with `cdg task view{:sh}`, is loaded by CodeDAG whenever it starts a Claude Code task session. It lets CodeDAG know how the session is progressing, such as when the task is done. It isn't written to your plugin configuration, and it doesn't appear in the sessions you open yourself. CodeDAG keeps it up to date automatically from version to version. It isn't the same thing as the CodeDAG Guide plugin. For how to manage that one, see [Manage the CodeDAG Guide Plugin](/docs/guides/guide-plugin).
+
+</Accordion>
+</Accordions>
+
+## Account and credits
+
+<Accordions type="single">
+<Accordion title="When are credits charged? Why didn't my credits change after I submitted?" id="when-credits-are-charged">
+
+Credits are deducted when a workflow reaches the head of the queue, right before it actually starts running. The full amount is deducted at once by task count, at 1 credit per task. At submission, CodeDAG only checks that you're signed in and have enough credits left. It doesn't deduct anything, and nothing is deducted while the workflow waits in the queue either. So when another workflow is still running ahead of yours, your credits stay the same for the time being after a successful submission. They go down only when your workflow's turn comes and it starts running. For the full rules, see [When credits are charged](/docs/account/credits-and-subscription#when-charged).
+
+</Accordion>
+<Accordion title="Does CodeDAG upload my code?" id="data-uploaded">
+
+No. Tasks run on your computer, and the CodeDAG service receives only what it needs to calculate and deduct credits: the workflow file's relative path and contents (including the prompts in it), the task IDs, the CLI version, the operating system, and the processor architecture. Neither the code in your repository nor the run logs are uploaded. For when data is sent and what it includes, see [Where your data goes](/docs/account/login-and-account#data-boundary). For the full description of how your data is handled, see the [Privacy Policy](/privacy).
+
+</Accordion>
+<Accordion title="Why does the CLI still work after I sign out on the web?" id="web-sign-out">
+
+Because the web console and the CLI are signed in independently. Signing out on the web ends only the session in your browser, and the CLI stays signed in. To sign the CLI out on this computer, run `cdg auth logout{:sh}`. See [Sign out, use multiple computers, and switch accounts](/docs/account/login-and-account#sign-out).
+
+</Accordion>
+<Accordion title="How do I sign in without a browser?" id="sign-in-without-browser">
+
+You currently can't. Support for this is planned for a later release. Sign-in has to be completed in a browser on the same computer that runs `cdg`, which isn't possible in an SSH remote session, a container, or a server without a graphical interface. For the reason, and for the workarounds that don't work, see [Without a desktop browser](/docs/account/login-and-account#no-browser).
+
+</Accordion>
+</Accordions>
+
+## Platforms and installation
+
+<Accordions type="single">
+<Accordion title="Is Windows supported?" id="windows">
+
+Not during the public beta. CodeDAG currently supports macOS and Linux and is installed with Homebrew. See [Installation and Sign-In](/docs/get-started/installation).
+
+</Accordion>
+<Accordion title="Do I need to install Node.js?" id="nodejs">
+
+No. CodeDAG is distributed as a standalone executable, and once you install it with Homebrew, you can run `cdg` right away. See [Installation and Sign-In](/docs/get-started/installation). Install Claude Code or Codex by following its own instructions.
+
+</Accordion>
+<Accordion title="Can I use CodeDAG on a server or in a container?" id="servers-and-containers">
+
+Not yet, if the server or container has no desktop browser. Support for this is planned for a later release. Using CodeDAG requires signing in, and for now sign-in has to be completed in a browser on the same machine. See [Without a desktop browser](/docs/account/login-and-account#no-browser).
+
+</Accordion>
+</Accordions>

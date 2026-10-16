@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <style>
+    .half { fill: #16151d; }
+    .slices { fill: #7632ec; }
+    @media (prefers-color-scheme: dark) {
+      .half { fill: #f1f0f6; }
+      .slices { fill: #b899ff; }
+    }
+  </style>
+  <path class="half" d="M16 0A16 16 0 0 1 16 32Z"/>
+  <path class="slices" d="M1 10.432A16 16 0 0 1 2 8.254L2 23.746A16 16 0 0 1 1 21.568ZM4 5.417A16 16 0 0 1 7 2.771L7 29.229A16 16 0 0 1 4 26.583ZM9 1.613A16 16 0 0 1 14 0.125L14 31.875A16 16 0 0 1 9 30.387Z"/>
+</svg>

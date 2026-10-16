@@ -1,0 +1,141 @@
+---
+title: 校验与提交
+description: cdg dag validate 与 cdg dag submit 的写法和选项，以及只对一次提交调整审核设置、修改后重新提交的做法。
+icon: Send
+---
+
+`cdg dag validate{:sh}` 在本地检查工作流文件，`cdg dag submit{:sh}` 把工作流放进项目的队列，轮到它时在后台执行。提交时会检查哪些事、提交之后怎样观察进度，见[提交、观察与日志](/zh/docs/guides/run-and-monitor)。
+
+## cdg dag validate [#validate]
+
+```bash title="Terminal"
+cdg dag validate <工作流...>
+```
+
+`cdg dag validate{:sh}` 在本地检查工作流文件的格式、字段和依赖关系。它只读取文件，不修改任何内容，不需要登录，也不消耗额度；除 `--help` 外没有其他选项。结果的读法和常见的警告，见编写工作流文件中[校验](/zh/docs/guides/writing-workflows#validate)一节。
+
+工作流至少要写一个，多个之间用空格分隔，每一个都可以写成名字或路径，写法见[指定工作流](/zh/docs/reference/cli#specify-workflow)。
+
+```bash title="Terminal"
+cdg dag validate feature
+# 一次校验三个工作流，其中一个在子目录里
+cdg dag validate feature docs .codedag/dags/team/release.yaml
+```
+
+命令要在项目内运行，也就是主仓库或某个已登记的工作区之内，因为校验除了检查文件本身，还要对照项目的设置和已登记的工作区，例如任务用到的 Agent 是否在项目的可用列表里、是否已经装在这台电脑上，指定的任务分支名是否与已有的分支重名，以及已登记的工作区目录是否还在。所以同一个文件换一台电脑，或者过一段时间再校验，结果可能不同。
+
+一次校验多个工作流时，每个文件分别检查、分别给出结果，一个文件出错不影响其他文件的检查。只要有一个文件出错，命令就以非零状态退出；只有警告时，退出状态仍为 0，在脚本中可以据此判断是否全部通过。
+
+校验通过并不保证提交一定成功。提交时还要确认工作流不在队列中、账号已经登录、额度够用，服务端还会检查文件大小和任务数，这些 `cdg dag validate{:sh}` 都不检查，见[提交时检查什么](/zh/docs/guides/run-and-monitor#submit-checks)。
+
+## cdg dag submit [#submit]
+
+```bash title="Terminal"
+cdg dag submit [选项] <工作流...>
+```
+
+`cdg dag submit{:sh}` 把工作流排进这个项目的队列。它先重新校验工作流文件，再确认工作流可以入队，全部通过才提交；入队之后命令立即返回，工作流在后台等待执行。工作流的写法与 `cdg dag validate{:sh}` 相同，至少写一个，不能省略；一次写多个时，见[一次提交多个工作流](#multiple)。
+
+提交需要登录 CodeDAG 账号，还没登录时，命令会先带你完成登录，见[为什么需要登录](/zh/docs/account/login-and-account#why-sign-in)。提交时只核对额度是否够用，并不扣除；额度在工作流排到队首、开始执行之前按任务数扣除，每个任务 1 点，见[什么时候扣除额度](/zh/docs/account/credits-and-subscription#when-charged)。提交被拒绝时，按故障排除中[提交被拒绝](/zh/docs/troubleshooting/troubleshooting#submit-rejected)一节对应的提示处理。
+
+一个工作流能不能提交，取决于它现在所处的[阶段](/zh/docs/concepts/how-it-works#phases)：只有处在计划中（`planning`）的工作流可以提交。
+
+| 工作流现在 | 能否提交 | 怎么做 |
+|---|---|---|
+| 还没提交过，或者审核记录已被清除（`planning`） | 可以 | 直接用 `cdg dag submit <工作流>{:sh}` 提交。提交之前用 `cdg task review{:sh}` 审核过其中的任务时例外，要先清除这些审核记录，见[还没提交的工作流中的任务审核记录](/zh/docs/reference/cli/review#unsubmitted-task-reviews) |
+| 仍在队列中（`submitted`），无论在排队、执行中、被停下还是等待审核 | 不能，同一个工作流在队列中只能有一份 | 等它审核结束；想按修改后的文件重来，见[修改已提交的工作流](#modify-submitted) |
+| 审核已经结束（`reviewed`） | 不能直接提交 | 先清除审核记录，再提交，见[修改已提交的工作流](#modify-submitted) |
+
+### 选项 [#options]
+
+| 选项 | 取值 | 省略时 | 用途 |
+|---|---|---|---|
+| `--attach` | 无 | 提交后命令立即返回 | 提交后在当前终端跟随这个工作流的日志，遇到需要人工审核的任务或工作流时显示审核菜单，见[提交后跟随日志](#attach) |
+| `-y`、`--yes` | 无 | 在终端中询问是否仍要提交，默认不提交 | 校验只有警告时不再询问，直接提交；有错误时仍然不提交 |
+| `--task-auto-accepted <值>` | `always`、`done`、`none` | 按任务、工作流文件与项目设置中的配置，都没写时为 `always` | 这一次提交中所有任务的审核策略，见[只对这一次提交调整审核设置](#auto-accept-options) |
+| `--dag-auto-accepted <值>` | `always`、`done`、`none` | 按工作流文件与项目设置中的配置，都没写时为 `done` | 这一次提交中整个工作流的审核策略，见[只对这一次提交调整审核设置](#auto-accept-options) |
+
+`-y` 只影响警告的确认。在交互终端里，校验有警告时命令会先列出警告，再询问是否仍要提交，默认不提交；经管道写入的作答同样有效，例如 `printf 'y\n' | cdg dag submit feature{:sh}`。在脚本、CI 或 Agent 的命令工具这类没有交互终端的环境里，不加 `-y` 时的结果取决于 stdin：
+
+- **stdin 已经关闭，或者指向 `/dev/null`：** 命令不询问。普通警告照常提交；其中含 `branchName` 冲突警告时取消提交，输出 `⚠ Submission cancelled. Workflow was not submitted.`，退出状态为 1。
+- **stdin 是一个没有数据的管道：** 命令显示询问并等着作答，管道关闭后报错，说明没有可以作答的交互终端、工作流未提交，退出状态为 1。
+
+所以在这类环境里提交，先用 `cdg dag validate{:sh}` 看过警告、确认不影响执行，再加 `-y` 提交，结果才可预期。
+
+有一条警告要单独留意：任务的 [`branchName`](/zh/docs/reference/workflow-file#tasks-branch-name) 与已有的分支同名时，校验给出 `branch-name-conflict`。不处理就提交时（加 `-y`，或者在询问中选择继续），工作流照常入队，但执行到这个任务时任务会停在 `on-hold`（`branch-name-conflict`）。警告写明同名分支在哪里、怎样处理：工作区里的本地分支由你删除或改名，被 CodeDAG 的同步仓库占着的用 [cdg branch release](/zh/docs/reference/cli/control#branch-release) 释放，完整的做法见[使用指定的任务分支名](/zh/docs/reference/branches-and-files#branch-name)。
+
+## 只对这一次提交调整审核设置 [#auto-accept-options]
+
+`--task-auto-accepted` 与 `--dag-auto-accepted` 在提交时覆盖工作流文件和项目设置中的审核策略，只作用于这一次提交，不修改任何文件。想临时多一道人工把关时用它们，例如第一次运行一个新工作流，想逐个检查任务的结果；停下来等待审核的任务怎样处理，见[审核任务与工作流](/zh/docs/guides/review-tasks)。
+
+`--task-auto-accepted` 决定每个任务完成后是否自动接受。它覆盖这次提交中所有任务的审核策略，包括任务自己写的 `autoAccepted`、工作流的 `taskAutoAccepted` 和项目设置，不能只作用于其中几个任务。`--dag-auto-accepted` 决定所有任务审核结束后，是否自动接受整个工作流，它覆盖工作流的 `dagAutoAccepted` 和项目设置。省略其中一个选项时，对应的审核策略仍按原来的配置确定，完整的顺序见[默认值与覆盖顺序](/zh/docs/reference/workflow-file#precedence)。
+
+两个选项的取值与工作流文件中的同名字段相同：`none` 表示停下来等你审核；`always` 与 `done` 在 0.1.0 中效果相同，都表示自动接受。每个取值用于任务与用于整个工作流时的具体含义，以及自动接受的例外，见[自动接受的取值](/zh/docs/reference/workflow-file#auto-accept-values)。
+
+```bash title="Terminal"
+# 每个任务完成后都停下，等你审核
+cdg dag submit feature --task-auto-accepted none
+# 任务照常自动接受，全部结束后等你对整个工作流给出结论
+cdg dag submit feature --dag-auto-accepted none
+# 两处都停下，等你审核
+cdg dag submit feature --task-auto-accepted none --dag-auto-accepted none
+```
+
+反过来，工作流文件或项目设置里写了 `none`，这一次想让它自动接受时，把对应的选项设为 `always`。`--task-auto-accepted always` 同样作用于所有任务，文件里单独设了 `autoAccepted: none` 的任务也会自动接受。
+
+## 一次提交多个工作流 [#multiple]
+
+一条命令可以提交多个工作流，它们按书写的顺序排进队列，前一个结束后下一个才开始。
+
+```bash title="Terminal"
+cdg dag submit api-docs release-notes
+```
+
+这批工作流要么全部提交，要么一个都不提交。其中任何一个校验出错、已经在队列中或者审核已经结束，又或者这批工作流的任务总数超出了剩余额度，整条命令都不会提交任何工作流。只有警告时，命令一次列出所有工作流的警告，只询问一次；`-y` 对全部工作流生效。
+
+`--task-auto-accepted`、`--dag-auto-accepted` 同样作用于这条命令中的每个工作流。要给不同的工作流不同的审核设置，就分几条命令提交。
+
+一条命令最多提交 100 个工作流。提交时，这些工作流文件的内容会一起发给 CodeDAG 服务核对额度（服务会收到哪些数据，见[你的数据边界](/zh/docs/account/login-and-account#data-boundary)），这次请求不能超过 1 MiB，所以各文件的大小加起来也要在 1 MiB 以内。超出任一限制时整批都被拒绝，分成几条命令提交即可。单个工作流文件的大小与任务数的限制，见[文件位置与格式](/zh/docs/reference/workflow-file#file-location)。
+
+## 修改已提交的工作流 [#modify-submitted]
+
+工作流提交时，CodeDAG 保存了当时的工作流定义，这次执行从头到尾都按它进行，之后修改工作流文件或项目设置，都不会影响它。想让修改生效，要先结束原来的执行，再按修改后的文件重新提交。
+
+只想调整某个任务的做法时，不必改文件重来：执行中的任务可以进入会话，直接和任务 Agent 对话；已经做完的任务可以在审核时要求修改，见[选择观察与修改方式](/zh/docs/guides/intervene-and-control#choose-intervention)。改动了任务的拆分、依赖、prompt、Agent 这类定义本身时，才需要重新提交。
+
+重新提交分三步：先对原来的执行给出工作流级的审核结论，让它离开队列；再[清除它的审核记录](/zh/docs/reference/cli/review#clear-and-resubmit)，让工作流回到 `planning`；最后重新提交。工作流已经审核结束时，跳过第一步即可。下面的例子放弃原来的执行：
+
+```bash title="Terminal"
+# 1. 取消原来的执行：仍在执行的任务先中断，队列中排在它后面的工作流照常执行
+cdg dag review cancel feature -k --downstream proceed
+# 2. 清除审核记录
+cdg dag review clear feature
+# 3. 按修改后的文件重新提交
+cdg dag submit feature
+```
+
+第一步决定原来的结果怎样处理。在隔离分支模式下取消时，集成分支回到这次工作流的起点，原来的结果默认先存进一条快照分支，以后还能从中取回；确定不需要时，加上 `--code discard` 直接丢弃。这几个选项的取值与默认值，以及接受或推迟工作流时的写法，见[审核](/zh/docs/reference/cli/review)。
+
+重新提交总是运行整个工作流，是一次新的执行，开始执行时按全部任务数重新消耗 CodeDAG 额度；新的执行从哪个提交开始、分支怎样命名，见[想再运行一次](/zh/docs/guides/finish-and-merge#run-again)。只想补做或重做其中几个任务时，把它们写成一个新的工作流单独提交，见[只补做其中几个任务](/zh/docs/guides/finish-and-merge#continue-remaining)。
+
+## 提交后跟随日志 [#attach]
+
+加上 `--attach`，提交之后当前终端会接着显示这个工作流的日志，直到它审核结束、离开队列。
+
+```bash title="Terminal"
+cdg dag submit api-docs --attach
+```
+
+跟随的内容与 `cdg dag logs <工作流> -f{:sh}` 相同，而且是只读的，你在这个终端里输入的内容不会传给任务 Agent；需要和任务 Agent 交流时，另开一个终端运行 `cdg task view{:sh}`，写法见 [cdg task view](/zh/docs/reference/cli/control#task-view)。按 Ctrl+C 只结束跟随，工作流在后台照常执行，之后用 `cdg dag logs <工作流> -f{:sh}` 可以重新跟上；按 `Ctrl+\` 则会中断整个工作流，效果与 `cdg dag kill{:sh}` 相同。
+
+跟随期间，有任务或整个工作流需要你审核时，终端会停下日志，显示审核菜单，你可以当场给出结论，用法见[想在提交的终端里跟着看](/zh/docs/guides/run-and-monitor#attach)。
+
+工作流本身被搁置时，跟随随即结束：终端输出 `Workflow entered on-hold: <工作流路径>`，其后的 `Reason:` 行给出搁置的原因，命令以退出状态 1 结束。工作流还在排队、没有开始执行时被搁置也是如此，例如审核前一个工作流时用了 `--downstream hold`。各种原因的处理步骤见[任务或工作流停在 on-hold](/zh/docs/troubleshooting/troubleshooting#on-hold)。
+
+一次提交多个工作流并加上 `--attach` 时，终端按队列顺序依次跟随它们，一个结束后接着跟随下一个。其中某个工作流被 `Ctrl+\` 中断、停在 `on-hold`，或者你在它的审核菜单里按 Esc 跳过了审核，跟随就此结束；排在它后面的工作流仍在队列中，要等它恢复或审核结束之后才会开始。
+
+## 相关
+
+- [提交、观察与日志](/zh/docs/guides/run-and-monitor)：提交时检查什么，以及提交之后怎样查看状态、读日志。
+- [工作流文件参考](/zh/docs/reference/workflow-file)：校验依据的字段规则，以及审核策略的取值与覆盖顺序。
+- [审核](/zh/docs/reference/cli/review)：给工作流或任务下结论、清除审核记录的全部参数。

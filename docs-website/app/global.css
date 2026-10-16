@@ -1,0 +1,285 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+@import 'fumadocs-twoslash/twoslash.css';
+@import 'fumadocs-openapi/css/preset.css';
+@import './home.css';
+@plugin 'tailwindcss-animate';
+
+/* Local web subsets for the philosophy cards; see public/fonts/philosophy/. */
+@font-face {
+  font-family: "CodeDAG Philosophy Kai";
+  src: url("/fonts/philosophy/philosophy-kai-400.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "CodeDAG Philosophy Serif";
+  src: url("/fonts/philosophy/philosophy-serif-400.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "CodeDAG Philosophy Mincho";
+  src: url("/fonts/philosophy/philosophy-mincho-400.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+/* Design philosophy: an at-a-glance list of linked principles. */
+.prose .philosophy-principles {
+  display: grid;
+  /* The column shrinks to the widest line and is centered; lines align left within it. */
+  grid-template-columns: minmax(0, max-content);
+  justify-content: center;
+  gap: 0.625rem;
+  margin-block: 1.75rem 2.75rem;
+  padding: 1.5rem clamp(1rem, 3vw, 2rem);
+  border-radius: 0.75rem;
+  background-color: color-mix(in srgb, var(--color-fd-foreground) 3.5%, var(--color-fd-background));
+  list-style: none;
+  text-align: left;
+  font-family: "CodeDAG Philosophy Serif", serif;
+  font-size: 1.125rem;
+  line-height: 1.65;
+  font-weight: 400;
+  font-synthesis: none;
+  font-optical-sizing: auto;
+}
+
+.prose .philosophy-principles:lang(zh) {
+  font-family: "CodeDAG Philosophy Kai", serif;
+}
+
+.prose .philosophy-principles:lang(ja) {
+  font-family: "CodeDAG Philosophy Mincho", "Yu Mincho", "Hiragino Mincho ProN", serif;
+}
+
+.dark .prose .philosophy-principles {
+  background-color: color-mix(in srgb, var(--color-fd-muted) 55%, transparent);
+}
+
+.prose .philosophy-principles > li {
+  margin: 0;
+  padding: 0;
+}
+
+.prose .philosophy-principles a {
+  color: inherit;
+  font-weight: inherit;
+  text-decoration-line: none;
+  text-underline-offset: 0.2em;
+}
+
+.prose .philosophy-principles a:hover {
+  color: var(--color-fd-primary);
+  text-decoration-line: underline;
+  text-decoration-color: currentColor;
+}
+
+.prose .philosophy-principles a:focus-visible {
+  border-radius: 0.125rem;
+  outline: 2px solid var(--color-fd-primary);
+  outline-offset: 4px;
+}
+
+/* Code blocks with line wrap on (toggled in components/mdx/code-block.tsx): wrap long lines instead of scrolling sideways. */
+.shiki[data-wrap='true'] pre {
+  width: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Brand violet. One perceived hue across the site, anchored on
+   --color-fd-primary below: at a fixed HSL hue a color looks bluer the darker
+   it gets, so the darker steps take a higher HSL hue (256 to 258 for tints,
+   260 to 262 from 70% lightness down). The gradient end stays at 280: it is
+   the fourth node of the mark. The app site defines the same tokens, kept in
+   step with these by hand. */
+@theme {
+  --spacing-page: 1440px;
+  --color-brand: hsl(260, 100%, 70%);
+  --color-brand-foreground: white;
+  --color-brand-secondary: hsl(262, 40%, 20%);
+  --color-brand-secondary-foreground: hsl(258, 100%, 80%);
+  --color-brand-200: hsl(258, 100%, 76%);
+  --color-brand-gradient-from: hsl(262, 100%, 65%);
+  --color-brand-gradient-to: hsl(280, 100%, 70%);
+}
+
+.dark {
+  --color-brand: hsl(258, 100%, 76%);
+  --color-brand-secondary: hsl(262, 40%, 15%);
+  --color-brand-secondary-foreground: hsl(257, 100%, 85%);
+  --color-brand-foreground: white;
+  --color-brand-200: hsl(257, 100%, 82%);
+  --color-brand-gradient-from: hsl(260, 100%, 70%);
+  --color-brand-gradient-to: hsl(280, 100%, 75%);
+}
+
+@theme inline {
+  --default-mono-font-family: var(--font-mono);
+}
+
+:root {
+  --color-fd-primary: hsl(256, 100%, 75%);
+}
+
+html {
+  scrollbar-gutter: stable;
+}
+
+html:has(body[data-scroll-locked]) {
+  scrollbar-gutter: auto;
+}
+
+body {
+  background-color: var(--color-fd-background);
+}
+/* .dark {
+  --color-fd-primary: hsl(256, 100%, 75%);
+} */
+@keyframes circuit_1 {
+  0% {
+    transform: translateY(-20px);
+  }
+
+  100% {
+    transform: translateY(100px);
+  }
+}
+
+@keyframes circuit_1_x_energy {
+  0%,
+  46% {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  47%,
+  70% {
+    opacity: 100%;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(212px);
+  }
+}
+
+/* Navbar layout alignment with sidebar */
+#nd-nav nav {
+  display: grid !important;
+  grid-template-columns: 268px 1fr auto;
+  padding-left: 0 !important;
+  padding-right: 1rem !important;
+}
+
+
+/* Logo area - align with sidebar left edge with margin */
+#nd-nav nav > a:first-child {
+  padding-left: 1rem;
+}
+
+/* Navigation links - start from sidebar right edge */
+#nd-nav nav > ul:first-of-type {
+  padding-left: 0 !important;
+  justify-self: start;
+}
+
+/* Right side controls */
+#nd-nav nav > div {
+  justify-self: end;
+}
+
+/* Mobile: reset to default layout with gap */
+@media (max-width: 767px) {
+  #nd-nav nav {
+    display: flex !important;
+    padding-left: 1rem !important;
+    column-gap: 1.5rem;
+  }
+  #nd-nav nav > a:first-child {
+    padding-left: 0;
+  }
+}
+
+/* From 1024px up, where its links show, the navbar is the same on every page:
+   the layout above, made for the docs (logo over the sidebar, controls at the
+   right edge of the 1440px layout). The home, pricing and policy pages have no
+   sidebar, but a bar that kept to their 1200px column would put the logo and
+   the buttons somewhere else than on the docs; and the docs cannot use that
+   bar either, its logo would hang over the middle of the sidebar.
+   Below 1024px the bar is a logo and a few buttons. There the side padding on
+   those pages follows their own gutter, so the logo stays above the text. */
+@media (max-width: 1023px) {
+  #nd-nav[data-layout='page'] nav {
+    display: flex !important;
+    column-gap: 1.5rem;
+    padding-left: 2rem !important;
+    padding-right: 2rem !important;
+  }
+
+  #nd-nav[data-layout='page'] nav > a:first-child {
+    padding-left: 0;
+  }
+}
+
+@media (max-width: 639px) {
+  /* In waitlist mode the sign-up button sits on the bar here too; a smaller
+     minimum gap after the logo keeps it on one line down to 360px. */
+  #nd-nav[data-layout='page'] nav {
+    padding-left: 1.25rem !important;
+    padding-right: 1.25rem !important;
+    column-gap: 0.5rem;
+  }
+}
+
+/* The navbar scrolls over violet-tinted stages on the home page. In the light
+   theme a mostly see-through bar would pick up their tint. Every page gets the
+   same background, so the bar does not change when you move to the docs. */
+:root:not(.dark) #nd-nav > div {
+  background-color: color-mix(in srgb, var(--color-fd-background) 94%, transparent);
+}
+
+/* Hide fumadocs-ui built-in sidebar panel, use custom SidebarFloatingButton instead */
+[data-sidebar-panel] {
+  display: none !important;
+}
+
+/* Sidebar footer: remove border and adjust padding to align with floating button */
+/* Floating button icon distance from edge: 16px (start-4) + 1px (border) + 2px (p-0.5) + 8px (p-2) = 27px */
+/* Sidebar button needs: 27px - 6px (button p-1.5) = 21px footer padding */
+#nd-sidebar > div.border-t,
+#nd-sidebar-mobile > div.border-t {
+  border-top: none !important;
+  padding-left: 1.3125rem !important; /* 21px */
+  padding-bottom: 1.3125rem !important; /* 21px */
+}
+
+/* Mobile sidebar: slide from left instead of right */
+#nd-sidebar-mobile {
+  --fd-sidebar-drawer-offset: -100%;
+  inset-inline-start: 0 !important;
+  inset-inline-end: auto !important;
+  border-inline-start: none !important;
+  border-inline-end: 1px solid var(--color-fd-border) !important;
+}
+
+/* Hide the original close button in mobile sidebar header */
+#nd-sidebar-mobile > div:first-child > div:first-child > button:last-child {
+  display: none;
+}
+
+/* Docs 404 page: reduce min-height to allow footer to appear without scrolling */
+#nd-docs-layout:has([data-not-found]) {
+  min-height: auto;
+}
+
+/* Docs page: remove bottom padding to reduce gap between docs footer and site footer */
+#nd-page {
+  padding-bottom: 0 !important;
+}

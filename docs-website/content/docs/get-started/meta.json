@@ -1,0 +1,6 @@
+{
+  "title": "Get Started",
+  "icon": "Rocket",
+  "defaultOpen": true,
+  "pages": ["installation", "quickstart", "second-workflow", "let-your-agent-orchestrate"]
+}

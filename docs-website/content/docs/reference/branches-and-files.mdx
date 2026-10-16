@@ -1,0 +1,156 @@
+---
+title: File and Branch Operations
+description: Restore changes from a snapshot branch, give a task branch a fixed name, save workflow configuration separately, and find the log files.
+icon: FolderTree
+---
+
+CodeDAG leaves the results of a run and your project configuration on your computer as ordinary Git branches and files. You can do most things with `cdg` commands, but a few require working directly with Git or the file system. For the full steps to check results, merge into the main branch, and clean up branches, see [Finish, Merge, and Clean Up](/docs/guides/finish-and-merge).
+
+## Restore some of the changes from a snapshot [#restore-from-snapshot]
+
+In isolated-branches mode, when a task is canceled, deferred, or reworked, or a whole workflow is canceled or deferred, the result is saved to a snapshot branch by default (`--code snapshot`). That branch stays in the repository until you delete it yourself. A task snapshot holds more than the task's own changes. It also includes the code the task started from and the upstream results that were merged in. So before you restore anything, compare the snapshot with the task branch to see which changes are the task's own, then use Git to restore the parts you need. For why snapshot branches exist, see [When a result isn't good enough](/docs/concepts/workspaces-and-branches#fallback).
+
+### What a snapshot holds [#snapshot-contents]
+
+There are two kinds of snapshot branch. One holds the result of a single task, and the other holds the results of a whole workflow:
+
+| Snapshot | Branch name | What it holds | Branch to compare with |
+|---|---|---|---|
+| Task snapshot | `cdg/<workflow-name>/snapshots/t<task-id>-<title>-<time>` | Everything on the task branch at the moment of review. Uncommitted changes are committed to it first | The task's task branch |
+| Workflow snapshot | `cdg/<workflow-name>/snapshots/dag-review-<time>` | The full set of merged results on the integration branch | The integration branch, `cdg/<workflow-name>/integration` |
+
+The title in the branch name is converted to lowercase, and spaces and other characters that can't be used in a branch name are replaced with `-`. The time is local time, to the second. For example, if task 2 of the `add-helpers` workflow, titled `Add mul helper`, is sent back for rework at 2026-09-30 11:39:55, its snapshot branch is `cdg/add-helpers/snapshots/t2-add-mul-helper-20260930-113955`.
+
+The `<workflow-name>` in a branch name is derived from the workflow file's path relative to `.codedag/dags/`. For example, `team-a/build.yaml` in a subdirectory becomes `team-a_build`. For the rules, see [File location and format](/docs/reference/workflow-file#file-location). When in doubt, go by the `Integration Branch` in the output of `cdg dag status{:sh}`.
+
+In the following cases, there's no snapshot to restore from:
+
+- **There are no changes to save:** No snapshot branch is created.
+- **The review used `--code discard`:** The changes are discarded outright and can't be restored afterward.
+- **A task-level `cancel` or `defer` used `--code commit`:** The changes are committed on the task branch, and no separate snapshot branch is created.
+- **Shared-workspace mode:** There are no snapshots. The files a canceled task wrote stay in the workspace. See [How does review differ in shared-workspace mode?](/docs/guides/review-tasks#shared-workspace).
+
+For the values that `--code` accepts with each review action, and their defaults, see the [task-level options table](/docs/reference/cli/review#task-review-options).
+
+### Find the snapshot branch [#find-snapshot]
+
+Every snapshot branch name starts with `cdg/<workflow-name>/snapshots/`, so you can list them with `git branch --list`. To compare, you also need the corresponding task branch, whose name starts with `cdg/<workflow-name>/t<task-id>-`:
+
+```bash title="Terminal"
+# List the snapshot branches of every workflow in the repository
+git branch --list 'cdg/*/snapshots/*'
+
+# Find the task branch of task 2 in the add-helpers workflow
+git branch --list 'cdg/add-helpers/t2-*'
+```
+
+One task can have several snapshot branches, for example when it was reworked once and later canceled. Tell them apart by the time at the end of the name. For a workflow that has been run again, the workflow name in its branch names carries a time suffix, as in `cdg/add-helpers-20260930-105924/snapshots/...`, and the first command lists those too. When a task sets its branch name with `branchName`, the task branch has exactly that name, and its snapshot branches still start with `cdg/<workflow-name>/snapshots/`.
+
+Worktree replicas share one set of branches with the primary repository, so you can see every snapshot branch from the primary repository. Clone replicas each have their own branches. When a task ran in a clone, its task branch and snapshot branch exist only in that clone. You can compare and restore right there in that clone, or fetch both branches into the primary repository first:
+
+```bash title="Terminal"
+git fetch ../my-app-clone-1 <snapshot-branch>:<snapshot-branch> <task-branch>:<task-branch>
+```
+
+If you aren't sure which clone a task ran in, list the snapshot branches in each clone. A workflow snapshot is created in the workspace that holds the integration branch, which is usually the primary repository.
+
+### See only the task's own changes [#compare-snapshot]
+
+Comparing the task branch with the snapshot branch using three dots gives you exactly the task's own changes:
+
+```bash title="Terminal"
+# Which files the task changed
+git diff --stat cdg/add-helpers/t2-add-mul-helper...cdg/add-helpers/snapshots/t2-add-mul-helper-20260930-113955
+
+# The commits in the snapshot that belong to this task
+git log --oneline cdg/add-helpers/t2-add-mul-helper..cdg/add-helpers/snapshots/t2-add-mul-helper-20260930-113955
+```
+
+A three-dot `git diff` starts from the point where the two branches diverged. After a task is canceled or deferred, its task branch sits at the clean baseline. After a rework, the new session also starts from the clean baseline. So the two branches always diverge at the clean baseline, and the comparison contains only the task's own changes. If you compare the snapshot directly with `main`, the upstream tasks' changes are counted too.
+
+You compare a workflow snapshot the same way, using the integration branch instead. After a workflow is canceled or deferred, the integration branch is back at this workflow's base, so the comparison shows all the changes from this run.
+
+```bash title="Terminal"
+git diff --stat cdg/add-helpers/integration...cdg/add-helpers/snapshots/dag-review-20260930-114306
+```
+
+### Restore the parts you need [#restore-changes]
+
+Before you restore anything, make sure the workflow's review is finished, then switch to the branch where you want the changes, such as `main` or a new branch. While a workflow is still in the queue, it may use the primary repository and any of the replicas. If you leave uncommitted changes in one of them, a task that starts later, or the step that merges into the integration branch, stops at `on-hold` because the workspace isn't clean. See [The workspace has uncommitted changes](/docs/troubleshooting/troubleshooting#hold-workspace).
+
+```bash title="Terminal"
+# Restore a whole file: replace the current file with the version in the snapshot
+git checkout <snapshot-branch> -- src/mul.js
+
+# Restore only the task's changes to one file, applying them to the current file
+git diff --binary <task-branch>...<snapshot-branch> -- README.md | git apply --3way
+
+# Restore all of the task's own changes
+git diff --binary <task-branch>...<snapshot-branch> | git apply --3way
+```
+
+The first approach gives you the file's complete contents from the snapshot. If upstream tasks also changed that file, their changes come along with it. The other two apply only the task's own changes and combine them with whatever else is in the file. If there's a conflict, `--3way` leaves conflict markers in the file for you to resolve. If there's no conflict, the restored changes are already staged, so check them and then commit them yourself. The `--binary` option makes the patch include changes to binary files such as images and fonts. Without it, `git apply` fails when the task changed a binary file. To bring the original commits along as well, you can instead use `git cherry-pick` to pick from the commits that `git log` listed in the previous section.
+
+A workflow snapshot holds a full set of results. To restore all of it, merge it the way you'd merge an integration branch, for example `git merge cdg/add-helpers/snapshots/dag-review-20260930-114306{:sh}`. To restore only part of it, use the methods above to restore file by file.
+
+## Use a fixed task branch name [#branch-name]
+
+To have a task's result land on a branch with a fixed name, for example because you plan to push that branch on its own and open a pull request, set `branchName` on the task. CodeDAG uses the name exactly as written, without the `cdg/` prefix. `branchName` works only in isolated-branches mode. For the requirements a name must meet and the names you can't use, see [`branchName`](/docs/reference/workflow-file#tasks-branch-name).
+
+```yaml title=".codedag/dags/search-api.yaml"
+tasks:
+  - id: 1
+    title: Implement the search API
+    branchName: feature/search-api
+    prompt: Implement the search API as described in docs/plans/search.md, and add the unit tests that go with it.
+```
+
+The trade-off with a fixed name is that it must not clash with an existing branch. An automatically named branch gets a time added to its name when the previous run's branch still exists, which avoids the clash, but a name set with `branchName` never changes. If a branch with that name already exists, validation gives a `branch-name-conflict` warning. If you submit without dealing with it, the task stops at `on-hold` when the workflow reaches it. The warning says what's holding the name and how to deal with it. Once the name is free, you can keep using it and don't need to choose a different one.
+
+A name can be held in two ways. The first is a local branch of the same name in a workspace, which you delete or rename yourself:
+
+```bash title="Terminal"
+# To keep the previous result: rename the branch
+git branch -m feature/search-api feature/search-api-prev
+
+# If you no longer need it: delete the branch
+git branch -D feature/search-api
+```
+
+Git doesn't let you delete a branch that's checked out in a workspace, so switch that workspace to another branch first. When your replicas are clones, deal with the same-named branch in each clone separately.
+
+The second occurs only when your replicas are clones. CodeDAG passes branches between workspaces through a sync repository on your machine, and the remote named `codedag-mirror` in the primary repository and in each clone points to it. If you used `--code commit` the last time you canceled or deferred this task, the name was left in the sync repository. Release it with `cdg branch release{:sh}`. You don't need to touch the `codedag-mirror` remote yourself:
+
+```bash title="Terminal"
+cdg branch release feature/search-api
+```
+
+Branches still in use by a workflow in the queue, and snapshot branches, can't be released. For the full conditions, see [`cdg branch release`](/docs/reference/cli/control#branch-release).
+
+If a task has already stopped at `on-hold` because of a same-named branch, recover it with `cdg task recover{:sh}` once the name is free. For the troubleshooting steps, see [Branch problems](/docs/troubleshooting/troubleshooting#hold-branch). If you still get `branch-name-conflict` after dealing with the old branch, switch to a new `branchName` in the workflow file, or remove it and let CodeDAG name the branch automatically.
+
+## Save workflows and shared configuration separately [#save-config]
+
+Workflow files and project settings live in `.codedag/` at the root of the primary repository. That directory is the project's [sidecar repository](/docs/concepts/how-it-works#sidecar-repo), a Git repository separate from the project repository. So you commit these files separately, inside `.codedag`, and they don't appear in the project repository's commits.
+
+Commit with ordinary git commands. The `.codedag/.gitignore` that `cdg init{:sh}` generates already excludes `local/`, the directory that holds the local settings file (`settings.local.jsonc`) and the logs. So `git add -A` adds only the files that can be shared, such as the workflow files under `dags/` and the shared settings file (`settings.jsonc`):
+
+```bash title="Terminal"
+cd .codedag
+git add -A
+git commit -m "Add search-api workflow"
+```
+
+CodeDAG never commits, pushes, or pulls in this repository, so when to save is up to you. To push it to a remote and sync with your team, see [Push `.codedag` to a remote](/docs/guides/team-sharing#push).
+
+## Log file locations [#log-files]
+
+Each workflow file has one log file, under `.codedag/local/logs/` in the primary repository. The log's path mirrors the workflow file's location relative to `.codedag/dags/`, with the extension changed to `.log`. The log for `.codedag/dags/add-helpers.yaml` is `.codedag/local/logs/add-helpers.log`. The log for `.codedag/dags/team-a/build.yaml`, in a subdirectory, is written to a subdirectory of the same name, at `.codedag/local/logs/team-a/build.log`. Directory and file names keep their original case and spelling. When a task runs in a replica, its log is still written to this directory in the primary repository.
+
+Every run of the same workflow is appended to the same file, and this is the file that `cdg dag logs{:sh}` and `cdg task logs{:sh}` read. Each log line begins with the task ID and the time, as in `[Task   2] [2026-09-30 11:38:20]`, so when you open the file directly, you can search by task or by time with tools such as `grep` and `less`.
+
+Logs are under `local/`, so they aren't under version control in `.codedag` and stay only on this computer. For the commands and options for viewing logs, see [cdg dag logs and cdg task logs](/docs/reference/cli/status-and-logs#logs). When you no longer need an old log, just delete the file.
+
+## Clean up branches or remove workspaces [#cleanup]
+
+Once a workflow's review is finished and the results you need have been merged, you can clean up the `cdg/<workflow-name>/` branches and the log file it left behind, along with any replicas you no longer use. For the steps, see [Clean up branches and workspaces](/docs/guides/finish-and-merge#cleanup). Snapshot branches are among those branches, and once you delete one, the changes in it can't be restored. Before you delete, follow [Restore some of the changes from a snapshot](#restore-from-snapshot) to make sure there's nothing you want to keep.

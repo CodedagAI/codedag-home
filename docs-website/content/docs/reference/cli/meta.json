@@ -1,0 +1,14 @@
+{
+  "title": "CLI Commands",
+  "icon": "Terminal",
+  "pages": [
+    "index",
+    "init",
+    "validate-and-submit",
+    "status-and-logs",
+    "control",
+    "review",
+    "plugin",
+    "auth"
+  ]
+}

@@ -1,0 +1,103 @@
+---
+title: 控制成本
+description: 运行工作流要付的两份成本各怎样计算，以及提交之前怎样估算、怎样少花。
+icon: Coins
+---
+
+用 CodeDAG 运行工作流要付两份成本：一份是 CodeDAG 额度，另一份是任务 Agent 自己的用量，也就是 Claude Code 或 Codex 消耗的订阅限额或 API 费用。前一份数一数任务就能算出，每个任务 1 点；后一份取决于模型、推理力度和每个任务读写的上下文，没法事先算准，要靠试跑来估。
+
+## 两种成本 [#two-costs]
+
+CodeDAG 额度按任务数计算，与任务做了多久、用了什么模型无关；Agent 用量由 Anthropic 和 OpenAI 按你本机 Claude Code、Codex 的登录方式各自计算，CodeDAG 既不代收，也不显示。
+
+| | CodeDAG 额度 | Agent 用量 |
+|---|---|---|
+| 由谁计算 | CodeDAG | Claude Code 由 Anthropic 计算，Codex 由 OpenAI 计算 |
+| 怎样计算 | 每个任务 1 点，工作流开始执行时按任务数一次扣除 | 用订阅登录时计入套餐的用量限额，常见的是 5 小时窗口和每周限额两层，具体因套餐而异；用 API key 时按 token 计费 |
+| 取决于什么 | 只取决于任务数 | 模型、推理力度、每个任务读写的上下文和对话轮数 |
+| 在哪里查看 | `cdg auth status{:sh}` 或网页控制台 | Claude Code 的 `/usage`；Codex 的 `/status` 或网页上的用量页面 |
+| 用完时 | 新的提交被拒绝；已经排队的工作流轮到执行时停在 `on-hold`，见[额度不足或无订阅时](/zh/docs/account/credits-and-subscription#insufficient-credits) | 撞上限额的任务要等限额恢复才能继续工作 |
+
+任务 Agent 就是你本机的 Claude Code 或 Codex，它们在任务里的用量，和你手动开的会话计在同一个账号上。限额的具体规则以各家的说明为准，见 Claude Code 的[成本管理文档](https://code.claude.com/docs/en/costs)和 Codex 的[用量说明](https://learn.chatgpt.com/docs/pricing)。
+
+## 估算一个工作流 [#estimate]
+
+CodeDAG 额度只要数一数任务就能算出：工作流文件里有几个任务，开始执行时就扣几点。这个数在开始执行的那一刻就定了，之后任务执行多久、中途返工几次、最后有几个任务真正做完，都不会改变它。重新提交是一次新的执行，开始执行时按那一次的任务数再扣，规则见[什么时候扣除额度](/zh/docs/account/credits-and-subscription#when-charged)。
+
+几个工作流先后排进队列时，要按它们的任务数之和来估算。每次提交时，CodeDAG 只核对这一次提交需要的额度够不够，并不为它预留；排在前面的工作流先开始、先把额度用掉，排在后面的轮到执行时就可能因为额度不足而停下。
+
+Agent 用量没法事先算准，但可以从任务的拆分方式判断大小。每个任务都是一个全新的会话，要把自己需要的代码和文档重新读一遍，所以同一批文件被几个任务读取，就要付几次读取的用量；任务里派出的子 Agent 也各自计入用量。反过来，把太多工作塞进一个任务也未必更省：会话越长，每一轮请求带上的上下文越多，每一轮都更贵。任务怎样拆分才合适，见[拆任务：一个任务一个目标](/zh/docs/guides/designing-tasks-and-prompts#split-tasks)。
+
+举个例子：让 4 个任务分别从不同角度审查同一份改动，CodeDAG 额度是 4 点；Agent 那边，4 个会话各自读一遍这份改动和相关代码，用量大致是一个会话做一次审查的 4 倍。要知道一个任务实际用多少，最可靠的办法是先试跑一小段。
+
+## 先试跑一小段 [#trial-run]
+
+任务多、彼此又相似的工作流，比如把同一种修改应用到二十个模块，可以先把开头的一两个任务单独写成一个工作流跑一遍，确认 prompt 写得清楚、`mode` 不会让任务卡在审批上、产出符合预期，再提交其余的部分。试跑只消耗一两点额度；而直接提交整个工作流时，全部任务的额度在开始执行时就扣掉了，等发现 prompt 有问题，扣掉的额度不会自动退还，Agent 的用量也已经花了出去。
+
+试跑也是估算 Agent 用量最直接的办法。在这个账号没有其他会话运行时，试跑前后各看一次 Claude Code 的 `/usage` 或 Codex 的 `/status`，就能知道一个任务大约占掉多少限额，乘以任务数，再对照剩余的限额，就能判断整个工作流能不能在一个窗口里跑完。
+
+试跑满意的结果可以直接留用：正式的工作流只写剩下的任务，只要不写 `baseRef`、也没有把主仓库切回别的分支，它就会接着试跑的结果开始（见[起点](/zh/docs/concepts/workspaces-and-branches#branches)）。这样两次消耗的额度加起来，与一次提交全部任务相同。
+
+## 按任务选模型 [#model-per-task]
+
+模型和推理力度是决定 Agent 用量的主要因素之一，而工作流可以给每个任务单独设置：用 `model` 和 `effort` 让机械性的任务用较省的配置，只在需要判断的任务上用强模型和较高的推理力度。CodeDAG 额度不受影响，每个任务仍是 1 点。
+
+不写这两个字段时，所有任务都用 Agent 自身配置的默认模型和推理力度。如果你平时的默认是最强的模型，整个工作流的每个任务都会按它消耗，包括那些只是在搜索、整理或按方案逐处修改的任务。
+
+下面的工作流先盘点仓库里的待办注释，再评估先做哪些，两个任务各用一档配置：
+
+```yaml title=".codedag/dags/todo-triage.yaml"
+executionMode: shared-workspace   # 两个任务都只写报告文件，不需要分支
+tasks:
+  - id: 1
+    title: 盘点待办注释
+    agent: claude
+    mode: bypassPermissions
+    model: sonnet                 # 机械的搜索与整理，用较省的模型
+    effort: low
+    prompt: |
+      找出仓库中所有 TODO 与 FIXME 注释（跳过依赖目录和构建产物），
+      按文件整理成表格，每行写文件路径、行号和注释原文，
+      写入 docs/todo-triage/inventory.md（已存在时直接覆盖），不修改其他文件。
+  - id: 2
+    title: 评估优先级
+    dependencies: [1]
+    agent: claude
+    mode: bypassPermissions
+    model: opus                   # 需要结合代码做判断，用更强的模型
+    effort: high
+    prompt: |
+      阅读 docs/todo-triage/inventory.md，结合相关代码，
+      判断每条待办的影响和工作量，选出最值得先做的五条并说明理由，
+      写入 docs/todo-triage/priorities.md（已存在时直接覆盖），不修改其他文件。
+```
+
+一般来说，按清单搜索、整理格式、按写好的方案逐处修改、生成固定格式的文档，适合较省的配置；制定方案、审查、综合多份结果、排查疑难问题，值得用强模型。两个字段的写法和各家可用的取值见[选模型与推理力度](/zh/docs/guides/agents-and-permission-modes#model-and-effort)。
+
+## 并发与限额 [#concurrency]
+
+并发不改变 CodeDAG 额度，也不怎么改变 Agent 用量的总数，它改变的是这些用量花出去的速度：同时执行的几个任务是几个独立的会话，一起从同一个账号的限额里消耗。
+
+并发越高，越快用完一个窗口的限额，而且用完时，正在执行的几个任务会一起停下。如果整个工作流的用量超出一个窗口能提供的，调低 `maxConcurrency`，让同样的用量分摊到更长的时间里，就更不容易在中途撞上 5 小时这类短窗口的限额；代价是工作流跑得更久，每周限额也不会因此变多。用 API key 时，并发越高，也越容易碰到每分钟请求数或 token 数的速率限制。
+
+混用 Claude Code 和 Codex，可以把用量分到两份各自独立的限额上：一家撞上限额时，另一家的任务照常执行，见[两家的用量限额互不影响](/zh/docs/guides/mixing-agents#usage-limits)。
+
+让 Agent 帮你编排时，编排 Agent 自己的会话也从它所用账号的限额里消耗；它和任务用的是同一家 Agent 时，长时间的巡检会占掉一部分本可以留给任务的限额。
+
+撞上限额之后，怎样找出受影响的任务、怎样止损并接着做，见故障排除的 [Agent 用量限额或速率限制](/zh/docs/troubleshooting/troubleshooting#agent-usage-limits)。
+
+## 在关键节点返工，少整体重跑 [#rework]
+
+在一次执行之内修正结果，不再消耗 CodeDAG 额度；结果一旦放行、只能整个重新提交时，就要按全部任务再付一次。所以在后续工作都建立在它之上的节点把审核门禁设为关，是用一点等待时间，换掉整体重跑的风险。
+
+门禁设为关时，任务完成后会停下来等你审核。结果不满意，可以用 `request-changes` 让原来的会话在现有结果上接着改，也可以用 `rework` 从任务开始前的干净起点重新做一遍，两个动作的用法见[按你的判断选择动作](/zh/docs/guides/review-tasks#choose-action)。这两种返工都不增加 CodeDAG 额度，只消耗 Agent 用量；其中 `rework` 开的是全新会话，用量大致相当于把这个任务重新执行一次。
+
+门禁设为开时，结果一完成就被自动接受，下游随即在它之上开始，事后发现问题，结论已经不能更改，原因见[审核结论不能更改](/zh/docs/concepts/review-gates#no-undo)。这时如果只有少数几个任务需要重做，把它们单独写成一个新的工作流接着做，只按这几个任务消耗额度，比清除审核记录后重新提交整个工作流要省，做法见[任务已经有了审核结论，才发现问题](/zh/docs/troubleshooting/troubleshooting#after-conclusion)。
+
+把门禁设为关也有代价：停下等审核的任务会让下游一直等待，在隔离分支模式下还一直占用自己的工作区，设为关的门禁越多，工作流跑得越慢。所以只值得在出错代价最大的少数节点这样设置，见[哪些节点值得把门禁设为关](/zh/docs/concepts/review-gates#when-to-close)。
+
+## 相关
+
+- [额度、订阅与扣费](/zh/docs/account/credits-and-subscription)：免费额度、订阅和扣费规则的完整说明。
+- [选择 Agent、模型与权限模式](/zh/docs/guides/agents-and-permission-modes)：为每个任务选择 Agent、模型、推理力度与权限模式。
+- [故障排除：Agent 用量限额或速率限制](/zh/docs/troubleshooting/troubleshooting#agent-usage-limits)：撞上 Claude Code 或 Codex 的用量限额之后怎样处理。

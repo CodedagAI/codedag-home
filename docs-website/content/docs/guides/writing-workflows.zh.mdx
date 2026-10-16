@@ -1,0 +1,151 @@
+---
+title: 编写工作流文件
+description: 从最小结构开始写一个工作流文件，按需要加上常用字段，并在提交前用 cdg dag validate 校验。
+icon: FileCode
+---
+
+[工作流](/zh/docs/concepts/how-it-works#workflow)文件是主仓库 `.codedag/dags/` 目录下的一个 YAML 或 JSON 文件，列出要执行的任务和任务之间的依赖。必须写的只有每个任务的 `id`、`title` 和 `prompt`；任务由哪个 Agent 执行、运行中要不要等你审批、完成后要不要等你审核，各由一个可选字段控制，不写时取默认值。
+
+## 不想手写时
+
+装了 CodeDAG Guide 插件的 Claude Code 或 Codex 可以按你的描述替你写工作流文件、校验、提交并跟踪进度，做法见[让 Agent 帮你编排](/zh/docs/get-started/let-your-agent-orchestrate)。它写出的文件和手写的没有区别，同样放在 `.codedag/dags/` 下，本页后面各节也适用于读懂和检查这些文件。
+
+## 文件放在哪
+
+工作流文件放在主仓库（也就是 `.codedag/` 所在的仓库）的 `.codedag/dags/` 目录下，CodeDAG 只从这里读取工作流。文件名去掉扩展名就是工作流的名字，命令里写名字即可：`.codedag/dags/testing-docs.yaml` 可以用 `cdg dag validate testing-docs{:sh}` 校验。这个名字还会出现在任务分支名和日志文件名里，所以取一个简短的英文小写名字最方便。
+
+文件格式可以是 YAML（`.yaml`、`.yml`）或 JSON（`.json`），两种格式的字段完全相同。推荐用 YAML，因为多行的 prompt 写起来更自然，还能加注释。`cdg init` 在 `.codedag/dags/` 下生成的 `untitled_dag.yaml` 是一份带注释的空白模板，可以复制一份、改名后开始写。
+
+`.codedag/` 是独立于项目仓库的[边车仓库](/zh/docs/concepts/how-it-works#sidecar-repo)，新建的工作流文件不会出现在项目仓库的 `git status` 里；想给它们留下版本记录，见[单独保存工作流与共享配置](/zh/docs/reference/branches-and-files#save-config)。
+
+## 最小结构 [#minimal-structure]
+
+一个工作流文件至少要有 `tasks` 列表，列表里至少有一个任务，每个任务都要有 `id`、`title` 和 `prompt`；任务之间的先后关系用 `dependencies` 表达。下面这个工作流有两个任务：任务 1 整理项目的测试命令并写进一个文件，任务 2 读这个文件，在 README 里补上测试说明。
+
+```yaml title=".codedag/dags/testing-docs.yaml"
+tasks:                      # 任务列表，至少要有一个任务
+  - id: 1                   # 任务编号：工作流内唯一的正整数
+    title: 整理测试命令     # 给人看的短标题，显示在状态看板上
+    prompt: |               # 交给任务 Agent 的指令，| 表示下面是多行文本
+      阅读仓库里的构建与测试配置（例如 package.json、Makefile 或 CI 配置），
+      找出在本地运行全部测试的命令和需要的准备步骤，
+      写入 docs/notes/testing.md。只写这一个文件（已存在时直接覆盖），不修改其他文件。
+
+  - id: 2
+    title: 在 README 中补充测试说明
+    dependencies: [1]       # 等任务 1 完成并被接受后才开始
+    prompt: |
+      阅读 docs/notes/testing.md，在 README.md 中新增“运行测试”一节，
+      用三到五步说明如何在本地运行测试。只修改 README.md。
+```
+
+任务 2 的 prompt 写明了要读取的文件路径：每个任务都是一个全新的 Agent 会话，看不到上游任务的对话，只能从仓库里读到上游留下的文件。任务怎么拆、prompt 怎么写，见[拆分任务与编写 prompt](/zh/docs/guides/designing-tasks-and-prompts)。
+
+prompt 只有一行时可以直接写在冒号后面，但内容里有英文冒号加空格（例如 `Goal: ...`）时，YAML 会把它当成键值对并报语法错误，这时也改用 `|` 的多行写法。
+
+这个文件已经能通过校验，但它没有指定由哪个 Agent 执行，也没有指定权限模式。照原样提交时，两个任务都由项目的默认 Agent 执行，并沿用这个 Agent 自己的权限设置；如果那套设置要求批准文件修改或命令，任务就会停下来等人应答。实际提交前，通常还要为每个任务写上 `agent` 和 `mode`，写法见[你可能想控制的事](#common-fields)。
+
+## 你可能想控制的事 [#common-fields]
+
+常见的控制需求各对应一个字段。标“任务”的字段写在 `tasks` 的某一项里，只影响这个任务；标“工作流”的字段写在文件顶层、与 `tasks` 同级，作用于整个工作流。
+
+| 你想做的事 | 字段 | 不写时 | 说明 |
+|---|---|---|---|
+| 指定任务由哪个 Agent 执行 | `agent`（任务） | 项目的默认 Agent，在 `cdg init` 时确定 | `claude` 表示 Claude Code，`codex` 表示 Codex。让两者分工的写法见[混合使用 Claude Code 与 Codex](/zh/docs/guides/mixing-agents)。 |
+| 指定模型或推理力度 | `model`、`effort`（任务） | Agent 自己配置的默认值 | 原样传给 Agent，可填的值以该 Agent 的文档为准。 |
+| 决定任务运行中会不会停下来等你审批 | `mode`（任务） | Agent 自己的权限设置 | 两家写法不同。无人值守通常用完全授权：Claude Code 写 `bypassPermissions`，Codex 写 `yolo`。怎样取舍见[决定无人值守还是有人值守](/zh/docs/guides/agents-and-permission-modes#unattended-or-attended)。 |
+| 让某个任务完成后停下，等你审核 | `autoAccepted: none`（任务） | 自动接受 | 你接受这个任务的结果之后，它的下游才开始。审核的做法见[审核任务与工作流](/zh/docs/guides/review-tasks)。 |
+| 让每个任务完成后都停下，等你审核 | `taskAutoAccepted: none`（工作流） | 自动接受 | 相当于给每个任务写了 `autoAccepted: none`；任务自己写了 `autoAccepted` 时，以任务的为准。 |
+| 让整个工作流结束前等你给结论 | `dagAutoAccepted: none`（工作流） | 自动接受 | 所有任务完成后，由你对整个工作流的结果给出接受、取消或推迟的结论。 |
+| 限制同时运行的任务数 | `maxConcurrency`（工作流） | 项目设置中的值，`cdg init` 写入的是 1 加副本数；项目设置也没有时为 1 | 隔离分支模式下，实际并发数还不会超过可用的工作区数，见[同时执行几个任务由什么决定](/zh/docs/guides/parallel-workspaces#concurrency)。 |
+| 让所有任务直接在同一个工作区里运行，不建分支、不提交 | `executionMode: shared-workspace`（工作流） | `isolated-branches`，即隔离分支模式：每个任务在自己的分支上执行 | 共享工作区模式，默认在主仓库里运行，适合文档、调研这类不编译、不运行测试的任务。两种模式的区别见[执行模式](/zh/docs/concepts/workspaces-and-branches#execution-modes)。 |
+
+“不写时”一栏是没有其他设置时的结果。项目设置和 `cdg dag submit` 的选项也能设置其中几项；同一项设置了多处时，提交命令的选项优先于文件里的字段，任务字段优先于工作流字段，文件里的字段又优先于项目设置，完整的覆盖顺序见[默认值与覆盖顺序](/zh/docs/reference/workflow-file#precedence)。
+
+下面把最小结构里的例子补全成实际会提交的样子，按你用的 Agent 选一个版本。
+
+<Tabs items={['Claude Code', 'Codex']}>
+  <Tab value="Claude Code">
+
+```yaml title=".codedag/dags/testing-docs.yaml"
+tasks:
+  - id: 1
+    title: 整理测试命令
+    agent: claude             # 由 Claude Code 执行
+    mode: bypassPermissions   # 完全授权：运行中不停下来等审批
+    model: sonnet             # 整理信息，用较快的模型
+    autoAccepted: none        # 完成后停下，等你确认结果再继续
+    prompt: |
+      阅读仓库里的构建与测试配置（例如 package.json、Makefile 或 CI 配置），
+      找出在本地运行全部测试的命令和需要的准备步骤，
+      写入 docs/notes/testing.md。只写这一个文件（已存在时直接覆盖），不修改其他文件。
+
+  - id: 2
+    title: 在 README 中补充测试说明
+    dependencies: [1]
+    agent: claude
+    mode: bypassPermissions
+    model: opus               # 写给读者看的文字，用更强的模型
+    prompt: |
+      阅读 docs/notes/testing.md，在 README.md 中新增“运行测试”一节，
+      用三到五步说明如何在本地运行测试。只修改 README.md。
+```
+
+  </Tab>
+  <Tab value="Codex">
+
+```yaml title=".codedag/dags/testing-docs.yaml"
+tasks:
+  - id: 1
+    title: 整理测试命令
+    agent: codex              # 由 Codex 执行
+    mode: yolo                # 完全授权：运行中不停下来等审批
+    effort: medium            # 整理信息，用中等推理力度
+    autoAccepted: none        # 完成后停下，等你确认结果再继续
+    prompt: |
+      阅读仓库里的构建与测试配置（例如 package.json、Makefile 或 CI 配置），
+      找出在本地运行全部测试的命令和需要的准备步骤，
+      写入 docs/notes/testing.md。只写这一个文件（已存在时直接覆盖），不修改其他文件。
+
+  - id: 2
+    title: 在 README 中补充测试说明
+    dependencies: [1]
+    agent: codex
+    mode: yolo
+    effort: high              # 写给读者看的文字，用更高的推理力度
+    prompt: |
+      阅读 docs/notes/testing.md，在 README.md 中新增“运行测试”一节，
+      用三到五步说明如何在本地运行测试。只修改 README.md。
+```
+
+  </Tab>
+</Tabs>
+
+任务 1 完成后，工作流会停下来等你：看过它整理的内容，再运行 `cdg task review accept 1 -w testing-docs{:sh}` 接受结果，任务 2 才会开始。
+
+## 校验 [#validate]
+
+`cdg dag validate` 在本地检查工作流文件的格式、字段取值和依赖关系。它不需要登录，也不消耗额度，可以在编写过程中反复运行；名字后面可以跟多个工作流，一次校验。
+
+```bash title="Terminal"
+cdg dag validate testing-docs
+```
+
+结果分为通过、通过但有警告、失败三种。失败时输出会逐条列出错误，例如任务 2 依赖了一个不存在的任务 3：
+
+```bash title="Terminal"
+✗ Validation failed: .codedag/dags/testing-docs.yaml
+  [dag] Task 2: depends on non-existent task 3
+```
+
+校验不只看这一个文件：两个项目设置文件也一起读，其中的设置项取值不合法时，校验直接失败，并指出是哪个文件里的哪一项。字段取值里，`mode` 按任务实际使用的那一家 Agent 的写法检查，`model`、`effort` 这类原样交给 Agent 的取值则不在检查范围内，各字段具体检查什么见[工作流文件参考](/zh/docs/reference/workflow-file)。
+
+警告不会让校验失败，但值得逐条看一遍。最常见的是 `unsupported-field`：CodeDAG 会忽略工作流文件里不认识的字段，所以拼错的字段名不会报错，只是不起作用。字段名一律用 camelCase，写成 `auto_accepted` 这样的 snake_case 时同样被忽略，另有一条 `naming` 警告提示应改成 `autoAccepted`。
+
+提交时 `cdg dag submit` 会重新校验一次，有错误就不会提交；校验或提交失败后的排查见[提交被拒绝](/zh/docs/troubleshooting/troubleshooting#submit-rejected)。
+
+## 相关
+
+- [拆分任务与编写 prompt](/zh/docs/guides/designing-tasks-and-prompts)：怎样拆分任务、安排依赖，写出全新会话也能独立完成的 prompt。
+- [提交、观察与日志](/zh/docs/guides/run-and-monitor)：校验通过之后提交工作流，并查看执行进度与日志。
+- [工作流文件参考](/zh/docs/reference/workflow-file)：每个字段的类型、全部取值、默认值与覆盖顺序。

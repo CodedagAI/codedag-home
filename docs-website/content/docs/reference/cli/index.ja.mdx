@@ -1,0 +1,150 @@
+---
+title: コマンド一覧と共通の引数
+description: やりたい操作から CodeDAG のコマンドを探せる一覧と、各コマンドに共通するワークフロー、タスク ID、タスクセレクターの書き方。
+icon: Terminal
+---
+
+## 操作からコマンドを探す [#commands]
+
+`cdg dag{:sh}` のコマンドはワークフローを、`cdg task{:sh}` のコマンドはワークフロー内のタスクを操作の対象にします。そのほかのルートコマンドは、プロジェクトの初期化、キューの確認、ブランチ名の解放、プラグインとアカウントの管理に使います。
+
+| やりたいこと | コマンド | 詳細 |
+|---|---|---|
+| プロジェクトを初期化し、ワークスペースを登録する | `cdg init{:sh}` | [プロジェクトを初期化する](/ja/docs/reference/cli/init) |
+| ワークフローファイルを検証する | `cdg dag validate{:sh}` | [検証と投入](/ja/docs/reference/cli/validate-and-submit#validate) |
+| ワークフローを投入し、キューに入れて実行させる | `cdg dag submit{:sh}` | [検証と投入](/ja/docs/reference/cli/validate-and-submit#submit) |
+| プロジェクトのワークフローのキューと、計画中およびレビュー済みのワークフローを確認する | `cdg status{:sh}`（`cdg dag ls{:sh}`、`cdg dag list{:sh}` と同じ） | [ステータスとログ](/ja/docs/reference/cli/status-and-logs#cdg-status) |
+| ワークフロー内の各タスクのステータスを確認する | `cdg dag status{:sh}`、または `cdg task ls{:sh}`（`cdg task list{:sh}` とも書けます） | [ステータスとログ](/ja/docs/reference/cli/status-and-logs#dag-status) |
+| 指定したタスクの詳しいステータスを確認する | `cdg task status{:sh}` | [ステータスとログ](/ja/docs/reference/cli/status-and-logs#task-status) |
+| ログを読む | `cdg dag logs{:sh}`（ワークフロー全体）、`cdg task logs{:sh}`（1 つのタスク） | [ステータスとログ](/ja/docs/reference/cli/status-and-logs#logs) |
+| 一時停止する、または一時停止を解除して実行を続行させる | `cdg dag pause{:sh}`、`cdg dag unpause{:sh}`、`cdg task pause{:sh}`、`cdg task unpause{:sh}` | [制御と介入](/ja/docs/reference/cli/control#syntax) |
+| 実行中のタスクをすぐに強制停止する | `cdg dag kill{:sh}`、`cdg task kill{:sh}` | [制御と介入](/ja/docs/reference/cli/control#syntax) |
+| 強制停止、一時停止、または保留（`on-hold`）になった実行を復旧する | `cdg dag recover{:sh}`、`cdg task recover{:sh}` | [制御と介入](/ja/docs/reference/cli/control#syntax) |
+| タスクエージェントのセッションに入る | `cdg task view{:sh}` | [制御と介入](/ja/docs/reference/cli/control#task-view) |
+| タスクをレビューする | `cdg task review <アクション>{:sh}`。アクションは `accept`、`cancel`、`defer`、`revise`、`request-changes`、`rework` のいずれかです。`review` を省いた省略形でも書けます（例：`cdg task accept{:sh}`） | [レビュー](/ja/docs/reference/cli/review) |
+| ワークフロー全体をレビューする | `cdg dag review <アクション>{:sh}`。アクションは `accept`、`cancel`、`defer` のいずれかです。`review` を省いた省略形でも書けます（例：`cdg dag accept{:sh}`） | [レビュー](/ja/docs/reference/cli/review) |
+| 再投入できるように、レビュー記録をクリアする | `cdg dag review clear{:sh}`。省略形はありません。`cdg task review clear{:sh}` は個々のタスクの記録をクリアするだけで、レビューが終了したワークフローを再投入できるようにはなりません | [レビュー](/ja/docs/reference/cli/review#clear-and-resubmit) |
+| CodeDAG が占有している固定のブランチ名を解放する | `cdg branch release{:sh}` | [制御と介入](/ja/docs/reference/cli/control#branch-release) |
+| CodeDAG Guide プラグインを管理する | `cdg plugin install{:sh}`、`cdg plugin status{:sh}`、`cdg plugin update{:sh}`、`cdg plugin uninstall{:sh}` | [プラグイン](/ja/docs/reference/cli/plugin) |
+| ログインする、ログアウトする、アカウントを確認する | `cdg auth login{:sh}`、`cdg auth logout{:sh}`、`cdg auth status{:sh}` | [アカウント](/ja/docs/reference/cli/auth) |
+
+一時停止、強制停止、復旧をそれぞれどんな場面で使うかは[介入と制御](/ja/docs/guides/intervene-and-control)、レビューアクションの選び方は[判断に応じてアクションを選ぶ](/ja/docs/guides/review-tasks#choose-action)を参照してください。
+
+`cdg` と `codedag` は、同じコマンドラインツールの 2 つの名前です。ドキュメントでは、すべて `cdg` と書きます。どのコマンドでも、後ろに `--help` を付けると、そのコマンドの引数とオプションをすべて確認できます。たとえば `cdg task pause --help{:sh}` です。
+
+`cdg help <コマンド...>{:sh}` も使えます。コマンド名を上の階層から順に書けば、どの階層のサブコマンドのヘルプも表示できます。たとえば `cdg help dag review clear{:sh}` です。`dag`、`task`、`dag review`、`task review`、`plugin`、`branch`、`auth` の各コマンドグループにも、それぞれ `help` があります。そのため、`cdg dag help review clear{:sh}` でも同じヘルプが出力されます。`cdg help dag foo{:sh}` のように、書いた名前がその階層に存在しない場合、コマンドは、そこまでにたどり着いた階層のヘルプを stderr に出力し、終了コードは 1 になります。
+
+## ワークフローを指定する [#specify-workflow]
+
+コマンドでは、ワークフローを名前でもパスでも指定できます。ただし、どの書き方でも、最終的には、プライマリリポジトリの `.codedag/dags/` ディレクトリ（サブディレクトリを含む）にある `.yaml`、`.yml`、`.json` のいずれかのファイルを指していなければなりません。それ以外の場所にあるファイルや、それ以外の拡張子のファイルを指している場合、コマンドは実行を拒否します。普段は、名前をそのまま書くのが最も手軽です。たとえば `.codedag/dags/feature.yaml` は `feature` と書きます。
+
+| 書き方 | 例 | 使う場面 |
+|---|---|---|
+| 拡張子なしの名前 | `feature` | 最もよく使う書き方です。`feature.yaml`、`feature.yml`、`feature.json` の順に探し、最初に見つかったファイルを使います。探すのは `.codedag/dags/` の直下だけです。 |
+| ファイル名 | `feature.json` | 同じディレクトリに、名前が同じで拡張子が異なるファイルがある場合に、拡張子でそのうちの 1 つを選びます。 |
+| `.codedag/dags/` で始まるパス | `.codedag/dags/team/feature.yaml` | ワークフローがサブディレクトリにある場合に使います。常にプライマリリポジトリのルートを基準にし、現在のディレクトリには左右されません。この書き方でも、拡張子は省略できます。 |
+| 現在のディレクトリからの相対パス | `./feature.yaml`、`../.codedag/dags/feature.yaml` | すでに `.codedag/dags/` またはプライマリリポジトリのいずれかのサブディレクトリにいて、シェルの補完でパスを入力したい場合に使います。 |
+| 絶対パス | `/Users/me/project/.codedag/dags/feature.yaml` | スクリプトに固定のパスを書く場合に使います。 |
+
+名前と、`.codedag/dags/` で始まるパスは、常にプライマリリポジトリを基準に解決されます。そのため、プライマリリポジトリ、登録済みのいずれかのレプリカのワークスペース、それらの任意のサブディレクトリのどこで実行しても、結果は同じです。それ以外の `/` を含む相対的な書き方は、`./` や `../` で始まるものも含めて、すべて現在のディレクトリを基準に解決されます。したがって、プライマリリポジトリのルートで `team/feature` と書くと拒否されます。サブディレクトリにあるワークフローは、`.codedag/dags/team/feature` と書く必要があります。レプリカのワークスペースでは、`./.codedag/dags/feature.yaml` のような相対パスはレプリカ自身のディレクトリを指すため、これも拒否されます。この場合は、名前で書くか、`.codedag/dags/` で始まる書き方に変えてください。
+
+どの書き方でも、コマンドそのものはプロジェクトの中、つまりプライマリリポジトリか登録済みのいずれかのワークスペースの中で実行する必要があります。プロジェクトの外では、正しい絶対パスを書いても、コマンドはそのワークフローが属するプロジェクトを見つけられません。
+
+`feature.yaml` と `feature.yml` のように、同じディレクトリにあって拡張子だけが異なる 2 つのファイルは、同じログファイルと同じブランチ名を共有します。そのため、2 つの異なるワークフローを置くのには向きません。[ファイルの置き場所と形式](/ja/docs/reference/workflow-file#file-location)を参照してください。
+
+### 位置引数と `-w` [#workflow-option]
+
+`cdg dag{:sh}` のコマンドでは、ワークフローを位置引数として書きます。`cdg task{:sh}` のコマンドでは、位置引数はタスク ID に使うため、ワークフローは `-w` で指定します。`-w`、`--workflow-file`、`--dag` は同じオプションの 3 つの書き方で、値のルールは上の表と同じです。
+
+```bash title="Terminal"
+cdg dag status feature
+cdg task status 2 -w feature
+```
+
+どちらの方法も受け付けるコマンドが 3 つあります。`cdg dag status{:sh}` と `cdg dag logs{:sh}` では、位置引数でも `-w` でもワークフローを指定できます。`cdg task ls{:sh}` は位置引数そのものがワークフローで、同じように `-w` も受け付けます。これらのコマンドが一度に操作するワークフローは 1 つだけで、位置引数、`-w`、`--dag` のうち指定できるのは 1 つだけです。2 つ以上を同時に指定すると、コマンドはエラーになり、ステータスもログも出力しません。それらが同じワークフローを指していても同じです。
+
+`cdg dag{:sh}` の検証、投入、制御、レビューのコマンドには、スペースで区切って複数のワークフローを一度に指定できます。たとえば `cdg dag validate feature docs{:sh}` です。一方、1 つの `cdg task{:sh}` コマンドが操作するのは、1 つのワークフローのタスクだけです。
+
+ワークフローを省略すると、ほとんどのコマンドはキューの先頭のワークフロー、つまり[キュー](/ja/docs/concepts/how-it-works#queue)のいちばん前に並んでいるワークフローを対象にします。どの時点でも、実行されているのはこのワークフローだけです。一方、`cdg dag validate{:sh}`、`cdg dag submit{:sh}`、`cdg dag review clear{:sh}` では、ワークフローを必ず明記しなければなりません。各コマンドでワークフローを省略できるかどうか、省略したときにどのワークフローが対象になるかは、各コマンドのページで確認してください。キューに複数のワークフローがある場合、キューの先頭は、最後に投入したワークフローとは限りません。そのため、スクリプトの中や、エージェントにコマンドを実行させる場合は、ワークフローを明記するほうが確実です。
+
+## 1 つまたは複数のタスクを指定する [#task-ids]
+
+タスクコマンドでは、ワークフローファイルの `tasks[].id` の値でタスクを指定します（[`id`](/ja/docs/reference/workflow-file#tasks-id) を参照）。この値は正の整数で、タスクのタイトルとも、リスト内でのタスクの位置とも関係ありません。同じ ID でも、ワークフローが違えば別のタスクを指します。そのため、コマンドでは `-w` でワークフローも指定する必要があり、省略した場合はキューの先頭のワークフローになります。
+
+複数の ID は、スペースで区切って書きます。たとえば `cdg task status 2 3 -w feature{:sh}` です。有効なのは、数字だけからなり、値が 1 以上の書き方だけです。`2,3`、`1.5`、`+2`、`2abc`、`0` のような書き方では、コマンドは `Invalid task ID` というエラーを出し、何もせずに終了コード 1 で終了します。1 つのコマンドに複数の ID がある場合、そのうち 1 つでも誤っていると、コマンド全体がエラーになり、正しく書いた ID も処理されません。
+
+指定できるタスクの数は、タスクコマンドによって異なります。`cdg task ls{:sh}` を除いて、どのコマンドにもデフォルトのタスクはありません。タスクを省略すると、コマンドはエラーになり、すべてのタスクが対象になることはありません。
+
+| コマンド | タスクの書き方 |
+|---|---|
+| `cdg task pause{:sh}`、`cdg task unpause{:sh}`、`cdg task kill{:sh}`、`cdg task recover{:sh}` | 1 つまたは複数の ID、または[タスクセレクター](#task-selectors) |
+| `cdg task review{:sh}` の各アクションとその省略形、`cdg task review clear{:sh}` | 1 つまたは複数の ID、またはタスクセレクター |
+| `cdg task status{:sh}` | 1 つまたは複数の ID。セレクターは使えません |
+| `cdg task logs{:sh}`、`cdg task view{:sh}` | 1 つの ID。`cdg task view{:sh}` では、[代わりにセッション ID を指定する](/ja/docs/reference/cli/control#task-view)こともできます |
+| `cdg task ls{:sh}` | タスクは書きません。ワークフロー全体のタスクを一覧表示します |
+
+## タスクセレクター [#task-selectors]
+
+タスクセレクターを使うと、依存関係をもとにタスクのまとまりを一度に選べるため、ID を 1 つずつ並べる必要がありません。以下では、5 つのタスクからなるワークフロー `feature` を例に、各セレクターがどのタスクを選ぶかを説明します。タスク 2 とタスク 3 はどちらもタスク 1 に依存し、タスク 4 はタスク 2 とタスク 3 に、タスク 5 はタスク 4 に依存します。
+
+export const selectorExampleChart = `flowchart LR
+  t1["1 インターフェース<br/>契約を書く"] --> t2["2 インターフェースを<br/>実装"]
+  t1 --> t3["3 テストを書く"]
+  t2 --> t4["4 テストを<br/>実行して修正"]
+  t3 --> t4
+  t4 --> t5["5 ドキュメントを<br/>更新"]`;
+
+<Tabs items={['図', 'コード']}>
+  <Tab value="図">
+    <Mermaid chart={selectorExampleChart} />
+  </Tab>
+  <Tab value="コード">
+    <DynamicCodeBlock lang="mermaid" code={selectorExampleChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+| オプション | 選ばれるタスク | 指定したタスクを含むか | 例と選ばれるタスク |
+|---|---|---|---|
+| `-o`、`--only` | 指定したタスクだけ | はい | `--only 2 3` → 2、3 |
+| `-u`、`--upto` | 指定したタスクと、そのすべての上流 | はい | `--upto 4` → 1、2、3、4 |
+| `-a`、`--above` | 指定したタスクのすべての上流 | いいえ | `--above 4` → 1、2、3 |
+| `-d`、`--downfrom`（エイリアス `--from`） | 指定したタスクと、そのすべての下流 | はい | `--downfrom 2` → 2、4、5 |
+| `-b`、`--below` | 指定したタスクのすべての下流 | いいえ | `--below 2` → 4、5 |
+| `-t`、`--through` | 指定したタスクと、そのすべての上流および下流 | はい | `--through 2` → 1、2、4、5 |
+
+上流と下流は `dependencies` を 1 段ずつたどって決まり、間接的な依存関係も含まれます。タスク 5 はタスク 4 を介してタスク 2 に間接的に依存しているため、`--below 2` にはタスク 5 が含まれます。指定したタスクと並列の位置にあり、互いに依存関係のないタスクは、上流にも下流にも含まれません。そのため、`--through 2` にタスク 3 は含まれません。
+
+コマンドの後ろに書いたタスク ID は、`--only` の省略形です。したがって、`cdg task pause 2 3{:sh}` と `cdg task pause --only 2 3{:sh}` は同じです。直接書いた ID は、どのセレクターとも同時には使えません。`--only` そのものも例外ではありません。
+
+1 つのセレクターに指定できる ID の数は、コマンドによって異なります。タスクの一時停止、一時停止の解除、強制停止、復旧のコマンドでは、どのセレクターにも複数の ID を指定でき、結果はその和集合になります。たとえば `--upto 2 3` は 1、2、3 を選びます。タスクのレビューコマンド（`cdg task review clear{:sh}` を含む）では、`--only` 以外のセレクターが受け付ける ID は、それぞれ 1 つだけです。
+
+ワークフローの途中にあるひと続きのタスクを選びたいときは、2 つのセレクターを組み合わせて、その積集合を取れます。一方は `--downfrom` または `--below` から、もう一方は `--upto` または `--above` から選びます。それ以外の組み合わせ、たとえば `--only` と `--upto` の併用や、3 つのセレクターの同時使用では、コマンドはエラーになり、実行されません。
+
+```bash title="Terminal"
+# タスク 2 から下流へ、タスク 4 まで：2、4 を選ぶ
+cdg task pause --downfrom 2 --upto 4 -w feature
+# タスク 1 とタスク 5 の間にあるタスク：2、3、4 を選ぶ
+cdg task pause --below 1 --above 5 -w feature
+```
+
+セレクターは依存関係だけをもとにタスクを選び、タスクが現在どの状態にあるかは見ません。選ばれたタスクにそのアクションを実行できるかどうかは、各コマンドがそれぞれの前提条件に従って、タスクごとに判断します。たとえば `cdg task pause{:sh}` は、レビューが終了したタスクをスキップします。各コマンドの具体的な前提条件は、[制御コマンドの構文と適用できる状態](/ja/docs/reference/cli/control#syntax)と[レビュー](/ja/docs/reference/cli/review)を参照してください。
+
+## よく使う一括操作 [#batch-examples]
+
+以下のコマンドでは、引き続きワークフロー `feature` を使います。タスク 2 とタスク 3 はタスク 1 に、タスク 4 はタスク 2 とタスク 3 に、タスク 5 はタスク 4 に依存します。最後の例では、ワークフロー `docs` も使います。
+
+| やりたいこと | コマンド | 対象範囲 |
+|---|---|---|
+| 複数のタスクを一度に一時停止する | `cdg task pause 2 3 -w feature{:sh}` | タスク 2、3 |
+| タスク 1 から 4 がすべてレビュー待ちのときに、まとめて承認する | `cdg task accept --upto 4 -w feature{:sh}` | タスク 1、2、3、4 |
+| タスク 2 のすべての下流をいったん開始させず、タスク 2 自体は通常どおり実行させる | `cdg task pause --below 2 -w feature{:sh}` | タスク 4、5 |
+| 複数のワークフローに同じアクションを実行する | `cdg dag pause feature docs{:sh}` | ワークフロー `feature` と `docs` |
+
+一括制御のそのほかの書き方は[範囲の指定と一括制御](/ja/docs/reference/cli/control#control-scope)、一括レビューでの各アクションのオプションとデフォルト値は[レビュー](/ja/docs/reference/cli/review)を参照してください。

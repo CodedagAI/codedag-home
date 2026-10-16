@@ -1,0 +1,11 @@
+{
+  "title": "Reference",
+  "icon": "Library",
+  "pages": [
+    "cli",
+    "workflow-file",
+    "settings",
+    "states",
+    "branches-and-files"
+  ]
+}

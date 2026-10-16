@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://codedag.com/docs
+    about: Guides and reference for CodeDAG.
+  - name: Troubleshooting
+    url: https://codedag.com/docs/troubleshooting/troubleshooting
+    about: Common problems and how to fix them.
+  - name: Contact us by email
+    url: https://codedag.com/docs/troubleshooting/troubleshooting#get-help
+    about: For a problem you can't discuss in public, or for anything else. This section lists what to include and where to send it.

@@ -1,0 +1,167 @@
+---
+title: 收口、合入主分支与清理
+description: 工作流审核结束后，怎样检查集成分支上的结果、合入主分支、再运行一次，以及清理留下的分支与工作区。
+icon: GitMerge
+---
+
+工作流审核结束、进入 `reviewed` 之后，CodeDAG 这一侧的工作就完成了。在默认的隔离分支模式下，通过审核的结果都在本地的集成分支 `cdg/<工作流名>/integration` 上，你的主分支没有被改动，远程仓库也没有被推送；检查结果、合入主分支、清理多出来的分支，都由你用 Git 完成。共享工作区模式没有这些分支，见[共享工作区模式下怎样收口](#shared-workspace)。
+
+## 检查集成分支上的结果 [#inspect]
+
+集成分支 `cdg/<工作流名>/integration` 汇集了这次执行中所有被接受的任务结果。它从本次工作流的起点开出，所以拿它和 `main` 比较，看到的就是这个工作流带来的全部改动；各条分支之间的关系见[任务分支、集成分支与起点](/zh/docs/concepts/workspaces-and-branches#branches)。
+
+```bash title="Terminal"
+git log --oneline --no-merges main..cdg/<工作流名>/integration
+git diff --stat main...cdg/<工作流名>/integration
+```
+
+第一条命令列出各个任务留下的提交，`--no-merges` 省去了 CodeDAG 合并各任务分支时留下的合并提交。CodeDAG 接受一个任务时，会把它的改动提交到它的任务分支上，提交说明默认就是任务标题，所以每个提交都能对上是哪个任务做的。例如一个有三个任务的工作流 `add-notes`：
+
+```bash title="Terminal"
+569eb2f Build notes index
+a251a6a Write beta note
+483711d Write alpha note
+```
+
+CodeDAG 判断任务完成、自动接受结果，都不看测试是否通过，改动是否正确要由你来确认：合入之前读一遍改动，再在集成分支上运行项目的测试。主仓库参与执行时，工作流结束后它正停在集成分支上，可以直接在主仓库里读代码、运行测试。
+
+工作流设了 `dagAutoAccepted: none`、停下来等你给出结论时，集成分支上已经是合并好的结果，可以用同样的命令先检查，再[给整个工作流作审核决定](/zh/docs/guides/review-tasks#dag-review)。
+
+## 合入主分支 [#merge]
+
+什么时候合入、以什么方式合入，由你决定并自行操作：可以推送到远程后开 PR，可以在本地直接合并，也可以只要其中几个任务的结果。CodeDAG 自己从不向你的远程仓库推送，也不从中拉取。
+
+团队协作时，通常从集成分支新建一条按团队约定命名的分支，推送后开 PR：
+
+```bash title="Terminal"
+git checkout -b <你的分支名> cdg/<工作流名>/integration
+git push -u origin <你的分支名>
+```
+
+工作流是从你已有的功能分支开始的话，改为切回那条分支、合并集成分支，再推送。集成分支也可以原样推送，但它的名字取自工作流名，同事运行同一个工作流会得到同名的分支，推到同一个远程时会撞名。
+
+不需要代码审查时，比如在个人项目里，可以在本地直接合并，切回 `main` 再合并集成分支：
+
+```bash title="Terminal"
+git checkout main
+git merge cdg/<工作流名>/integration
+```
+
+这次合并 CodeDAG 不参与：`main` 在工作流运行期间有了新的提交并因此产生冲突时，按平常的方式解决即可。
+
+### 只要其中几个任务的结果 [#pick-tasks]
+
+每个任务的结果还留在它自己的任务分支上，分支名形如 `cdg/<工作流名>/t<任务 ID>-<标题>`，所以也可以跳过集成分支，只把其中几个任务合入 `main`：
+
+```bash title="Terminal"
+git branch --list 'cdg/<工作流名>/*'
+git merge cdg/<工作流名>/t<任务 ID>-<标题>
+```
+
+合并时要留意依赖关系。下游任务开始之前，CodeDAG 已经把上游的结果合并进了它的分支，所以合并一个下游任务的分支，会把它的上游结果一起带进来。只想要这个任务自己的改动时，改用 `git cherry-pick` 挑出它自己的提交，通常就是以它的任务标题为说明的那个提交。
+
+还有两种情况要另外处理。被取消或推迟的任务，改动默认存进了以 `cdg/<工作流名>/snapshots/` 开头的快照分支，任务分支已经退回任务开始前的状态，取回方法见[取回快照中的部分改动](/zh/docs/reference/branches-and-files#restore-from-snapshot)。用 clone 做副本时，在某个 clone 里执行的任务，任务分支只存在于那个 clone 里，主仓库里没有，需要时从那个 clone 取回。
+
+## 工作流结束后，仓库停在哪 [#where-repo-stays]
+
+工作流结束后，CodeDAG 不会把工作区切回原来的分支。主仓库参与执行时，停在这个工作流的集成分支上；每个副本停在它最后执行的那个任务的分支上。你的 `main` 没有变化，想回到 `main`，自己运行 `git checkout main`。为什么会这样，见[任务分支、集成分支与起点](/zh/docs/concepts/workspaces-and-branches#branches)。
+
+这一步也决定了下一个工作流从哪里开始。没有写 `baseRef` 的工作流，以开始执行时主仓库检出的提交为起点：主仓库还停在集成分支上，下一个工作流就接着这次的结果做；切回了 `main`，就从 `main` 开始。想让起点不取决于主仓库当时在哪个分支上，在工作流文件里写上 [`baseRef`](/zh/docs/reference/workflow-file#base-ref)，例如 `baseRef: main`。
+
+想让主仓库在执行期间也不被切换，可以在工作流文件里写 `excludeWorkspaces: ["."]`，让任务只在副本里执行，主仓库的分支就始终保持原样，做法见[想在工作流运行时同时手动开发](/zh/docs/guides/parallel-workspaces#keep-main-repo)。
+
+## 想再运行一次 [#run-again]
+
+已经审核结束的工作流不能原样再提交，`cdg dag submit{:sh}` 会提示它处在 `reviewed` 阶段。先清除它的审核记录，让它回到 `planning`，再提交：
+
+```bash title="Terminal"
+cdg dag review clear <工作流名>
+cdg dag submit <工作流名>
+```
+
+重新提交是一次新的执行。它按提交这一刻的工作流文件运行；开始执行时，它按任务数重新消耗 CodeDAG 额度，计费规则见[什么时候扣除额度](/zh/docs/account/credits-and-subscription#when-charged)。还在队列中的工作流不能直接清除，要先给出工作流级的审核结论，步骤见[修改已提交的工作流](/zh/docs/reference/cli/validate-and-submit#modify-submitted)。
+
+提交之前，先确认新的执行从哪里开始。没写 `baseRef` 时，它从主仓库此刻检出的提交开始：主仓库还停在上一次的集成分支上，或者你已经把上一次的结果合入了 `main`，新的执行都会在上一次的结果之上进行，任务面对的是已经改过的代码。想基于原来的代码重做，就在合入之前先运行 `git checkout main`，或者在工作流文件里写上 `baseRef: main`。
+
+上一次执行留下的分支还在时，新一次执行的分支名会带上开始执行时的时间，以免重名，例如 `cdg/add-notes-20260930-105924/integration`。工作流的名字不变，命令里仍然写 `add-notes`。用 [`branchName`](/zh/docs/reference/workflow-file#tasks-branch-name) 指定了分支名的任务不会自动改名：同名的旧分支还在时，这个任务会停在 `on-hold`，处理办法见[分支问题](/zh/docs/troubleshooting/troubleshooting#hold-branch)。
+
+### 换一个文件名提交 [#new-file-name]
+
+工作流要反复执行时，例如由定时任务每天提交一次，也可以不清除审核记录：每次把工作流文件复制一份，给文件名加上后缀，再提交这个新文件。
+
+```bash title="Terminal"
+cp .codedag/dags/add-notes.yaml .codedag/dags/add-notes-20261010.yaml
+cdg dag submit add-notes-20261010
+```
+
+工作流的名字来自文件名，所以新文件是另一个工作流。提交它不需要上一次执行审核结束，上一次还在队列中时，它排在后面。各次执行的记录也分开保留：以前各次的状态和审核结果仍然可以用 `cdg dag status <工作流名>{:sh}` 查看，这一次的分支都在 `cdg/add-notes-20261010/` 下，日志写进它自己的文件。代价是每执行一次就多出一个工作流文件、一组分支和一个日志文件，分支和日志的清理见[清理分支与工作区](#cleanup)。
+
+起点和计费的规则与清除审核记录后重新提交相同。任务里写了 `branchName` 时，新文件里仍是同一个分支名，旧分支还在时任务同样会停在 `on-hold`。
+
+### 只补做其中几个任务 [#continue-remaining]
+
+重新提交总是运行整个工作流。只需要补做或重做其中几个任务时，把它们写进一个新的工作流文件单独提交，只按这几个任务消耗额度，比整个重新运行要省。
+
+新工作流要从已经接受的结果开始。不写 `baseRef` 时，主仓库还停在上一个工作流的集成分支上，或者你已经把结果合入 `main` 并切了回去，新工作流就会在这些结果之上接着做；也可以写 `baseRef: cdg/<工作流名>/integration` 明确指定。原来的上游任务不在新工作流里，不能写进 `dependencies`；它们的结果已经在起点里，在 prompt 里指名要读的文件即可。
+
+工作流还在执行，只是做到一半很难继续时，先收下已经完成的结果，步骤见[工作流做到一半，很难继续](/zh/docs/troubleshooting/troubleshooting#start-over)，再用同样的方式接着做。
+
+## 清理分支与工作区 [#cleanup]
+
+工作流审核结束、需要的结果也已经合入之后，它留下的分支、日志和不再使用的副本都可以清理。清理只针对已经审核结束的工作流：仍在队列中或正在等待审核的工作流，CodeDAG 还要在它的分支上继续合并和审核，删除这些分支会打断它，例如集成分支被删除后，工作流会停在 `on-hold`。
+
+### 删除分支
+
+一个工作流留下的分支都以 `cdg/<工作流名>/` 开头，包括任务分支、集成分支，以及 `cdg/<工作流名>/snapshots/` 下的快照分支。Git 不允许删除正被某个工作区检出的分支，而工作流结束后，主仓库停在集成分支上，每个 worktree 副本停在它最后执行的任务分支上，所以要先让它们离开这些分支，否则删除时会看到 `cannot delete branch ... used by worktree` 的报错：
+
+```bash title="Terminal"
+git checkout main
+# 每个 worktree 副本各运行一次
+git -C ../<项目名>-wt-1 checkout --detach
+```
+
+然后列出这个工作流的分支，确认之后一起删除：
+
+```bash title="Terminal"
+git branch --list 'cdg/<工作流名>/*'
+git branch --list 'cdg/<工作流名>/*' --format='%(refname:short)' | xargs git branch -D
+```
+
+重新运行过的工作流还有带时间的那一组分支，用 `git branch --list 'cdg/<工作流名>-*/*'{:sh}` 列出，确认之后同样删除。用 clone 做副本时，在 clone 里执行的任务分支要到对应的 clone 里删除；`codedag-mirror` 远程由 CodeDAG 维护，保持原样即可，其中占用了固定分支名的分支用 `cdg branch release <分支名>{:sh}` 释放。
+
+<Callout type="warn">快照分支里存着被取消、推迟或重做的任务当时的改动，删除之后就取不回来了。删除之前，确认其中没有还想保留的内容。</Callout>
+
+### 删除旧日志
+
+每个工作流的日志写在 `.codedag/local/logs/` 下的一个 `.log` 文件里，路径见[日志文件位置](/zh/docs/reference/branches-and-files#log-files)，重新运行时接着追加在同一个文件末尾。不再需要时直接删除这个文件即可。
+
+### 移除不再使用的副本
+
+副本可以一直留着，以后的工作流会继续用它并行执行。确实不再需要某个 worktree 副本时，移除它，再重新运行 `cdg init{:sh}`，让登记的副本与实际一致：
+
+```bash title="Terminal"
+git worktree remove ../<项目名>-wt-1
+cdg init
+```
+
+重新初始化时怎样保留已有的配置，见[重新初始化与保留已有配置](/zh/docs/reference/cli/init#reinitialize)。
+
+## 共享工作区模式下怎样收口 [#shared-workspace]
+
+共享工作区模式没有任务分支和集成分支，也不会切换主仓库的分支，所有任务的产出以未提交的改动留在执行它们的工作区里，默认是主仓库，由你检查后自己提交。前面几节的分支操作在这个模式下都用不上。再运行一次的做法相同，先 `cdg dag review clear{:sh}` 再 `cdg dag submit{:sh}`，新的执行会在工作区现有的文件之上进行。
+
+## 常见问题
+
+### 工作流在合并到集成分支时停住了
+
+所有任务审核完成后，CodeDAG 把各任务的结果合并到集成分支；几路改动发生冲突、另开的 Agent 会话三轮都没能解决时，工作流停在 `on-hold`，原因是 `integration-merge-conflict`，这时集成分支上还没有完整的结果。在集成分支所在的工作区（通常是主仓库）里完成合并，再执行 `cdg dag recover <工作流名>{:sh}`，工作流会接着把其余的结果合并进来，具体步骤见[合并冲突](/zh/docs/troubleshooting/troubleshooting#hold-merge-conflict)。
+
+### 集成分支上没有任何改动
+
+最常见的原因是工作流级审核给出了 `cancel` 或 `defer`：在隔离分支模式下，这两个动作都会让集成分支回到本次工作流的起点。默认情况下，CodeDAG 会先把整套结果存进一条以 `cdg/<工作流名>/snapshots/dag-review-` 开头的快照分支，需要时可以从那里取回，见[取回快照中的部分改动](/zh/docs/reference/branches-and-files#restore-from-snapshot)。另一种可能是任务都被取消或推迟了，它们各自的改动同样默认存在快照分支里。
+
+## 相关
+
+- [审核任务与工作流](/zh/docs/guides/review-tasks)：任务和工作流停在审核门禁时，怎样查看结果并给出结论。
+- [审核](/zh/docs/reference/cli/review)：审核动作的参数与默认值，以及清除审核记录的规则。
+- [文件与分支操作](/zh/docs/reference/branches-and-files)：从快照分支取回改动，单独保存工作流配置。

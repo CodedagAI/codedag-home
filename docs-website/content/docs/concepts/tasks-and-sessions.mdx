@@ -1,0 +1,73 @@
+---
+title: Tasks and Sessions
+description: Why every task in a workflow is a fresh agent session, and what that means for how you split tasks, pass results, and grant access.
+icon: MessageSquareCode
+---
+
+Every task in a workflow is handed to a fresh Claude Code or Codex session, because the longer a session runs, the more its context fills with information unrelated to the work at hand, and the less reliable the agent's judgment becomes. A fresh session knows only the task's prompt and the files it reads from its workspace. The conversation and reasoning of upstream tasks don't carry over. Only the files in the repository do. So split tasks down to a size one session can reliably finish, write each prompt so that a session with no background can complete it on its own, and write any conclusions meant for downstream tasks into files.
+
+## Tasks [#task]
+
+### Why split work into tasks, and how far [#why-split]
+
+When you work with Claude Code or Codex interactively, the agent's judgment is sharpest at the start of a session, when the context holds nothing but what you've asked for. As the conversation gets longer, the files the agent has read, the approaches it tried and abandoned, and intermediate conclusions that are long out of date all stay in the context. The more of this unrelated information piles up, the more likely the agent is to miss a constraint or contradict itself. Compacting the context frees up space, but it can also drop a constraint that matters. So no matter how capable the model is, once a goal is big enough, you can't count on a single session to do it well. You have to split it into several tasks, each of which one session can reliably finish.
+
+There's a practical test for when to stop splitting. If you handed the task to an agent to finish in one session, would you be confident enough that the result would come back satisfactory with no manual changes? If so, there's no need to split further. If not, keep splitting. The boundary between tasks belongs wherever your confidence drops below what you can accept.
+
+That boundary moves up as models improve, but you can always set a goal far beyond it, so there will always be a need to split work into tasks.
+
+### How to organize the tasks [#organize-tasks]
+
+A common way to organize the resulting tasks is to have a main agent dispatch subagents as it goes. Each subagent has a clean context, but the main session has to take in every report and keep the whole plan in mind, so once there are enough tasks, its own context fills up just the same. How many subagents to dispatch, and what to give each one, is also decided on the spot. The plan exists only inside the main session, so afterward it's hard to see what the plan was, and you can't run it again the same way.
+
+CodeDAG takes a different approach. The tasks and the dependencies between them are written into a workflow ahead of time, and at run time CodeDAG follows the dependencies and starts a clean session for each task.
+
+### What a task is in CodeDAG [#task-definition]
+
+In CodeDAG, a **task** is one piece of work in a workflow. It has a clear goal and a set of instructions for an agent, and it can depend on other tasks. In a workflow file, it's one entry in the `tasks` list: `title` is a name for people to read, `prompt` is the instructions given to the agent, and `dependencies` lists the upstream tasks it waits for. When its turn comes, CodeDAG starts a fresh Claude Code or Codex session for it, and `prompt` is the first message that session receives.
+
+For how to split a goal into tasks and how to write prompts, see [Design Tasks and Prompts](/docs/guides/designing-tasks-and-prompts).
+
+## Dependencies [#dependencies]
+
+### What a dependency is in CodeDAG [#dependency-definition]
+
+In systems that run steps in dependency order, such as build systems and data pipelines, a dependency usually represents dataflow: the upstream step produces a result, and the downstream step takes it as input. A CodeDAG task has no separate output like that to hand downstream. What it does is modify the repository, so a dependency means something different.
+
+In CodeDAG, a **dependency** means that the downstream task inherits the upstream task's repository state. Once the upstream result is accepted, the downstream task starts from the code as the upstream task left it and keeps making changes on top of it, the way a Git commit follows its parent. In the default isolated-branches mode, CodeDAG merges the accepted upstream results into the downstream task branch before that task starts, and the results of its indirect upstream tasks come along with them.
+
+When a task has more than one upstream task, it inherits several repository states, each changed separately. They have to be merged into one first, with any conflicts resolved. Dataflow has no such step, because multiple inputs there are just separate pieces of data sitting side by side. For how merges and conflicts are handled, see [Merges and conflicts at join nodes](/docs/concepts/workspaces-and-branches#merge-and-conflicts).
+
+In other words, in isolated-branches mode the branch merges have essentially the same topology as the dependencies. The main difference is that the merges also end by bringing the leaf nodes, the tasks with nothing downstream, together on an [integration branch](/docs/concepts/workspaces-and-branches#branches).
+
+Conversely, two tasks with no dependency between them each stay on their own branch. Even if one of them finished long ago, the other can't see its changes. So a task that needs another task's result has to declare the dependency.
+
+### What gets passed downstream [#passing-results]
+
+Every task is an independent session, so the only things that can be passed downstream are the files in the repository: the code the upstream task changed and the documents it wrote. The conversation in the upstream session, its reasoning, and any conclusions it didn't write down don't make it across. So the upstream task has to write its conclusions into a file, and the downstream prompt has to name that file as something to read. The file path is the interface between the two tasks. For how to do this, see [Pass conclusions downstream](/docs/guides/designing-tasks-and-prompts#pass-results).
+
+## A task agent's view and permissions [#task-agent]
+
+A task agent is simply an ordinary Claude Code or Codex session started in one of your repository's workspaces.
+
+### What a task agent can see [#agent-view]
+
+A task agent's **view** is limited to the `prompt` and the files it reads itself. The `prompt` is all that CodeDAG gives it. The `title` and `description` in the workflow and the contents of other tasks aren't sent to it, and your conversation with the orchestrating agent isn't brought into its context either.
+
+The files come mainly from the workspace it runs in. In the default isolated-branches mode, the workspace has this task's task branch checked out, and its contents are the workflow's [base](/docs/concepts/workspaces-and-branches#branches) commit plus the upstream results that have been accepted. In shared-workspace mode, all tasks run directly in the same workspace, and what they see is whatever that directory contains at the time.
+
+So write the prompt so that a new session with no background can complete the task on its own. Any material the prompt tells the agent to read must either be committed before the workflow starts or be produced by an upstream task.
+
+### What a task agent can do [#agent-permissions]
+
+A task agent's **permissions** are determined by the task's `mode`, which maps directly to that agent's own permission settings. If you leave `mode` out, CodeDAG doesn't decide for the agent, and the agent runs with its own configuration.
+
+When the permission mode requires the agent to get consent before it edits files or runs commands, the agent stops in its session and waits for someone to respond, and the task stops there with it. To approve the request, [enter its native session](/docs/guides/intervene-and-control#task-view). If you want a task to run to the end unattended, give it a mode that doesn't ask for confirmation at each step, and accept the risk that comes with that level of access. For the values each of the two agents supports and how to weigh unattended against attended runs, see [Choose Agents, Models, and Permission Modes](/docs/guides/agents-and-permission-modes).
+
+## A task is not a subagent [#not-a-subagent]
+
+A task is not a subagent. No main session is waiting for it, and it doesn't hand its result back to anyone.
+
+A subagent is dispatched by a main session. When it's done, it reports its result back to that session, and the main session decides what happens next. A task has no such main session, and the orchestrating agent that writes and submits the workflow for you isn't its main session either. CodeDAG starts tasks according to their dependencies, a finished task's result stays only in the repository, and downstream tasks read it from there.
+
+A task agent, on the other hand, can still dispatch subagents within its own session. That's a means of getting the task done, and it's internal to the task. The task doesn't count as finished until all of those subagents have finished.

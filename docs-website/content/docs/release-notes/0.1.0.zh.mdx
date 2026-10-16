@@ -1,0 +1,71 @@
+---
+title: 0.1.0
+description: 发布日期待定
+icon: PartyPopper
+---
+
+0.1.0 是 CodeDAG 的首个公开版本，公测期间任何人都可以注册使用。它面向已经在用 Claude Code 或 Codex 写代码的开发者，适合把多步、耗时、不想一直守着终端的开发任务写成工作流交给它推进；任务在你自己的电脑上执行，调用的是你已经安装并登录的 Agent。第一次了解 CodeDAG，可以先读[概览](/zh/docs/introduction/overview)。
+
+## 主要能力
+
+### 编排
+
+你把一批开发任务写成一个工作流文件，提交之后，CodeDAG 按任务之间的依赖启动它们：一个任务要等它依赖的任务完成并被接受后才开始，互不依赖的任务可以同时执行。工作流文件用 YAML 或 JSON 编写，放在项目的 `.codedag/dags/` 目录下，每个任务写明交给 Agent 的 prompt，并用 `dependencies` 列出它依赖的任务，写法见[编写工作流文件](/zh/docs/guides/writing-workflows)。
+
+`cdg dag validate{:sh}` 在提交前检查文件的结构、依赖和字段；`cdg dag submit{:sh}` 把工作流放进项目的队列，可以一次提交多个。同一个项目的工作流按提交顺序依次执行，前一个结束后下一个自动开始，所以你可以在离开前排好几个，队列的规则见[提交与队列](/zh/docs/concepts/how-it-works#queue)。工作流在后台执行，关掉终端也不受影响；想在当前终端跟着看进度和日志，提交时加上 `--attach`。
+
+### 隔离与合并
+
+在默认的隔离分支模式下，每个任务在自己的任务分支上执行，结果由 CodeDAG 逐步合并，最后汇到这个工作流专属的集成分支，你的主分支不会被改动。下游任务开始之前，CodeDAG 先把上游已接受的结果合并进它的分支；遇到合并冲突时交给 Agent 解决，解决不了，任务就停下来等你处理。集成分支名为 `cdg/<工作流名>/integration`，所有任务审核完成后，结果才合并进来；何时合入主分支、直接合并还是开 PR，都由你决定并自行操作，做法见[收口、合入主分支与清理](/zh/docs/guides/finish-and-merge)。
+
+每个任务的改动都留有退路：取消、推迟或重做一个任务时，它已有的改动默认存进一个快照分支，之后仍能取回。
+
+要让任务同时执行，需要为项目准备 worktree 或 clone 副本作为额外的工作区，同时执行的任务各占一个工作区，见[并行执行与工作区](/zh/docs/guides/parallel-workspaces)；分支与工作区之间的关系见[工作区与分支](/zh/docs/concepts/workspaces-and-branches)。
+
+不编译、不运行测试的轻量任务，比如写文档、翻译或调研，可以在工作流文件里把 `executionMode` 设为 `shared-workspace`，改用共享工作区模式：所有任务在同一个工作区里执行，不建分支、不做合并，也不创建提交。
+
+### 审核门禁
+
+任务做完之后，结果要先被接受，才会交给下游。默认自动接受，工作流中途不停顿，一直执行到结束；你也可以在任意任务或整个工作流上关掉自动接受，让流程在那里停下等你审核。控制自动接受的有三个字段：任务的 `autoAccepted`、工作流对其中所有任务生效的 `taskAutoAccepted`，以及针对工作流本身的 `dagAutoAccepted`，设为 `none` 就会停下等人；提交时还可以用 `--task-auto-accepted` 和 `--dag-auto-accepted` 临时覆盖。哪些节点值得停下等人审核，见[哪些节点值得把门禁设为关](/zh/docs/concepts/review-gates#when-to-close)。
+
+审核动作分为两类。`accept`、`cancel`、`defer` 给出最终结论，分别是接受、取消和推迟；`revise`、`request-changes`、`rework` 让任务继续改，分别是由你自己动手修改、让 Agent 在现有结果上接着改，以及回到任务开始前的干净起点重新做。任务用 `cdg task review{:sh}` 审核，整个工作流用 `cdg dag review{:sh}` 审核，后者只有三个最终动作，用法见[审核任务与工作流](/zh/docs/guides/review-tasks)。
+
+### 观察与控制
+
+提交之后，你可以从项目、工作流和任务三个层级查看进度，也可以随时暂停、中断和恢复执行。`cdg status{:sh}` 显示项目的队列，`cdg dag status{:sh}` 显示一个工作流里每个任务的状态，`cdg task status{:sh}` 显示单个任务的细节，三者都可以加 `--watch` 持续刷新；`cdg dag logs{:sh}` 与 `cdg task logs{:sh}` 回看执行日志，加 `-f` 持续跟随，加 `-n` 只看末尾几行，用法见[提交、观察与日志](/zh/docs/guides/run-and-monitor)。
+
+`cdg task view{:sh}` 把你带进任务 Agent 的原生会话，你可以看它正在做什么，也可以直接和它对话、纠正方向或应答审批。`pause`、`unpause`、`kill`、`recover` 在工作流和任务两级都能用；对执行中的 Agent 任务，`kill` 只中断当前的输出并保留会话，之后 `recover` 会在同一个会话里继续。几种操作分别适合什么情况，见[干预与控制](/zh/docs/guides/intervene-and-control)。
+
+遇到 CodeDAG 无法自行处理的情况，比如工作区里有未提交的改动、合并冲突没能解决，或者轮到工作流开始执行时 CodeDAG 额度不足，任务或工作流会进入 `on-hold`（搁置）并给出原因，你处理之后用 `recover` 恢复，各种原因的处理见[任务或工作流停在 on-hold](/zh/docs/troubleshooting/troubleshooting#on-hold)。
+
+### Agent 集成
+
+每个任务都可以交给 Claude Code 或 Codex 执行，并单独指定 Agent、权限模式、模型和推理力度。`agent` 写 `claude` 或 `codex`，不写时使用项目的默认 Agent；`mode` 按所选 Agent 自己的权限模式写法填写，决定任务 Agent 能否不经你批准就执行命令、修改文件；`model` 与 `effort` 原样交给 Agent。无人值守和有人值守时各该怎样设置，见[选择 Agent、模型与权限模式](/zh/docs/guides/agents-and-permission-modes)。
+
+同一个工作流可以混用两家 Agent，例如让 Claude Code 实现、Codex 审查，或者让两者各写一版再综合；合并冲突交给哪个 Agent 解决，可以用 `mergeConflictAgent` 指定。常见的分工方式见[混合使用 Claude Code 与 Codex](/zh/docs/guides/mixing-agents)。
+
+### CodeDAG Guide 插件
+
+CodeDAG Guide 插件让 Claude Code 和 Codex 学会使用 `cdg`。装好之后，你用自然语言描述目标，由它拆分任务、写工作流、提交并跟踪进度，做法见[让 Agent 帮你编排](/zh/docs/get-started/let-your-agent-orchestrate)。插件可以在 `cdg init{:sh}` 时一并安装，之后用 `cdg plugin{:sh}` 下的 `install`、`status`、`update`、`uninstall` 安装、查看、更新和卸载，见[管理 CodeDAG Guide 插件](/zh/docs/guides/guide-plugin)。
+
+## 已知限制
+
+0.1.0 还做不到下面这些事。其中条件分支与循环、执行中增删任务和图形界面几项的替代做法，见 [CodeDAG 目前的限制](/zh/docs/introduction/when-to-use#limitations)。
+
+- **没有条件分支和循环，也不能在执行中增删任务。** 工作流的结构在提交时就已确定，执行用的是提交那一刻的文件内容。
+- **没有任务超时。** 长时间没有进展的任务不会被自动停止，要靠状态和日志判断它是否卡住，判断方法见[怎样判断它是不是卡住了](/zh/docs/guides/run-and-monitor#is-it-stuck)。
+- **没有图形界面。** 工作流和任务的状态、日志都在命令行里查看。
+- **只支持 Claude Code 与 Codex 两种 Agent。**
+- **只能用 Google 账号登录，并且需要浏览器。** 登录要在运行 CodeDAG 的这台电脑上通过浏览器完成，没有桌面浏览器的环境目前无法登录，也就无法初始化项目和提交工作流，见[没有桌面浏览器时](/zh/docs/account/login-and-account#no-browser)。对这类环境的支持已列入后续版本的规划。
+- **没有额度补充包。** 免费额度用完或到期后，要订阅才能继续提交工作流；订阅的额度每月重置，当月用完后要等下一次重置，见[额度、订阅与扣费](/zh/docs/account/credits-and-subscription)。
+- **公测期间暂不支持 Windows。**
+
+## 平台与安装
+
+0.1.0 支持 macOS 和 Linux，Apple 芯片与 Intel 芯片的 Mac、x64 与 arm64 的 Linux 都有对应的版本，统一通过 Homebrew 安装和升级。CodeDAG 以独立的二进制程序分发，不需要安装 Node.js。
+
+除 CodeDAG 本身之外，你还需要 Git，以及 Claude Code 或 Codex 至少一个。Claude Code 最低要求 2.1.196，0.1.0 验证过的最新版本是 2.1.292。安装、登录和升级的步骤见[安装与登录](/zh/docs/get-started/installation)。
+
+## 反馈
+
+使用 0.1.0 时遇到问题或有改进建议，可以写信到 <Email user="hi" />，或者提交到 [GitHub Issues](https://github.com/CodedagAI/codedag-home/issues)。报告问题之前，可以先在[故障排除](/zh/docs/troubleshooting/troubleshooting)里按症状排查，求助时需要附上哪些信息见[收集信息以便求助](/zh/docs/troubleshooting/troubleshooting#get-help)。

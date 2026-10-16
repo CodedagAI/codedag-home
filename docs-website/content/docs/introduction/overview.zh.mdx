@@ -1,0 +1,98 @@
+---
+title: 概览
+description: 用几分钟了解 CodeDAG 做什么、怎样运作，判断它是否适合你手头的工作。
+icon: LayoutTemplate
+---
+
+## CodeDAG 是什么
+
+CodeDAG 让你把一批开发任务写成一个工作流文件，交给它排队执行。每个任务由一个全新的 Claude Code 或 Codex 会话完成，默认在自己的分支上工作；通过审核的结果最后汇到这个工作流专属的集成分支上，由你决定何时合入主分支。
+
+直接使用 Claude Code 或 Codex 时，工作是一轮一轮推进的：你交代一件事，等它做完，检查结果，再交代下一件。多开几个会话能同时做几件事，代价是你要在几个终端之间来回照看，记住每件事做到了哪一步；你一离开，所有会话都停在等你下一句话的地方。
+
+CodeDAG 把“接下来做什么”提前写进工作流：哪些任务先做，哪些要等别的任务完成，哪些可以同时进行。提交之后，它按这份安排启动任务，把上游的结果交给下游，不需要你在场逐个交代。你随时可以查看进度、暂停执行，或者进入某个任务的会话直接和 Agent 对话，但流程本身不再靠你推动。
+
+CodeDAG 本身是一个命令行工具，命令是 `cdg`。它在你电脑上的 Git 仓库里运行，调用的是你已经安装并登录的 Claude Code 或 Codex，Agent 本身的用量照常计在你自己的账号上。使用 CodeDAG 还需要登录一个 CodeDAG 账号：工作流轮到它开始执行时，按任务数消耗 CodeDAG 额度，每个任务 1 点；新账号注册即送一批免费额度，细则见[额度、订阅与扣费](/zh/docs/account/credits-and-subscription)。
+
+## 一分钟看懂
+
+你写好并提交工作流之后，CodeDAG 按依赖启动任务，每个任务在自己的分支上执行，审核通过的结果传给下游，最后全部汇入集成分支；是否合入主分支由你决定。
+
+export const overviewChart = `%%{init: {"flowchart": {"padding": 10, "nodeSpacing": 30, "rankSpacing": 28}}}%%
+flowchart LR
+  s1["写工作流"] --> s2["提交"]
+  s2 --> s3
+  subgraph engine["提交后由 CodeDAG 推进"]
+    s3["执行任务<br/>全新会话，独立分支"] --> s4["审核<br/>默认自动通过"]
+    s4 --> s5["汇入集成分支"]
+  end
+  s5 -.-> s6["由你合入主分支"]`;
+
+<Tabs items={['图表', '代码']}>
+  <Tab value="图表">
+    <Mermaid chart={overviewChart} />
+  </Tab>
+  <Tab value="代码">
+    <DynamicCodeBlock lang="mermaid" code={overviewChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+1. **写工作流。** 把目标拆成几个任务，为每个任务写一段交给 Agent 的指令，并注明它要等哪些任务先完成。
+2. **提交。** 工作流进入这个项目的队列，轮到它时在后台开始执行，关掉终端也不影响。同一个项目里的多个工作流按提交顺序依次执行。
+3. **执行任务。** 依赖已经满足的任务各自启动一个全新的 Claude Code 或 Codex 会话，在自己的分支上工作，已通过审核的上游结果会事先合并进这个分支。任务之间不共享对话，靠仓库里的文件传递信息。为 CodeDAG 准备了额外的 worktree 或 clone 之后，互不依赖的任务可以同时执行。
+4. **审核。** 任务做完后要先被接受，结果才会交给依赖它的任务。默认自动接受，工作流不停顿；你也可以[让指定的任务做完后停下来](/zh/docs/concepts/review-gates)，等你检查过再决定放行、要求修改还是放弃。
+5. **汇入集成分支。** 所有任务都通过审核后，CodeDAG 把它们的结果合并到这个工作流的[集成分支](/zh/docs/concepts/workspaces-and-branches#branches)上，整个工作流也要经过一次审核，默认同样自动通过。之后是否合入主分支、直接合并还是开 PR，都由你决定并自行操作。
+
+<Callout type="info">
+CodeDAG 不会在你的主分支上提交，也不会向你的远程仓库推送或从中拉取。不过默认情况下，运行期间它会把你的仓库切换到各个任务分支，结束后仓库停在集成分支上，而不是回到你原来所在的分支。
+</Callout>
+
+## 适合什么，不适合什么
+
+CodeDAG 适合多步、耗时、你不想一直守着终端的开发任务，通常是这几类：
+
+- **一次安排好的多步、耗时任务。** 比如先写方案，再按方案写测试，最后实现并修到测试通过。写好工作流之后你可以离开，回来再看结果。
+- **想同时推进的几项改动。** 各项改动在独立的分支和代码副本上并行执行，完成后自动合并到一起，不需要你在几个会话之间来回协调。
+- **需要另一个模型把关的质量流程。** 比如让 Claude Code 实现、Codex 审查，或者让两个模型各写一版再综合。同一个工作流里的每个任务都可以指定不同的 Agent 和模型。
+
+这几类工作不适合交给 CodeDAG：
+
+- **几行就能改完的小修。** 直接在 Claude Code 或 Codex 里改更快。
+- **需要边做边定方向的探索。** 先在交互会话里谈出方案，再把能连续推进的部分写成工作流。
+- **每一步都必须由人看过结果才能定下一步的工作。** 结果很不确定，没法一开始就规划好，下一步怎么走又重要到不能直接交给 Agent 判断。比如先做出几个原型，看过实际效果，再决定产品往哪个方向做，这种决定一旦做错，往回改的代价很高。这类工作在 Claude Code 或 Codex 里一步步做更合适。
+
+想把 CodeDAG 和你现在的做法逐项比较，包括它与 Claude Code Dynamic Workflow 的差异，以及它目前做不到的事，见[何时用 CodeDAG](/zh/docs/introduction/when-to-use)。
+
+## 两种使用方式
+
+日常使用时，你可以把目标直接告诉装了 CodeDAG Guide 插件的 Claude Code 或 Codex，由它写工作流、提交并跟踪进度；也可以自己手写工作流文件。两种方式得到的是同一种工作流，执行起来没有区别，可以混着用。
+
+也就是说，你不必先学会写工作流才能用 CodeDAG。CodeDAG Guide 插件教会 Agent 使用 `cdg`，可以在初始化项目时顺带安装。装好之后，你描述想完成什么，它负责把目标拆成任务、写出工作流并提交，运行期间替你查看进度，结束后告诉你结果在哪里。手写工作流则适合学习和微调：工作流文件一般用 YAML 写，每个任务写明编号、标题、给 Agent 的指令和它依赖的任务，每个细节都由你掌握。
+
+混用的方式很自然：让 Agent 起草工作流，你打开文件调整几个任务后再让它提交；或者自己写好并提交，再让 Agent 帮你盯着运行。
+
+<Cards>
+  <Card href="/zh/docs/get-started/let-your-agent-orchestrate" title="让 Agent 帮你编排">
+    在装了 CodeDAG Guide 插件的 Claude Code 或 Codex 里描述目标，由它写工作流、提交并跟踪进度。
+  </Card>
+  <Card href="/zh/docs/guides/writing-workflows" title="手写工作流">
+    自己写出任务、指令与依赖，精确控制每个任务交给谁、怎么执行。
+  </Card>
+</Cards>
+
+即使打算主要让 Agent 代劳，也建议先跟着[快速开始](/zh/docs/get-started/quickstart)亲手写一个小工作流。完整看过一次工作流文件，再读 Agent 写出的版本就快得多，也更容易发现它哪里写得不对。
+
+## 下一步
+
+- [何时用 CodeDAG](/zh/docs/introduction/when-to-use)：与你现在的做法逐项比较，判断手头的工作该不该交给它。
+- [安装与登录](/zh/docs/get-started/installation)：安装 `cdg`，登录 CodeDAG 账号。
+- [快速开始：第一个工作流](/zh/docs/get-started/quickstart)：在自己的仓库里跑通一个只新增文件、不改动已有代码的工作流。
+
+让 Agent 查阅本站时，可以从 `/llms.txt` 的页面索引开始，每页地址后加 `.md` 即可取得 Markdown 正文；字段与命令的精确写法见[工作流文件参考](/zh/docs/reference/workflow-file)与[命令总览](/zh/docs/reference/cli)。

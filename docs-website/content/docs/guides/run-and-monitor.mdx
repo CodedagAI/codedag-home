@@ -1,0 +1,177 @@
+---
+title: Submit, Monitor, and Read Logs
+description: Submit a workflow, check progress at the project, workflow, and task levels, read the run logs, and tell whether a task is making normal progress.
+icon: Activity
+---
+
+`cdg dag submit{:sh}` puts a workflow in the project's [queue](/docs/concepts/how-it-works#queue), and the workflow runs in the background when its turn comes. The command returns as soon as the workflow is queued, and closing the terminal doesn't affect the run. After you submit, use `cdg status{:sh}`, `cdg dag status{:sh}`, and `cdg task status{:sh}` to check [status](/docs/concepts/how-it-works#status) at the project, workflow, and task levels, and use `cdg dag logs{:sh}` and `cdg task logs{:sh}` to see what the task agents did. CodeDAG has no task timeout, so when a task has been quiet for a long time, it's up to you to judge whether it's stuck.
+
+## Submit a workflow [#submit]
+
+Once a workflow file passes [validation](/docs/guides/writing-workflows#validate) with `cdg dag validate{:sh}`, submit it with `cdg dag submit{:sh}`. The workflow joins this project's queue and starts running in the background when its turn comes. Closing the terminal doesn't affect it.
+
+```bash title="Terminal"
+cdg dag submit api-docs
+```
+
+The command returns as soon as the workflow is queued. Its output shows the workflow's position in the queue and the commands for checking status and logs.
+
+You can submit several workflows at once by separating their names with spaces, for example `cdg dag submit api-docs release-notes{:sh}`. They enter the queue in the order you list them. See [Submit several workflows at once](/docs/reference/cli/validate-and-submit#multiple). To change the review settings for this submission only, for example to make every task stop when it finishes and wait for your review, use options such as `--task-auto-accepted`. For the syntax, see [Adjust review settings for a single submission](/docs/reference/cli/validate-and-submit#auto-accept-options).
+
+### What submission checks [#submit-checks]
+
+Before it submits a workflow, CodeDAG confirms the following. If any check fails, the workflow doesn't enter the queue. When you submit several workflows at once and any one of them fails a check, none of them are submitted.
+
+1. **The workflow file is valid.** Submission runs the `cdg dag validate{:sh}` checks again and doesn't submit if there are errors. If there are only warnings, the command lists them and then asks `Submit anyway?`, and the default is not to submit. Once you've read the warnings and confirmed that they don't affect the run, you can add `-y` to skip the question.
+2. **The workflow isn't already in the queue.** After you submit a workflow, you can't submit it again until its review is finished and it has left the queue.
+3. **The workflow hasn't already been reviewed.** If its review is finished, you have to clear the review with `cdg dag review clear{:sh}` before you can submit it again. See [Clear the review and resubmit](/docs/reference/cli/review#clear-and-resubmit).
+4. **You're signed in to your CodeDAG account.** If you aren't, the command has you [sign in](/docs/account/login-and-account#sign-in) first and then goes on with the submission.
+5. **You have enough CodeDAG credits.** The credits left in your account have to cover every task in this submission. If you don't have enough credits or have no active subscription, the submission is rejected.
+
+When a submission is rejected, use the message in the output to find the matching fix under [Submission rejected](/docs/troubleshooting/troubleshooting#submit-rejected) in Troubleshooting.
+
+<Callout type="info">
+Submission only checks whether you have enough credits. It doesn't deduct them, and it doesn't reserve them for this workflow. Credits are deducted when the workflow reaches the head of the queue, just before it actually starts running, at 1 credit per task. See [When credits are charged](/docs/account/credits-and-subscription#when-charged).
+</Callout>
+
+### Submission warns that the workspace has uncommitted changes [#dirty-workspace]
+
+If the submit output ends with a yellow notice whose first line is `The workflow is on hold because the target workspace has uncommitted changes.`, the workflow is in the queue, but the first workspace it needs (the primary repository by default) isn't clean. The task can't start, and it stops at `on-hold` with the reason `workspace-dirty`. In the default isolated-branches mode, CodeDAG has to switch the workspace to the task branch and commit the task's changes there, so before each task starts, its workspace must have no uncommitted changes. Untracked new files count too.
+
+You don't need to resubmit the workflow. In that workspace, commit the changes, stash them (for example with `git stash -u`), or discard them, and then run `cdg dag recover api-docs{:sh}`. The task is prepared again and starts. If you'd rather not clean up the workspace for this task, you can end the task instead. See [The workspace has uncommitted changes or an unfinished Git operation](/docs/troubleshooting/troubleshooting#hold-workspace).
+
+## Submit and follow in the same terminal: `--attach` [#attach]
+
+To watch a workflow run from start to finish, add `--attach` when you submit. The terminal then keeps showing the workflow's logs until it finishes. If you're leaving right after you submit, or you need to keep an eye on several workflows at once, submit without it and check in whenever you like with the commands in the sections below.
+
+```bash title="Terminal"
+cdg dag submit api-docs --attach
+```
+
+The logs are the same as what `cdg dag logs -f{:sh}` shows. For how to read them, see [Logs](#logs). If the workflow is further back in the queue, no logs appear until its turn comes and it starts running. If it stops at `on-hold` partway through, following ends as well, and the terminal tells you so.
+
+Two keys work while you're following, and they do very different things. Ctrl+C only stops this terminal from following. The workflow keeps running in the background, and you can follow it again later with `cdg dag logs api-docs -f{:sh}`. `Ctrl+\` kills the whole workflow, just as `cdg dag kill{:sh}` does, and afterward you need `cdg dag recover{:sh}` to let it continue. See [Stop immediately](/docs/guides/intervene-and-control#kill).
+
+The logs you follow are read-only, and nothing you type in this terminal reaches the task agent. To see the agent's own interface, talk to it, or respond to an approval request, open another terminal and run `cdg task view{:sh}`. See [Enter a session, make changes, and exit](/docs/guides/intervene-and-control#task-view).
+
+The only input you're asked for while following is a review. When a task or the whole workflow is set for manual review and reaches the point where it waits for you, the terminal stops the logs and shows a prompt such as `Task 1 is ready for review (done).` along with the review actions you can choose, so you can give your decision on the spot. Pressing Esc in the menu means you aren't reviewing right now. Following ends there, and the task or workflow stays where it is and waits for you. Give your decision later with `cdg task review{:sh}` or `cdg dag review{:sh}`. See [Review Tasks and Workflows](/docs/guides/review-tasks).
+
+## Check what's happening: three levels of status [#status]
+
+`cdg status{:sh}` shows the whole project's queue, `cdg dag status <workflow>{:sh}` shows every task in one workflow, and `cdg task status <task-id> -w <workflow>{:sh}` shows the details of a single task. When you troubleshoot, work from the top down: find the workflow that stopped, then the task that stopped, and then the reason it stopped. If you leave out the workflow in `cdg dag status{:sh}` or `-w` in `cdg task status{:sh}`, the command refers to the first workflow in the queue.
+
+In the example below, the `api-docs` workflow was submitted but still hasn't started running. The three commands, from the top down, close in on the reason:
+
+```bash title="Terminal"
+$ cdg status
+[TZ: -04:00] 2026-09-30 10:53:37
+
+Planning Workflows (1):
+  📝 .codedag/dags/release-notes.yaml
+
+Submitted Workflows (1):
+  #1   🔘 [pending]     [on-hold]  .codedag/dags/api-docs.yaml
+
+$ cdg dag status api-docs
+[TZ: -04:00] 2026-09-30 10:53:38
+
+Workflow: .codedag/dags/api-docs.yaml
+  Phase: 📤 submitted
+  Queue Position: 1
+  Status: 🔘 pending
+  Substatus: on-hold
+  Docs: https://codedag.com/docs/troubleshooting/troubleshooting#on-hold
+  Integration Workspace: /Users/you/my-app
+  Integration Branch: cdg/api-docs/integration
+  Base Commit: ae07d384aa41aa5aaa2041af5bfd529f8584f461
+
+Submitted Tasks (2):
+  🔘 [pending]     [on-hold]  Task 1: List the API endpoints
+  🔘 [pending]     [blocked]  Task 2: Write the API docs
+
+Progress: 0/2 tasks completed (0%)
+
+$ cdg task status 1 -w api-docs
+[TZ: -04:00] 2026-09-30 10:53:38
+
+Task 1 in .codedag/dags/api-docs.yaml
+Title: List the API endpoints
+Phase: 📤 submitted
+Status: 🔘 pending
+Substatus: on-hold
+Reason: workspace-dirty
+Diagnostic: Task workspace has uncommitted changes: ?? notes.txt
+Docs: https://codedag.com/docs/troubleshooting/troubleshooting#hold-workspace
+Workspace: /Users/you/my-app
+Branch: cdg/api-docs/t1-list-the-api-endpoints
+```
+
+`cdg status{:sh}` tells you only that `api-docs`, at the head of the queue, is `[pending] [on-hold]`. `cdg dag status{:sh}` shows that task 1 is the one on hold and that task 2 is waiting for it. Only `cdg task status{:sh}` gives the reason, `workspace-dirty`: the workspace assigned to task 1 has uncommitted changes, and the `Diagnostic:` line lists the files. To fix it, see [Submission warns that the workspace has uncommitted changes](#dirty-workspace).
+
+The reason a task is on hold appears only in `cdg task status{:sh}`, and only when you pass a single task ID. When the workflow itself is on hold, for example because you don't have enough CodeDAG credits when its turn to run comes, the reason appears right in `cdg status{:sh}`, in parentheses at the end of the workflow's row, and on the `Reason:` line of `cdg dag status{:sh}`.
+
+For what each combination of status and substatus means, see [State Meanings](/docs/reference/states). For which situations only call for waiting and which need you to act, see [When you need to act](/docs/reference/states#what-to-do) on that page.
+
+All three commands accept `--watch`, which refreshes once a second until every workflow or task you're watching has been reviewed. For each command's exit condition, see [Refresh status continuously](/docs/reference/cli/status-and-logs#watch).
+
+## See what a task is doing: logs [#logs]
+
+`cdg dag logs <workflow>{:sh}` shows the logs for a whole workflow, grouped by task. Add `-f` to keep following, or `-n` to see only the last few lines. When you care about only one task, use `cdg task logs <task-id> -w <workflow>{:sh}`.
+
+```bash title="Terminal"
+# Show all the logs for the whole workflow, grouped by task
+cdg dag logs api-docs
+
+# Show the last 50 lines first, then keep following new logs
+cdg dag logs api-docs -n 50 -f
+
+# Show only the last 50 lines for task 2
+cdg task logs 2 -w api-docs -n 50
+```
+
+With `-f`, the logs from several tasks are interleaved in time order, and following ends automatically when the workflow has been reviewed and leaves the queue. Logs tend to be long, so when you just want to know how things stand, it's quicker to look at the last few dozen lines with `-n` first. If you leave out the workflow, you get the one at the head of the queue. After a workflow has been reviewed, you can still view its logs by name.
+
+The logs record what the task agent prints in its terminal interface: its replies, the tools it calls, the commands it runs, and the results of those commands. CodeDAG also writes a `START:` line when each task starts and an `END:` line when it ends. Because the logs are captured line by line from a terminal interface, they also contain fragments left behind by the interface's animations, timers, and status bar refreshes, so they aren't as tidy to read as the agent's own interface. Text that the agent prints all at once, such as the body of its replies, permission prompts, commands, and file names, keeps the spaces between words in the logs, so you can search for whole phrases.
+
+Log files are saved under `.codedag/local/logs/` in the primary repository, at the same path that the workflow file has relative to `.codedag/dags/`, with the extension changed to `.log`. When the same workflow runs again, the new logs are appended to the same file. For how to view and clean up the files, see [Log file locations](/docs/reference/branches-and-files#log-files).
+
+Logs are a read-only record. You can read them from any terminal, script, or agent's shell tool, and reading them doesn't affect the task, so they're all you need for routine monitoring. When you want to see the agent's own interface, talk to it, or respond to an approval request, enter the session with `cdg task view{:sh}`. For how to choose between the two, see [Choose how to observe and make changes](/docs/guides/intervene-and-control#choose-intervention).
+
+## Is it stuck? [#is-it-stuck]
+
+A task that stays `working` while its log shows no meaningful new output for a long time isn't necessarily stuck. When a task agent has subagents working in the background or is running a command that takes a long time, the main session may show nothing but a changing timer and status bar for a long while. CodeDAG has no task timeout either, and it doesn't kill a task just because it has been running for a long time. So whether to step in is your call. As a rule, start investigating only after ten minutes or more with no sign of progress.
+
+The most important case to watch for is a task agent that's waiting for you to approve an operation or answer a question. If nobody responds, it keeps waiting, and all that time the task's status still shows `working`. The only sign is that the log ends at the agent's confirmation prompt or question and its timestamps stop advancing. For example:
+
+```bash title="Terminal"
+$ cdg task status 1 -w api-docs
+[TZ: -04:00] 2026-09-30 11:01:53
+
+Task 1 in .codedag/dags/api-docs.yaml
+Title: List the API endpoints
+Phase: 📤 submitted
+Status: 🟢 in-progress
+Substatus: working
+
+$ cdg task logs 1 -w api-docs -n 12
+[Task   1] [2026-09-30 10:59:14] ──────────────────────────────────────────────────────────────────────────────────────────
+[Task   1] [2026-09-30 10:59:14]  Create file
+[Task   1] [2026-09-30 10:59:14]  docs/api/endpoints.md
+[Task   1] [2026-09-30 10:59:14] ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+[Task   1] [2026-09-30 10:59:14]   1 No endpoints yet
+[Task   1] [2026-09-30 10:59:14] ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+[Task   1] [2026-09-30 10:59:14]  Do you want to create endpoints.md?
+[Task   1] [2026-09-30 10:59:14]  ❯ 1. Yes
+[Task   1] [2026-09-30 10:59:14]    2. Yes, and switch to accept edits (auto-approve file edits and common file commands)
+[Task   1] [2026-09-30 10:59:14]       for this session (shift+tab)
+[Task   1] [2026-09-30 10:59:14]    3. No
+[Task   1] [2026-09-30 10:59:14]  Esc to cancel · Tab to amend
+```
+
+Here task 1's status is `working`, but its log stopped more than two minutes ago and ends with Claude Code's prompt asking whether to create `endpoints.md`. It's waiting for someone to approve. Enter the session with `cdg task view{:sh}` and make a choice. For the steps, see [Respond to an approval request](/docs/guides/intervene-and-control#approval). For the full troubleshooting procedure, and for how to kill a task you've confirmed is stuck and have it resume in its original session, see [A task has no new output for a long time](/docs/troubleshooting/troubleshooting#no-output).
+
+## Related
+
+- [Intervene and Control](/docs/guides/intervene-and-control): Pause, kill, and recover tasks, and enter a session to correct course or respond to an approval request.
+- [State Meanings](/docs/reference/states): What each phase, status, substatus, and review result means, and whether to wait or act when you see it.
+- [Status and Logs](/docs/reference/cli/status-and-logs): All the arguments and syntax for the status and log commands.

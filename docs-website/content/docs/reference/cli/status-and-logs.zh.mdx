@@ -1,0 +1,177 @@
+---
+title: 查看状态与日志
+description: 状态命令与日志命令的写法和查询范围，以及持续刷新、跟随日志与限制行数的选项。
+icon: Activity
+---
+
+工作流提交之后，用状态命令查看工作流与任务的进度，用日志命令查看任务 Agent 做了什么。怎样用它们逐层排查、怎样读日志的内容，见[提交、观察与日志](/zh/docs/guides/run-and-monitor)。
+
+## 查看状态 [#status-commands]
+
+查看状态的命令分三个层级：`cdg status{:sh}` 列出整个项目的工作流，`cdg dag status{:sh}` 显示一个工作流中的每个任务，`cdg task status{:sh}` 显示指定任务的详细状态。
+
+| 想查看什么 | 命令 | 工作流的写法 | 省略工作流时 |
+|---|---|---|---|
+| 项目中的全部工作流，以及各自的阶段与状态 | `cdg status{:sh}` | 没有参数 | — |
+| 一个工作流，以及其中每个任务的状态 | `cdg dag status [工作流]{:sh}` | 位置参数或 `-w`，只能给出一种 | 队首工作流 |
+| 指定任务的详细状态，包括被搁置的原因 | `cdg task status <任务 ID...> [-w <工作流>]{:sh}` | `-w` | 队首工作流 |
+
+三个命令都可以加 `--watch` 持续刷新，见[持续刷新状态](#watch)。输出中的阶段、状态、子状态与审核结果各表示什么，见[状态含义](/zh/docs/reference/states)。
+
+### cdg status [#cdg-status]
+
+```bash title="Terminal"
+cdg status [--watch]
+```
+
+`cdg status{:sh}` 没有参数，显示当前项目中的全部工作流，按阶段分为三组：还没提交的、在队列中的和已经审核结束的。`cdg dag ls{:sh}` 与 `cdg dag list{:sh}` 是它的另外两种写法，效果完全相同。
+
+还没提交的一组列出 `.codedag/dags/` 及其各层子目录中的工作流文件：先列本目录中的，再依次列各个子目录。已经提交或已经审核结束的工作流归入另外两组，不在这一组里重复出现。
+
+### cdg dag status [#dag-status]
+
+```bash title="Terminal"
+cdg dag status [工作流] [--watch]
+```
+
+`cdg dag status{:sh}` 显示一个工作流的阶段与状态，以及其中每个任务的状态。它不限于队列中的工作流：指定还没提交的工作流时，列出它的任务；指定已经审核结束的工作流时，显示工作流与各任务的审核结果。`cdg task ls{:sh}` 与 `cdg task list{:sh}` 是放在 `task` 下的另外两种写法，显示的内容相同。
+
+工作流可以写成位置参数，也可以用 `-w`（或 `--workflow-file`、`--dag`）指定，每次只能给出一种，见[位置参数与 `-w`](/zh/docs/reference/cli#workflow-option)。省略时显示队首工作流，队列为空时命令报错。
+
+### cdg task status [#task-status]
+
+```bash title="Terminal"
+cdg task status <任务 ID...> [-w <工作流>] [--watch]
+```
+
+`cdg task status{:sh}` 显示同一个工作流中指定任务的状态。任务 ID 必须写出，可以写一个或多个，用空格分隔，写法见[指定一个或多个任务](/zh/docs/reference/cli#task-ids)。这个命令不支持任务选择器，要看工作流中的全部任务，用 `cdg dag status{:sh}`。工作流用 `-w` 指定，省略时为队首工作流；和 `cdg dag status{:sh}` 一样，也可以指定还没提交或已经审核结束的工作流。
+
+只写一个任务 ID 时，命令显示这个任务的详细信息：任务被搁置时给出原因 `Reason:`，其后常有一行 `Diagnostic:` 补充具体情况，启动前准备失败而停住的任务（`workspace-dirty`、`branch-name-conflict` 这类原因）在这一行写明失败原因，Agent 会话出问题的任务写明 Agent 那边发生了什么；再下一行 `Docs:` 是这个原因对应的排障页链接。写多个 ID 时，每个任务只显示一行状态，上面这几行与[代码位置](#code-location)都不显示。所以要查看任务为什么停下，每次只写一个 ID：
+
+```bash title="Terminal"
+cdg task status 2 -w feature
+```
+
+### 代码位置 [#code-location]
+
+`cdg task status{:sh}` 的单任务详情与 `cdg dag status{:sh}` 开头 `Workflow:` 之下的工作流信息区，给出代码所在的工作区、分支与起点提交，排在状态、原因与诊断各行之后。审核前想看任务改了什么、要手工修复时想进对应的目录，都从这里取：例如拿到任务的工作区与起点提交后，用 `git -C <工作区> diff <起点提交>{:sh}` 就能看到这个任务的全部改动。
+
+显示的是执行过程中记录下来的值，不读取 Git 现场；还没确定的值不显示，对应的行不出现。
+
+- **单任务详情：** `Workspace:` 是任务实际执行所在的工作区目录，`Branch:` 是它的任务分支，两者在任务开始启动时一同确定，从未启动的任务都没有。`Base Commit:` 是任务开始前任务分支所在的提交，任务的改动就是从它到任务分支当前内容的差异，取快照、丢弃改动与 rework 也都回退到它；它要等任务分支准备和上游结果合并都完成才确定，所以停在 `workspace-dirty`、`merge-conflict` 这类启动阶段原因上的任务只有前两行。
+- **工作流信息区：** `Integration Workspace:` 与 `Integration Branch:` 是集成工作区和集成分支，`Base Commit:` 是整个工作流的起点提交，所有任务分支都从它创建，用 `cdg dag review cancel{:sh}` 或 `defer` 结束工作流后集成分支也回到它。这三行在工作流启动完成时一次确定，所以还没提交的、在队列中排队等待的，以及一启动就停在 `dag-startup-failed`、`mirror-unavailable` 的工作流都没有代码位置。
+- **共享工作区模式：** 不创建任务分支，也没有单独的集成工作区。单任务详情与工作流信息区都只有一行 `Workspace:`，即整个工作流的执行目录。
+
+工作区释放之后，`Workspace:` 或 `Integration Workspace:` 的路径后面追加 `(released; used by this run)`，表示这只是本次执行用过的位置：这个目录之后可能已经分配给别的任务或工作流，里面检出的也可能是别的分支。隔离分支模式下的任务在自己进入 `reviewed` 时释放工作区，共享工作区模式下的任务跟随所在工作流，工作流本身则在两种模式下都是进入 `reviewed` 时释放。分支与起点提交两行照常显示，据此仍能找回当时的改动。
+
+用 `cdg task review clear{:sh}` 或 `cdg dag review clear{:sh}` 清除审核记录后，任务或工作流回到 `planning`，代码位置不再显示。
+
+### 没有进程在推进的任务 [#stale-owner]
+
+机器重启、进程崩溃或进程被强制结束之后，任务的状态还停在 `working`，但已经没有进程在推进它。状态命令认得出这种任务，并在输出里提示怎样恢复；它们只读，看状态不会重新拉起执行。
+
+- **单任务详情：** 子状态显示成 `working (stale owner)`，下一行 `Diagnostic:` 给出这个任务的恢复命令，再下一行是 `Docs:` 链接。
+- **任务列表：** `cdg dag status{:sh}` 与写多个 ID 的 `cdg task status{:sh}` 在 Submitted Tasks 分组中把这些任务的子状态列显示成 `[working (stale owner)]`。`cdg dag status{:sh}` 另在工作流信息区给出一行 `Diagnostic:`，列出工作流中全部这类任务的 ID，其后是 `Docs:` 链接；`cdg task status{:sh}` 把这一行放在所有分组之后，只列出本次查询到的任务，不附链接。
+- **队列视图：** `cdg status{:sh}` 在含这类任务的工作流行下面多出一行 `Diagnostic:`，内容与任务列表相同，工作流行本身不变。
+
+```bash title="Terminal"
+# 单任务详情中的诊断行
+Diagnostic: The persisted task worker is no longer running. Use 'cdg task recover 2 -w .codedag/dags/feature.yaml' to resume the original session.
+# 列表与队列视图中的诊断行
+Diagnostic: The persisted task workers for tasks 2, 3 are no longer running. Use 'cdg dag recover feature' to resume the original sessions.
+```
+
+列表与队列视图提示的是 `cdg dag recover{:sh}`，而不是逐个任务恢复：机器重启时工作流中执行着的任务通常全部中断，恢复整个工作流一次就够，它也会连带恢复其中被你有意暂停或中断的任务。完整的处理步骤见[机器重启或进程崩溃之后](/zh/docs/troubleshooting/troubleshooting#after-restart)。
+
+### 没有审核结论的任务 [#unreviewed]
+
+用 `cdg dag review cancel{:sh}`、`defer` 之类的工作流级审核直接结束工作流时，其中已经开始执行、还没审核的任务得到与工作流相同的结论；还没开始执行的任务也随工作流进入 `reviewed`，但自身没有审核结论。
+
+- **单任务详情：** `Disposition:` 一行显示 `unreviewed`，不带图标，其后是任务随工作流进入 `reviewed` 时的 `Status:` 与 `Substatus:`。
+- **多任务列表：** 这些任务归入 `Unreviewed Tasks` 分组，每行格式与 `Submitted Tasks` 相同，显示它们当时的状态与子状态。分组按 Submitted、Unreviewed、Reviewed、Planning 的顺序排列，空的分组不显示。
+
+## 持续刷新状态 [#watch]
+
+三个状态命令都可以加 `--watch`：命令不再显示一次就退出，而是每秒刷新一次，直到下表中的条件满足时自动结束，期间可以随时按 Ctrl+C 退出。
+
+| 示例 | 刷新到什么时候 |
+|---|---|
+| `cdg status --watch{:sh}` | 队列中不再有工作流，也就是已提交的工作流全部审核结束 |
+| `cdg dag status feature --watch{:sh}` | 工作流 `feature` 审核结束、离开队列 |
+| `cdg task status 2 3 -w feature --watch{:sh}` | 任务 2、3 都离开 submitted 阶段，也就是各自有了审核结论，或随工作流一起审核结束 |
+
+`--watch` 只在还有变化可看时生效：`cdg status{:sh}` 要求队列中至少有一个工作流；`cdg dag status{:sh}` 要求所查询的工作流已经提交、还没有审核结束；`cdg task status{:sh}` 要求所查询的任务中至少有一个处在这样的状态。条件不满足时，命令给出一行提示，把当前状态显示一次后退出。
+
+省略工作流时，`cdg dag status --watch{:sh}` 与 `cdg task status --watch{:sh}` 始终盯着开始时的队首工作流，不会转去显示接着排到队首的工作流。两者的结束条件不同：`cdg dag status --watch{:sh}` 等这个工作流审核结束，`cdg task status --watch{:sh}` 只看所选的任务，它们都审核结束时刷新就结束，不等工作流。
+
+在交互终端中，每次刷新都在原处更新。输出被重定向到文件，或者在脚本、Agent 的命令工具中运行时，每次刷新会在后面追加一整份状态，命令也要等到结束条件满足才返回；这类场景下，按需运行不带 `--watch` 的命令更合适。
+
+## cdg dag logs 与 cdg task logs [#logs]
+
+`cdg dag logs{:sh}` 读取一个工作流中全部任务的日志，`cdg task logs{:sh}` 只读取其中一个任务的日志，两者的选项相同。
+
+```bash title="Terminal"
+cdg dag logs [工作流] [-f] [-n <行数>]
+cdg task logs <任务 ID> [-w <工作流>] [-f] [-n <行数>]
+```
+
+| | `cdg dag logs{:sh}` | `cdg task logs{:sh}` |
+|---|---|---|
+| 读取什么 | 工作流中全部任务的日志 | 一个任务的日志，只能写一个任务 ID |
+| 工作流的写法 | 位置参数或 `-w`，只能给出一种 | `-w` |
+| 省略工作流时 | 队首工作流 | 队首工作流 |
+| 选项 | `-f`、`-n`，见[日志选项](#log-options) | 与 `cdg dag logs{:sh}` 相同 |
+
+`-w` 也可以写作 `--workflow-file` 或 `--dag`，工作流的写法见[指定工作流](/zh/docs/reference/cli#specify-workflow)。两个命令读取的都是主仓库 `.codedag/local/logs/` 下的日志文件，位置与命名见[日志文件位置](/zh/docs/reference/branches-and-files#log-files)。
+
+两个命令按工作流的路径找日志文件，队列中的、已经审核结束的和还没提交的工作流都能读取，只要工作流文件还在、还能通过校验。所以用 `cdg dag review clear{:sh}` 清除审核记录之后，不必重新提交也能继续读这个工作流以前的日志。读取还没提交的工作流时，`cdg dag logs{:sh}` 的分段标题与 `cdg task logs{:sh}` 的任务 ID 都按工作流文件现在的内容确定；日志里有、而文件里已经没有的任务，标题显示为 `Task N`。
+
+日志文件在工作流的第一个任务开始执行时才创建。工作流还排在队列里等待，或者已经开始而第一个任务还没启动时，没有日志可读：
+
+- **不加 `-f`：** 命令说明日志文件还没有创建，并给出加上 `-f` 等待的命令，退出状态为 0。
+- **加 `-f`：** 命令说明正在等待这个工作流的日志，然后保持运行；日志文件一出现就从头显示，接着继续跟随。
+
+```bash title="Terminal"
+$ cdg dag logs feature
+No logs yet for .codedag/dags/feature.yaml. The log file is created when the workflow's first task starts.
+→ Use 'cdg dag logs feature -f' to wait for log output
+```
+
+已经审核结束或还没提交的工作流不会再产生日志，它没有日志文件时，加不加 `-f` 都输出 `No logs found for <工作流路径>.` 后退出，退出状态为 0。
+
+上面这几种说明都写到 stderr，stdout 只承载日志行，所以把输出重定向到文件时，文件里只有日志。
+
+`cdg task logs{:sh}` 的任务 ID 按工作流文件中的定义校验：工作流里没有这个任务时，命令输出 `Task N not found in workflow: <工作流路径>` 并以退出状态 1 结束。任务存在而还没写出任何日志行时，命令不报错，也没有输出。
+
+### 日志选项 [#log-options]
+
+两个日志命令都有 `-f` 和 `-n` 两个选项：`-f` 持续跟随新写入的日志，`-n` 只显示最后若干行。两个都不加时，命令从日志文件的开头显示全部已有的日志，然后退出。
+
+| 选项 | 取值 | 默认 | 作用 |
+|---|---|---|---|
+| `-f`、`--follow` | 不带值 | 不跟随 | 显示已有的日志之后不退出，继续显示新写入的行，直到工作流审核结束、离开队列；可以随时按 Ctrl+C 退出 |
+| `-n`、`--tail <行数>` | 非负整数 | 不限制，从文件开头显示 | 只显示最后若干行，`0` 表示不显示已有的日志；与 `-f` 同用时，先显示这些行，再开始跟随 |
+
+`-n` 的取值只接受非负整数，写成 `abc`、`-1`、`1.5` 这类取值时命令报错，不输出任何日志，退出状态为 1。
+
+不加 `-n` 时读取的是整个日志文件，而同一个工作流的历次执行都追加在这个文件里，所以重新提交过的工作流，会连同以前几次执行的日志一起显示；只加 `-f` 不加 `-n` 时，也会先把这些日志全部显示一遍，再开始跟随。只关心最近的内容时，加上 `-n`；只想看命令启动之后新增的内容，用 `-n 0 -f{:sh}`。
+
+`cdg dag logs{:sh}` 的显示方式随选项而变。`-f` 和 `-n` 都不加时，日志按任务分段，同一个任务的行集中在一起；加 `-n` 时，取的是整个文件的最后若干行，不按任务分段，其中可能夹杂几个任务的行；加 `-f` 时，各任务的行按写入的先后交错显示。每一行都以任务 ID 和时间开头，交错时可以据此分辨。`cdg task logs{:sh}` 只显示一个任务的行，`-n` 数的也只是这个任务的行。
+
+`-f` 什么时候结束，以整个工作流为准，而不是以某个任务为准。`cdg task logs -f{:sh}` 在任务执行结束、写出 `END:` 行之后仍会继续等待，直到任务所在的工作流审核结束；只想看这一个任务时，看完按 Ctrl+C 退出即可。省略工作流时，跟随的是开始时的队首工作流。工作流已经不在队列里时，不论它已经审核结束还是还没提交，`-f` 都只显示完已有的日志就退出。
+
+```bash title="Terminal"
+# 按任务分段，显示工作流 feature 的全部日志
+cdg dag logs feature
+# 整个工作流的最后 100 行，不按任务分段
+cdg dag logs feature -n 100
+# 先显示任务 2 的最后 20 行，再跟随它的新日志
+cdg task logs 2 -w feature -n 20 -f
+```
+
+## 相关
+
+- [提交、观察与日志](/zh/docs/guides/run-and-monitor)：用三个层级的状态逐层排查，读懂日志的内容，判断任务是不是卡住了。
+- [状态含义](/zh/docs/reference/states)：阶段、状态、子状态与审核结果各表示什么，看到它们时该等待还是处理。
+- [控制与干预](/zh/docs/reference/cli/control)：需要介入时，暂停、中断、恢复任务与进入任务会话的写法。
+- [故障排除](/zh/docs/troubleshooting/troubleshooting#on-hold)：任务或工作流停在 `on-hold` 时，按原因处理。

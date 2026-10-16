@@ -1,0 +1,237 @@
+---
+title: Initialize a Project
+description: The two ways to run cdg init, the values each option takes, and how to keep existing configuration when you reinitialize.
+icon: CirclePlay
+---
+
+`cdg init{:sh}` sets up a Git repository as a CodeDAG [project](/docs/concepts/how-it-works#project). It creates `.codedag/` at the root of the primary repository, registers the replica workspaces used for parallel execution, and writes the default agent and concurrency limit to the local settings. You can run it as many times as you need. After you add or remove replicas, run it again to update the registration. It doesn't change the workflows you've written. For a full walkthrough of a first initialization, see [Initialize the project](/docs/get-started/quickstart#init-project) in the quickstart. For the steps to set up and register replicas, see [Run in Parallel with Workspaces](/docs/guides/parallel-workspaces).
+
+## Syntax and prerequisites [#syntax]
+
+`cdg init{:sh}` runs either interactively or non-interactively. Which one you get depends only on whether you give `--primary-workdir`.
+
+```bash title="Terminal"
+# Interactive: finds the primary repository from the current directory and asks each question in turn
+cdg init [options]
+# Non-interactive: the primary repository and the replicas are both given as options
+cdg init --primary-workdir <primary-repository-path> [options]
+```
+
+Interactive initialization asks, in order, about the replica setup, the default agent (only when both agents are installed on this machine), and whether to install the CodeDAG Guide plugin. Non-interactive initialization asks none of these. It handles the default agent and the plugin according to the options and the rules below, which makes it suitable for scripts or for handing to an agent to run for you. When the project has already been initialized, it keeps every existing file in `.codedag/`, again without asking. See [Reinitialize and keep existing configuration](#reinitialize). In an environment without an interactive terminal, interactive initialization stops at the first question and exits without changing anything. Use non-interactive initialization there instead.
+
+Before you run it, you need the following:
+
+- The primary repository is a Git repository. For tasks to run in parallel, the replicas also have to be created with Git beforehand. CodeDAG doesn't create them for you. A project's replicas must be either all git worktrees or all clones, and the two can't be mixed.
+- At least one of Claude Code and Codex is installed on this machine, and the `claude` or `codex` command can be found directly in the current terminal. When Claude Code is installed, initialization also checks its version. See [Claude Code version check](#claude-version).
+- You're signed in to your CodeDAG account. If you aren't, `cdg init{:sh}` takes you through sign-in first. See [Sign in](/docs/account/login-and-account#sign-in).
+
+### Where to run it [#where-to-run]
+
+Run `cdg init{:sh}` from the root of the primary repository. In non-interactive initialization, the primary repository is the directory that `--primary-workdir` names, so it makes no difference where you run the command. Either way, `.codedag/` is created only at the root of the primary repository, and no second copy appears in the replicas.
+
+When you run interactive initialization from some other directory, it finds the primary repository from the Git repository that contains the current directory:
+
+- From a subdirectory of the primary repository or from the `.codedag/` directory, it finds the enclosing project repository, the same as running from the root.
+- From a registered replica, worktree and clone replicas behave the same. The command first tells you which project this directory is a replica of (`is registered as a replica of the CodeDAG project at`) and then initializes starting from that project's primary repository. It still sets up the original project, and the replica doesn't get a `.codedag/` of its own.
+- From a clone that isn't registered yet, the result is different. A clone is an independent Git repository in its own right, so CodeDAG treats it as a primary repository and creates a separate project.
+
+A directory can't belong to two projects at once, so a directory that's registered as a replica of one project can't also serve as the primary repository of another. When `--primary-workdir`, or the primary repository path you enter in the interactive clone setup, points to such a directory, initialization fails with `Cannot use <path> as the primary workspace` before it writes anything. The exit code is 1, and both projects' registrations stay as they were. If you really do want to turn that replica into a project of its own, first go back to the primary repository of the project it belongs to, run `cdg init{:sh}` once, and leave it out of the replica list. Then initialize in the replica's own directory.
+
+### Claude Code version check [#claude-version]
+
+When Claude Code is installed on this machine, initialization runs `claude --version{:sh}` once, after the replica setup has been determined. If the version is lower than 2.1.196, the minimum version CodeDAG supports, it prints a warning:
+
+```bash title="Terminal"
+Warning: Claude Code 2.1.100 is older than 2.1.196, the minimum version CodeDAG supports. Until you upgrade it (for example, with `claude update`), tasks that run on Claude Code are put on hold with agent-version-unsupported.
+```
+
+If `claude --version{:sh}` fails or its output contains no version number, the warning instead says that the version couldn't be determined and gives the reason in parentheses.
+
+Neither warning stops initialization or affects the choice of default agent. The project is set up as usual, but until you upgrade Claude Code, every task assigned to it stops at `on-hold` with the reason `agent-version-unsupported`. Upgrade as the warning suggests, for example by running `claude update{:sh}`, and workflows you submit afterward no longer run into this hold. For what to do about tasks that have already stopped, see [Version problems](/docs/troubleshooting/troubleshooting#versions).
+
+## Options [#options]
+
+| Option | Value | When omitted | Description |
+|---|---|---|---|
+| `--primary-workdir <path>` | Path to the root of the primary repository | Runs interactively | When given, initialization runs non-interactively. The path must be the root of the repository. If it points to a subdirectory, initialization fails. |
+| `--replica-workdirs <paths...>` | One or more replica directories, separated by spaces | No replicas are registered | Takes effect only together with `--primary-workdir`. If you give it without `--primary-workdir`, the command first prints a warning that it's being ignored, then goes into interactive initialization as usual, where your selections determine the replicas. Every directory must already exist. |
+| `--max-concurrency <number>` | A positive integer | `maxConcurrency` from the shared settings, or 1 plus the number of replicas if that isn't set | Written to `maxConcurrency` in the local settings, which is used when a workflow file doesn't set a concurrency limit. Works with both interactive and non-interactive initialization. |
+| `--default-agent <agent>` | `claude` (Claude Code) or `codex` (Codex) | Determined by the [rules for the default agent](#default-agent) | Must be an agent installed on this machine. Works with both interactive and non-interactive initialization. When given, you aren't asked about the default agent. |
+| `--no-install-guide-plugins` | None | Non-interactive initialization installs the plugin at the user scope for every agent installed on this machine | Skips plugin installation in non-interactive initialization. Has no effect on interactive initialization. |
+
+The paths you give to `--primary-workdir` and `--replica-workdirs`, and the paths you enter during interactive initialization, can be absolute or relative. Relative paths are resolved from the directory where you run the command, and every path is converted to an absolute path when it's registered.
+
+`--max-concurrency` accepts only a positive integer. With 0, a negative number, or a decimal, initialization fails. To have the project default to no concurrency limit, change `maxConcurrency` to 0 in the local settings after initialization. See [`maxConcurrency`](/docs/reference/settings#max-concurrency).
+
+Initialization writes only the values that differ from the team's settings to the local settings, `.codedag/local/settings.local.jsonc`. When the default agent (`defaultAgent`) or the concurrency limit (`maxConcurrency`) is the same as the value in the shared settings, `.codedag/settings.jsonc`, it isn't written, so when the team later changes the shared settings, this computer follows. For how these two fields are updated when you reinitialize, see [Reinitialize and keep existing configuration](#reinitialize).
+
+An agent you install after initialization can be used in workflows right away. Initialization doesn't write `availableAgents`, the list of agents available to the project. That field exists only for deliberately restricting which agents a project can use, and when it isn't set, every supported agent is available. See [`availableAgents`](/docs/reference/settings#available-agents).
+
+### How the default agent is determined [#default-agent]
+
+Tasks that don't set the `agent` field are run by the default agent. Initialization determines it according to the table below. If neither agent is installed on this machine, initialization fails.
+
+| Situation | Default agent |
+|---|---|
+| `--default-agent` is given | The agent you specify. If it isn't installed, initialization fails |
+| Only one of the two agents is installed on this machine | That agent |
+| Both are installed, interactive initialization | You're asked which one to use |
+| Both are installed, non-interactive initialization, and the `defaultAgent` in the shared settings is installed on this machine | The team's default agent |
+| None of the above | Codex |
+
+In the interactive prompt, the team's default agent is listed first, and the other choice is marked as an override for this computer only:
+
+```bash title="Terminal"
+Both Claude Code and Codex are installed.
+The team default agent in .codedag/settings.jsonc is Claude Code.
+Which agent would you like to use as your default for this project?
+1. Claude Code (team default)
+2. Codex (override for this machine only)
+```
+
+If you choose the same agent as the team, `defaultAgent` isn't written to the local settings, and when the team later changes the shared settings, your default changes with them. When the shared settings have no `defaultAgent`, the prompt omits the line about the team default, and neither choice is labeled.
+
+When the team's default agent isn't installed on your computer, initialization picks another according to the table above, writes it to the local settings, and explains that the team's default can't be used here:
+
+```bash title="Terminal"
+Team default agent 'codex' in .codedag/settings.jsonc is not installed on this machine. Your default agent 'claude' is saved in .codedag/local/settings.local.jsonc.
+```
+
+When you initialize from a script, give `--default-agent` explicitly so that every computer gets the same default agent. Without it, the result varies with which agents each computer has installed.
+
+### CodeDAG Guide plugin [#guide-plugin]
+
+The last step of initialization handles the CodeDAG Guide plugin, which teaches Claude Code and Codex how to use `cdg`. Interactive initialization asks separately for each agent installed on this machine: install at the user, project, or local scope, or choose Skip to leave it uninstalled for now. Non-interactive initialization doesn't ask. It installs the plugin at the user scope for every installed agent. To use a different scope, add `--no-install-guide-plugins` to skip this step, then install at the scope you want with `cdg plugin install{:sh}` from the project directory.
+
+You aren't asked about the installation scope for an agent that already has the plugin. An agent counts as having it if you installed it at the user scope in any repository before, or if it was installed the last time this project was initialized. For the commands to install it later, update it, or change its scope, see [Plugin](/docs/reference/cli/plugin). For how the three scopes differ, see [Choose an installation scope](/docs/guides/guide-plugin#scopes).
+
+## Register and update workspaces [#register-workspaces]
+
+Every time you run `cdg init{:sh}`, CodeDAG replaces the whole previous registration with the replica list determined in that run. It doesn't detect added, moved, or deleted replicas on its own. So run it again after you add, remove, or move a replica, and make sure the list that time includes every replica you still want to use, not just the new one. If the registration still contains a directory that no longer exists, workflows skip it and keep running in the remaining workspaces, and validation suggests reinitializing. See [Register the replicas with CodeDAG](/docs/guides/parallel-workspaces#register).
+
+In interactive initialization, your answer to the first question, `Select your repository setup method`, determines which replicas are registered:
+
+| Answer | Replicas registered |
+|---|---|
+| `1. I have set up git worktrees for this project` | The worktrees you select in the prompt that follows. See [Select the worktrees to register](#select-worktrees) |
+| `2. I have cloned this repository into multiple directories` | The clone directories you enter. You first confirm the primary repository's path. Its default is inferred from the current directory, and you can change it. You then enter the path of each clone, separated by spaces. Pressing Enter without entering anything registers no replicas |
+| `3. I haven't configured any replicas yet, and I need help` | Nothing is decided yet. The command shows a brief explanation of worktrees and clones and then shows this question again, so you can go straight on to choose 1, 2, or 4. You can also create the replicas in another terminal right then and come back to choose 1 or 2 once they're ready |
+| `4. I don't need concurrent tasks, only sequential execution` | No replicas are registered. Only the primary repository is used |
+
+### Select the worktrees to register [#select-worktrees]
+
+After you choose the worktree setup, the command lists every worktree other than the primary repository, in the order of `git worktree list{:sh}`. Each line shows whether the worktree is selected, its number, its path, and its branch name in parentheses (or `detached HEAD` when the worktree has a detached HEAD):
+
+```bash title="Terminal"
+? Select the worktrees to register as replicas:
+  CodeDAG runs concurrent tasks in the selected worktrees.
+  Worktrees created by Claude Code or Codex for their own sessions are not selected by default.
+◉ 1. /work/project-wt-1 (feature-a)
+◯ 2. /work/project/.claude/worktrees/fix-bug (worktree-fix-bug, created by Claude Code)
+◯ 3. /home/me/.codex/worktrees/ab12/project (codex/task, created by Codex)
+
+↑↓ navigate • Space toggle • a toggle all • 1-9 jump • ⏎ confirm • Esc cancel
+```
+
+Worktrees that Claude Code and Codex created for their own sessions aren't selected by default, and the parentheses note which of them created each one. All other worktrees are selected by default. The keys are listed on the last line of the prompt. Note that Esc cancels the whole initialization, and no files are written. If you select nothing, the project registers no replicas and uses only the primary repository. If there are no worktrees to list, the prompt doesn't appear, and the result is the same.
+
+Worktrees whose directories no longer exist are left out of the list. The command lists them before the prompt and suggests clearing out these leftover records:
+
+```bash title="Terminal"
+Skipped worktrees whose directories no longer exist (run `git worktree prune` to remove them):
+  - /work/project-wt-3
+```
+
+When the local settings are newly created, the concurrency limit is calculated from your selection: 1 plus the number of replicas you selected.
+
+### Register non-interactively [#register-non-interactive]
+
+Non-interactive initialization lists the replicas with `--replica-workdirs`, and the syntax is the same for worktrees and clones. The command below registers a primary repository and two worktree replicas. On a first initialization, the concurrency limit is 3:
+
+```bash title="Terminal"
+cdg init --primary-workdir /Users/you/my-app --replica-workdirs /Users/you/my-app-wt-1 /Users/you/my-app-wt-2
+```
+
+When you later stop using `my-app-wt-2`, run the command again listing only `my-app-wt-1`. If you've moved a replica, put its new path in the list. If you leave out `--replica-workdirs` entirely, the project is left with the primary repository as its only workspace. All of these are reruns on a project that's already initialized. For how existing files are handled and whether the concurrency limit follows the number of replicas, see [Reinitialize and keep existing configuration](#reinitialize).
+
+## Reinitialize and keep existing configuration [#reinitialize]
+
+When a project has already been initialized, what happens to the files in `.codedag/` that have the same names as the initialization templates depends on how you run the command:
+
+- **Non-interactive initialization:** Every existing file is kept as is, nothing is asked, and the exit code tells you whether initialization completed.
+- **Interactive initialization:** Files already committed to the `.codedag` repository are kept automatically, and you're asked about each of the other existing files. When `.codedag` has no commits yet, you're asked about every existing file.
+
+The files involved are `.gitignore`, `settings.jsonc`, `local/settings.local.jsonc`, `dags/untitled_dag.yaml`, and the two blank templates under `templates/`. The workflows you wrote yourself and the other files in `.codedag/` aren't among them and aren't changed. The `.codedag` repository itself isn't reinitialized either, so its commit history and remote URL stay as they are.
+
+The files kept automatically are listed before the conflict questions, with the reason they were kept in parentheses:
+
+```bash title="Terminal"
+Existing files kept (committed in the .codedag repository and shared with your team):
+  - .codedag/.gitignore
+  - .codedag/settings.jsonc
+To replace a file with the CodeDAG default, delete it and rerun `cdg init`.
+```
+
+As a result, reinitializing doesn't overwrite the settings and workflows your team shares, and a new member who initializes on a cloned `.codedag` doesn't have to answer for each file.
+
+### The six choices for each file [#file-conflicts]
+
+For the files it still has to ask about, interactive initialization asks one file at a time, after the `File conflicts detected.` list. Each question offers six choices:
+
+| Choice | Effect |
+|---|---|
+| `1. Keep` | Keeps this file and moves on to the next one |
+| `2. Overwrite` | Replaces this file with the initialization template, after one more confirmation, and moves on to the next one |
+| `3. Keep All` | Keeps this file and all the remaining files, with no further questions |
+| `4. Overwrite All` | Replaces this file and all the remaining files. The files to be replaced are listed before you confirm |
+| `5. Apply & Exit` | Handles the earlier files according to the choices you've already made and keeps this file and the remaining ones, with no further questions |
+| `6. Abort` | Cancels this initialization without changing anything. The workspace registration also stays as it was. Pressing Esc does the same |
+
+Every choice except Abort completes initialization and updates the workspace registration according to this run.
+
+The local settings file, `local/settings.local.jsonc`, isn't under version control in the `.codedag` repository, so you're always asked about it. The difference between keeping and replacing is greatest for the two settings files:
+
+| File | When kept | When replaced |
+|---|---|---|
+| `local/settings.local.jsonc` (local settings) | The default agent and concurrency limit keep their existing values, and initialization doesn't ask about the default agent. A `--default-agent` or `--max-concurrency` given in this run is still written in place. See [When the local settings are kept](#kept-local-settings) | Regenerated from this run. The default agent follows the [rules for determining it](#default-agent), and the concurrency limit is `--max-concurrency`, the value in the shared settings, or 1 plus the current number of replicas. Any other settings you added to the file by hand are lost |
+| `settings.jsonc` (shared settings) | Stays as it is | Becomes an empty object, `{}`, and all the existing shared settings are lost |
+
+The other files all return to the contents of the initialization templates when replaced, and a `dags/untitled_dag.yaml` that you've edited is reset as well. When you choose to keep `.gitignore`, CodeDAG still makes sure it contains the line that ignores `local/`.
+
+### When the local settings are kept [#kept-local-settings]
+
+When the local settings are kept, initialization doesn't rewrite the file, but it still updates fields in place according to the options you give in this run. Comments, other settings, and formatting stay unchanged. `--default-agent` and `--max-concurrency` each print a confirmation line:
+
+```bash title="Terminal"
+✓ Updated maxConcurrency to 3 in .codedag/local/settings.local.jsonc.
+```
+
+When you don't give `--max-concurrency`, initialization checks whether the effective concurrency limit is lower than the current number of workspaces, which is the primary repository plus the replicas. That's exactly the situation when you've added replicas and kept the local settings. Interactive initialization asks whether you want to raise it, and the default is Yes:
+
+```bash title="Terminal"
+maxConcurrency in .codedag/local/settings.local.jsonc is 1, but this project now has 3 workspaces (1 primary + 2 replicas).
+Update maxConcurrency to 3?
+```
+
+If you choose No or press Esc, nothing is changed, and the command gives you two ways to make the change: edit the file by hand, or rerun with `--max-concurrency`. Non-interactive initialization doesn't ask. It prints the same information as a warning, and the exit code is still 0. The check is skipped only when the shared settings set `maxConcurrency` and the local settings don't override it, because that's a default the team set deliberately.
+
+When the team settings or local settings being kept can't be parsed or contain an invalid value, both kinds of initialization fail with exit code 1 before writing any file or updating the workspace registration. When the agent given with `--default-agent` is excluded by the project's `availableAgents`, non-interactive initialization likewise fails with exit code 1. Interactive initialization only prints a warning that the value can't be written, skips the explicit option for this run, and completes as usual.
+
+## Change the default agent or concurrency limit [#change-defaults]
+
+After a project is initialized, you can change the default agent or adjust the concurrency limit by editing `defaultAgent` or `maxConcurrency` directly in the local settings, `.codedag/local/settings.local.jsonc`. You don't need to reinitialize. You can also run `cdg init{:sh}` again with `--default-agent` or `--max-concurrency`. Both options are written whether the local settings are newly created, replaced, or kept. See [When the local settings are kept](#kept-local-settings).
+
+```jsonc title=".codedag/local/settings.local.jsonc"
+{
+  "defaultAgent": "claude", // Tasks that don't set agent are now run by Claude Code
+  "maxConcurrency": 3 // Run at most 3 tasks at the same time
+}
+```
+
+The change affects only workflows you submit afterward. Workflows that are already submitted aren't affected. For the two fields' values and defaults, see [`defaultAgent`](/docs/reference/settings#default-agent) and [`maxConcurrency`](/docs/reference/settings#max-concurrency). To change just one workflow, set [`maxConcurrency`](/docs/reference/workflow-file#max-concurrency) in its workflow file, or set [`agent`](/docs/reference/workflow-file#tasks-agent) on its tasks.
+
+## Related
+
+- [Run in Parallel with Workspaces](/docs/guides/parallel-workspaces): Set up replicas, register them with CodeDAG, and see what determines how many tasks run at once.
+- [Project Settings](/docs/reference/settings): The local settings that `cdg init{:sh}` writes, and the rules for how the shared settings and local settings override each other.
+- [Plugin](/docs/reference/cli/plugin): Install or update the CodeDAG Guide plugin, or change its installation scope, after initialization.

@@ -1,0 +1,15 @@
+openapi: 3.1.0
+info:
+  title: CodeDAG API
+  description: |
+    CodeDAG API Reference - Task orchestration and execution engine for Coding Agents.
+
+    This API specification is a placeholder for future CodeDAG API documentation.
+  version: 0.1.0
+  contact:
+    name: CodeDAG Team
+servers:
+  - url: https://api.codedag.com
+    description: Production server (placeholder)
+paths: {}
+tags: []

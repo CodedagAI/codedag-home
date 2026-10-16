@@ -1,0 +1,150 @@
+---
+title: 命令总览与通用参数
+description: 按操作查找 CodeDAG 命令，以及各命令通用的工作流、任务 ID 与任务选择器写法。
+icon: Terminal
+---
+
+## 按操作查命令 [#commands]
+
+`cdg dag{:sh}` 下的命令以工作流为操作对象，`cdg task{:sh}` 下的命令以某个工作流中的任务为操作对象，其余几个根命令负责初始化项目、查看队列、释放分支名、管理插件和账号。
+
+| 想做什么 | 命令 | 详见 |
+|---|---|---|
+| 初始化项目，登记工作区 | `cdg init{:sh}` | [初始化项目](/zh/docs/reference/cli/init) |
+| 校验工作流文件 | `cdg dag validate{:sh}` | [校验与提交](/zh/docs/reference/cli/validate-and-submit#validate) |
+| 提交工作流，排队执行 | `cdg dag submit{:sh}` | [校验与提交](/zh/docs/reference/cli/validate-and-submit#submit) |
+| 查看项目中的工作流队列、计划中与已审核的工作流 | `cdg status{:sh}`，等同于 `cdg dag ls{:sh}`、`cdg dag list{:sh}` | [查看状态与日志](/zh/docs/reference/cli/status-and-logs#cdg-status) |
+| 查看一个工作流中各任务的状态 | `cdg dag status{:sh}`；`cdg task ls{:sh}`，也可写作 `cdg task list{:sh}` | [查看状态与日志](/zh/docs/reference/cli/status-and-logs#dag-status) |
+| 查看指定任务的详细状态 | `cdg task status{:sh}` | [查看状态与日志](/zh/docs/reference/cli/status-and-logs#task-status) |
+| 读取日志 | `cdg dag logs{:sh}`（整个工作流）、`cdg task logs{:sh}`（单个任务） | [查看状态与日志](/zh/docs/reference/cli/status-and-logs#logs) |
+| 暂停，或让暂停的执行继续 | `cdg dag pause{:sh}`、`cdg dag unpause{:sh}`；`cdg task pause{:sh}`、`cdg task unpause{:sh}` | [控制与干预](/zh/docs/reference/cli/control#syntax) |
+| 立即中断正在执行的任务 | `cdg dag kill{:sh}`、`cdg task kill{:sh}` | [控制与干预](/zh/docs/reference/cli/control#syntax) |
+| 恢复被中断、暂停或搁置（`on-hold`）的执行 | `cdg dag recover{:sh}`、`cdg task recover{:sh}` | [控制与干预](/zh/docs/reference/cli/control#syntax) |
+| 进入任务 Agent 的会话 | `cdg task view{:sh}` | [控制与干预](/zh/docs/reference/cli/control#task-view) |
+| 审核任务 | `cdg task review <动作>{:sh}`，动作为 `accept`、`cancel`、`defer`、`revise`、`request-changes`、`rework`；可省去 `review` 简写，如 `cdg task accept{:sh}` | [审核](/zh/docs/reference/cli/review) |
+| 审核整个工作流 | `cdg dag review <动作>{:sh}`，动作为 `accept`、`cancel`、`defer`；可省去 `review` 简写，如 `cdg dag accept{:sh}` | [审核](/zh/docs/reference/cli/review) |
+| 清除审核记录，以便重新提交 | `cdg dag review clear{:sh}`，没有简写；`cdg task review clear{:sh}` 只清除单个任务的记录，不能让已经审核结束的工作流重新提交 | [审核](/zh/docs/reference/cli/review#clear-and-resubmit) |
+| 释放被 CodeDAG 占用的固定分支名 | `cdg branch release{:sh}` | [控制与干预](/zh/docs/reference/cli/control#branch-release) |
+| 管理 CodeDAG Guide 插件 | `cdg plugin install{:sh}`、`cdg plugin status{:sh}`、`cdg plugin update{:sh}`、`cdg plugin uninstall{:sh}` | [插件](/zh/docs/reference/cli/plugin) |
+| 登录、退出与查看账号 | `cdg auth login{:sh}`、`cdg auth logout{:sh}`、`cdg auth status{:sh}` | [账号](/zh/docs/reference/cli/auth) |
+
+暂停、中断与恢复各自适合什么情况，见[干预与控制](/zh/docs/guides/intervene-and-control)；几个审核动作之间怎么选，见[按你的判断选择动作](/zh/docs/guides/review-tasks#choose-action)。
+
+`cdg` 与 `codedag` 是同一个命令行工具的两个名字，文档中一律写作 `cdg`。在任何命令后加 `--help` 都能看到它的完整参数，例如 `cdg task pause --help{:sh}`。
+
+也可以用 `cdg help <命令...>{:sh}`：把命令名逐级写出，就能定位到任意一层子命令，例如 `cdg help dag review clear{:sh}`。`dag`、`task`、`dag review`、`task review`、`plugin`、`branch`、`auth` 这几个命令组下也各有 `help`，所以 `cdg dag help review clear{:sh}` 输出的是同一份帮助。写出的名字在那一级下不存在时，例如 `cdg help dag foo{:sh}`，命令把已经定位到的那一级帮助输出到 stderr，退出状态为 1。
+
+## 指定工作流 [#specify-workflow]
+
+命令中的工作流可以写成名字，也可以写成路径，但不论哪种写法，最终都必须指向主仓库 `.codedag/dags/` 目录（含其子目录）中的一个 `.yaml`、`.yml` 或 `.json` 文件；指向其他位置或其他扩展名的文件，命令会拒绝执行。日常直接写名字最省事，例如 `.codedag/dags/feature.yaml` 写作 `feature`。
+
+| 写法 | 示例 | 适用场景 |
+|---|---|---|
+| 不带扩展名的名字 | `feature` | 最常用。依次查找 `feature.yaml`、`feature.yml`、`feature.json`，使用第一个存在的文件；只在 `.codedag/dags/` 顶层查找。 |
+| 文件名 | `feature.json` | 同一目录下有同名、不同扩展名的文件时，用扩展名选定其中一个。 |
+| 以 `.codedag/dags/` 开头的路径 | `.codedag/dags/team/feature.yaml` | 工作流放在子目录中时使用。总是从主仓库的根目录算起，与当前所在目录无关；扩展名同样可以省略。 |
+| 相对当前目录的路径 | `./feature.yaml`、`../.codedag/dags/feature.yaml` | 已经位于 `.codedag/dags/` 或主仓库的某个子目录中，想借助 shell 补全路径时。 |
+| 绝对路径 | `/Users/me/project/.codedag/dags/feature.yaml` | 在脚本中写固定路径时。 |
+
+名字和以 `.codedag/dags/` 开头的路径总是从主仓库解析，所以在主仓库、任一已登记的副本工作区，以及它们的任意子目录中执行，效果都相同。其他含有 `/` 的相对写法，包括以 `./`、`../` 开头的，都按当前目录解析。因此在主仓库根目录写 `team/feature` 会被拒绝，子目录中的工作流要写成 `.codedag/dags/team/feature`；在副本工作区中，`./.codedag/dags/feature.yaml` 这样的相对路径指向的是副本自己的目录，同样会被拒绝，这时改用名字或以 `.codedag/dags/` 开头的写法即可。
+
+不论用哪种写法，命令本身都要在项目内执行，也就是主仓库或某个已登记的工作区之内；在项目之外，即使写了正确的绝对路径，命令也找不到所属的项目。
+
+同一目录下只有扩展名不同的两个文件，例如 `feature.yaml` 与 `feature.yml`，共用同一个日志文件和同一套分支名，不适合用来放两个不同的工作流，见[文件位置与格式](/zh/docs/reference/workflow-file#file-location)。
+
+### 位置参数与 `-w` [#workflow-option]
+
+`cdg dag{:sh}` 下的命令把工作流写成位置参数，`cdg task{:sh}` 下的命令把位置参数留给任务 ID，工作流改用 `-w` 指定。`-w`、`--workflow-file` 与 `--dag` 是同一个选项的三种写法，取值规则与上表相同。
+
+```bash title="Terminal"
+cdg dag status feature
+cdg task status 2 -w feature
+```
+
+有三个命令两种方式都接受：`cdg dag status{:sh}` 与 `cdg dag logs{:sh}` 既可以用位置参数，也可以用 `-w`；`cdg task ls{:sh}` 的位置参数本身就是工作流，同样接受 `-w`。它们每次只操作一个工作流，位置参数、`-w` 与 `--dag` 只能给出一种，同时给出两种以上时命令报错、不输出状态或日志，即使这些写法指向的是同一个工作流。
+
+`cdg dag{:sh}` 下的校验、提交、控制与审核命令可以一次写多个工作流，用空格分隔，例如 `cdg dag validate feature docs{:sh}`。一条 `cdg task{:sh}` 命令则只操作一个工作流中的任务。
+
+省略工作流时，多数命令作用于队首工作流，也就是排在[队列](/zh/docs/concepts/how-it-works#queue)最前面的那一个，同一时刻只有它在执行；`cdg dag validate{:sh}`、`cdg dag submit{:sh}` 与 `cdg dag review clear{:sh}` 则必须写明工作流。每个命令能否省略、省略时指向哪个工作流，以对应的命令页为准。队列中有多个工作流时，队首不一定是你最近提交的那个，所以在脚本中或让 Agent 调用命令时，写明工作流更稳妥。
+
+## 指定一个或多个任务 [#task-ids]
+
+任务命令用工作流文件中 `tasks[].id` 的值指定任务（见 [`id`](/zh/docs/reference/workflow-file#tasks-id)）。它是一个正整数，与任务标题以及任务在列表中的位置都无关。同一个 ID 在不同工作流中指的是不同任务，所以命令中还要用 `-w` 指明工作流，省略时为队首工作流。
+
+多个 ID 用空格分隔，例如 `cdg task status 2 3 -w feature{:sh}`。只有由数字组成、数值不小于 1 的写法合法；`2,3`、`1.5`、`+2`、`2abc`、`0` 这类写法都会让命令报 `Invalid task ID`，以退出状态 1 结束，不做任何事。一条命令里有多个 ID 时，其中一个写错，整条命令就报错，写对的那几个也不会被处理。
+
+各任务命令接受的任务数量不同。除 `cdg task ls{:sh}` 外，它们都没有默认任务：省略任务时命令会报错，而不会作用于全部任务。
+
+| 命令 | 任务的写法 |
+|---|---|
+| `cdg task pause{:sh}`、`cdg task unpause{:sh}`、`cdg task kill{:sh}`、`cdg task recover{:sh}` | 一个或多个 ID，或[任务选择器](#task-selectors) |
+| `cdg task review{:sh}` 的各个动作及其简写、`cdg task review clear{:sh}` | 一个或多个 ID，或任务选择器 |
+| `cdg task status{:sh}` | 一个或多个 ID，不支持选择器 |
+| `cdg task logs{:sh}`、`cdg task view{:sh}` | 一个 ID；`cdg task view{:sh}` 也可以[改用会话 ID](/zh/docs/reference/cli/control#task-view) |
+| `cdg task ls{:sh}` | 不写任务，列出整个工作流的任务 |
+
+## 任务选择器 [#task-selectors]
+
+任务选择器按依赖关系一次选中一组任务，省去逐个列出 ID。下面用一个有五个任务的工作流 `feature` 说明各选择器选中哪些任务：任务 2、3 都依赖任务 1，任务 4 依赖任务 2 和 3，任务 5 依赖任务 4。
+
+export const selectorExampleChart = `flowchart LR
+  t1["1 写接口契约"] --> t2["2 实现接口"]
+  t1 --> t3["3 编写测试"]
+  t2 --> t4["4 运行测试并修复"]
+  t3 --> t4
+  t4 --> t5["5 更新文档"]`;
+
+<Tabs items={['图表', '代码']}>
+  <Tab value="图表">
+    <Mermaid chart={selectorExampleChart} />
+  </Tab>
+  <Tab value="代码">
+    <DynamicCodeBlock lang="mermaid" code={selectorExampleChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+| 选项 | 选中哪些任务 | 包含指定任务 | 示例与选中的任务 |
+|---|---|---|---|
+| `-o`、`--only` | 只选指定任务 | 是 | `--only 2 3` → 2、3 |
+| `-u`、`--upto` | 指定任务及其全部上游 | 是 | `--upto 4` → 1、2、3、4 |
+| `-a`、`--above` | 指定任务的全部上游 | 否 | `--above 4` → 1、2、3 |
+| `-d`、`--downfrom`，别名 `--from` | 指定任务及其全部下游 | 是 | `--downfrom 2` → 2、4、5 |
+| `-b`、`--below` | 指定任务的全部下游 | 否 | `--below 2` → 4、5 |
+| `-t`、`--through` | 指定任务及其全部上游与下游 | 是 | `--through 2` → 1、2、4、5 |
+
+上游与下游沿 `dependencies` 逐级追溯，间接依赖也算在内：任务 5 经由任务 4 间接依赖任务 2，所以 `--below 2` 包含任务 5。与指定任务并列、彼此没有依赖关系的任务不算上下游，所以 `--through 2` 不包含任务 3。
+
+写在命令后面的任务 ID 就是 `--only` 的简写，因此 `cdg task pause 2 3{:sh}` 与 `cdg task pause --only 2 3{:sh}` 相同。直接写出的 ID 不能再与任何选择器同时使用，包括 `--only` 本身。
+
+一个选择器能跟几个 ID，取决于命令。在任务的暂停、继续、中断与恢复命令中，每个选择器都可以跟多个 ID，结果取并集，例如 `--upto 2 3` 选中 1、2、3；在任务的审核命令中，包括 `cdg task review clear{:sh}`，除 `--only` 外的选择器每个只接受一个 ID。
+
+需要圈出中间的一段任务时，可以组合两个选择器取交集：一个取自 `--downfrom` 或 `--below`，另一个取自 `--upto` 或 `--above`。其他组合，例如 `--only` 搭配 `--upto`，或同时使用三个选择器，命令都会报错而不执行。
+
+```bash title="Terminal"
+# 从任务 2 往下、到任务 4 为止：选中 2、4
+cdg task pause --downfrom 2 --upto 4 -w feature
+# 任务 1 与任务 5 之间的一段：选中 2、3、4
+cdg task pause --below 1 --above 5 -w feature
+```
+
+选择器只根据依赖关系圈定任务，不看它们当前处于什么状态。圈中的任务能否执行这个动作，仍由各命令按自己的前提逐个判断，例如 `cdg task pause{:sh}` 会跳过已经审核结束的任务。各命令的具体前提见[控制命令语法与适用状态](/zh/docs/reference/cli/control#syntax)与[审核](/zh/docs/reference/cli/review)。
+
+## 常用批量操作 [#batch-examples]
+
+下面的命令沿用 `feature` 工作流：任务 2、3 依赖任务 1，任务 4 依赖任务 2 和 3，任务 5 依赖任务 4。最后一例另外用到工作流 `docs`。
+
+| 想做什么 | 命令 | 作用范围 |
+|---|---|---|
+| 一次暂停多个任务 | `cdg task pause 2 3 -w feature{:sh}` | 任务 2、3 |
+| 任务 1 到 4 都在等待审核时，一并接受 | `cdg task accept --upto 4 -w feature{:sh}` | 任务 1、2、3、4 |
+| 让任务 2 的全部下游先不启动，任务 2 本身照常执行 | `cdg task pause --below 2 -w feature{:sh}` | 任务 4、5 |
+| 对多个工作流执行同一动作 | `cdg dag pause feature docs{:sh}` | 工作流 `feature` 与 `docs` |
+
+批量控制的其余写法见[指定范围与批量控制](/zh/docs/reference/cli/control#control-scope)，批量审核时各动作的选项与默认值见[审核](/zh/docs/reference/cli/review)。

@@ -1,0 +1,150 @@
+---
+title: Project Settings
+description: Where the project settings files are, how one overrides the other, and the values and default of each field.
+icon: Settings
+---
+
+Project settings supply the defaults for every workflow in a project: how many tasks run at once, whether tasks and whole workflows are auto-accepted when they finish, which agents can be used, and which agent runs a task that doesn't specify one. The corresponding fields in a workflow file and the options of the submit command both take precedence over project settings. A change to project settings affects only workflows submitted afterward.
+
+## Where settings go [#files]
+
+Project settings are split across two files, both in the primary repository's `.codedag/` directory. The shared settings hold the defaults the team has in common, and the local settings hold values that belong only to this computer.
+
+| File | Scope | Shared through the `.codedag` repository? | What to put in it |
+|---|---|---|---|
+| `.codedag/settings.jsonc` | Shared settings, which apply to every member who uses the same `.codedag` repository | Yes | The team's common review policy, and the team's defaults for the concurrency limit and the default agent |
+| `.codedag/local/settings.local.jsonc` | Local settings, which apply only to this project on this computer | No; the `.codedag/.gitignore` that `cdg init{:sh}` generates ignores `local/` | A concurrency limit and a default agent that differ from the team's |
+
+`cdg init{:sh}` generates both files. The shared settings file is an empty object, `{}`. The local settings file contains only the default agent and the concurrency limit determined during initialization, and only where they differ from the shared settings. You can delete either file, and a missing file is treated as an empty object.
+
+### File format and errors [#format]
+
+Both files are JSONC, which is standard JSON plus `//` and `/* */` comments. Everything else still has to be valid JSON: the top level must be an object, and there can't be a comma after the last field.
+
+If a file can't be parsed, or one of the five fields described below has an invalid value, every command that needs to read project settings, such as validation and submission, fails instead of falling back to the default configuration and carrying on. The error names the file and gives either the line and column where parsing failed or the reason the value is invalid. Only the first problem in each file is reported.
+
+A misspelled field name doesn't keep the other fields from taking effect. Field names are case-sensitive, and CodeDAG skips keys it doesn't recognize. `cdg dag validate{:sh}` and the validation at submission give one `unsupported-setting` warning for each file that contains such keys, listing the unrecognized keys and all the supported field names. The warning doesn't fail validation. At submission, you confirm the warning once and the submission continues.
+
+## When the same field is set more than once [#precedence]
+
+When both files set the same field, the local settings take precedence. An override replaces the whole field, and arrays are no exception: if the shared settings have `["claude", "codex"]` and the local settings have `["claude"]`, the value in effect is `["claude"]`, and the two lists aren't merged.
+
+A field that the local settings don't set takes its value from the shared settings, and when the team changes the shared settings later, this computer follows. Initialization writes only the values that differ from the shared settings to the local settings, so the values the team puts in the shared settings apply to new members right away. To return an overridden field to the value in the shared settings, delete it from the local settings. A field that neither file sets uses the default in the [Fields](#fields) table.
+
+Project settings rank below the workflow file and the submit command. When a workflow file sets the corresponding field, or you add an override option at submission, that value wins. See [Adjust a single workflow or a single submission](#per-workflow). For the full order across all sources, see [Defaults and precedence](/docs/reference/workflow-file#precedence).
+
+## When changes take effect [#when-applied]
+
+A change to the settings affects only workflows submitted afterward. A workflow's concurrency limit, its review policies, the agent each task uses, and the default agent for merge conflict sessions are all fixed at submission, based on the settings at that time. Workflows that are already submitted aren't affected by later changes.
+
+## Fields [#fields]
+
+Project settings have five fields, and every one of them is optional.
+
+| Field | Type | When neither file sets it | Written to the local settings by `cdg init{:sh}`? |
+|---|---|---|---|
+| [`maxConcurrency`](#max-concurrency) | Integer | `1` | When it differs from the value in the shared settings |
+| [`taskAutoAccepted`](#task-auto-accepted) | `always`, `done`, or `none` | `always` | No |
+| [`dagAutoAccepted`](#dag-auto-accepted) | `always`, `done`, or `none` | `done` | No |
+| [`availableAgents`](#available-agents) | Non-empty array containing `claude`, `codex`, or both | All supported agents can be used | No |
+| [`defaultAgent`](#default-agent) | `claude` or `codex` | `codex`; if it isn't on the available list, the first item on the list | When it differs from the value in the shared settings |
+
+### maxConcurrency [#max-concurrency]
+
+`maxConcurrency` is the default limit on how many tasks run at once. It applies to workflows that don't set [`maxConcurrency`](/docs/reference/workflow-file#max-concurrency) in the workflow file. It has to be an integer. A positive integer means at most that many tasks run at once, and 0 or a negative number means no limit. A decimal or a quoted value such as `"3"` is an error. When neither file sets it, the value is 1, and tasks run one at a time.
+
+When you don't pass `--max-concurrency` and the shared settings don't have this field either, `cdg init{:sh}` writes 1 plus the number of registered replicas, which is the total number of workspaces, to the local settings. For how this value is updated when you add replicas later and reinitialize, see [When the local settings are kept](/docs/reference/cli/init#kept-local-settings).
+
+In the default isolated-branches mode, the actual concurrency also never exceeds the number of available workspaces, so however large you make this value, it matters only up to the number of workspaces. Shared-workspace mode isn't limited by the number of workspaces, so this value is the actual limit. When it's greater than 1, a shared-workspace workflow that doesn't set `maxConcurrency` also runs tasks that don't depend on one another at the same time, in the same workspace. If you need the tasks to run one at a time, set `maxConcurrency: 1` in the workflow file.
+
+```jsonc title=".codedag/local/settings.local.jsonc"
+{
+  // Leave the other fields as they are
+  "maxConcurrency": 3 // The primary repository plus two replicas, so at most 3 tasks run at once
+}
+```
+
+### taskAutoAccepted [#task-auto-accepted]
+
+`taskAutoAccepted` is the default review policy for tasks in the project. It determines whether a task is auto-accepted when it finishes, or stops and waits for your review. It's used only when the task doesn't set `autoAccepted`, the workflow doesn't set `taskAutoAccepted`, and the submission doesn't include `--task-auto-accepted`. It takes `always`, `done`, or `none`. For what each value means, see [Auto-accept values](/docs/reference/workflow-file#auto-accept-values). When neither file sets it, the value is `always`, which means auto-accept.
+
+To have the team's tasks stop and wait for someone to review them by default, set it to `none` in the shared settings:
+
+```jsonc title=".codedag/settings.jsonc"
+{
+  "taskAutoAccepted": "none" // Every task stops when it finishes and waits for someone to review it
+}
+```
+
+### dagAutoAccepted [#dag-auto-accepted]
+
+`dagAutoAccepted` is the default review policy for workflows in the project. It determines whether, after every task has been reviewed, the whole workflow is auto-accepted or stops and waits for your decision on the full set of results. It's used only when the workflow file doesn't set `dagAutoAccepted` and the submission doesn't include `--dag-auto-accepted`. It takes `always`, `done`, or `none`. For what each value means, see [Auto-accept values](/docs/reference/workflow-file#auto-accept-values). When neither file sets it, the value is `done`, which means auto-accept.
+
+It's independent of the review policy for tasks. To confirm once before each workflow finishes while tasks are still auto-accepted, set only this field:
+
+```jsonc title=".codedag/local/settings.local.jsonc"
+{
+  // Leave the other fields as they are
+  "dagAutoAccepted": "none" // Tasks are auto-accepted as usual, and the whole workflow waits for my confirmation before it ends
+}
+```
+
+With `none`, the workflows behind this one in the queue don't start until you give a decision.
+
+### availableAgents [#available-agents]
+
+`availableAgents` lists the agents that this project's workflows can use: `claude` means Claude Code, and `codex` means Codex. At validation and submission, CodeDAG checks agents in two places: the agent each task actually uses (the task's `agent`, or the [default agent](#default-agent) when the task doesn't set one), and the `agent` in [`mergeConflictAgent`](/docs/reference/workflow-file#merge-conflict-agent). All of them have to be on this list, or validation fails. The error says which file the restriction comes from and gives two ways to fix it: add the agent to `availableAgents` in that file, or delete the field.
+
+Use this field only for a deliberate restriction, for example when the team has agreed that this project uses only Claude Code:
+
+```jsonc title=".codedag/settings.jsonc"
+{
+  "availableAgents": ["claude"]
+}
+```
+
+When it's omitted, all supported agents can be used, and a newly installed agent works right away. When you no longer want the restriction, delete the field: an empty array produces the error `availableAgents must list at least one agent; remove the field to allow all supported agents`, and a value other than `claude` or `codex` in the list is an error too.
+
+This list has nothing to do with which agents are installed on this computer. Validation and submission run a separate installation check: if the command for an agent that the workflow actually uses isn't on your PATH, they report an `agent-not-installed` error. See [Submission rejected](/docs/troubleshooting/troubleshooting#submit-rejected).
+
+### defaultAgent [#default-agent]
+
+`defaultAgent` is the project's default agent. It takes `claude` or `codex`. Tasks that don't set `agent` run with it, and their `mode` is validated against its syntax. When a workflow doesn't set [`mergeConflictAgent`](/docs/reference/workflow-file#merge-conflict-agent), it also resolves any conflict that occurs when the results are merged into the integration branch after all tasks finish.
+
+When neither file sets it, the default agent is `codex`. A value other than `claude` or `codex` is an error. The value itself is case-insensitive, and leading and trailing whitespace is ignored. If the resulting agent isn't in [`availableAgents`](#available-agents), the first item in `availableAgents` is used instead. For example, in a project that allows only `claude`, the default agent is Claude Code when `defaultAgent` isn't set.
+
+For how `cdg init{:sh}` determines the default agent and when it writes that agent to the local settings, see [How the default agent is determined](/docs/reference/cli/init#default-agent). To change it later, edit this field in the local settings:
+
+```jsonc title=".codedag/local/settings.local.jsonc"
+{
+  // Leave the other fields as they are
+  "defaultAgent": "claude"
+}
+```
+
+Once you change the default agent, every task that doesn't set `agent` runs with the other agent, and those that set `mode` may fail validation because the syntax doesn't match. Each person can also override the default agent in their own local settings. So for a workflow that will run on more than one computer, it's best to set [`agent`](/docs/reference/workflow-file#tasks-agent) explicitly on every task.
+
+## Adjust a single workflow or a single submission [#per-workflow]
+
+Project settings are defaults that all workflows share. To change just one workflow, set the corresponding field in its workflow file. To change just one submission, use the options of `cdg dag submit{:sh}`. Neither approach modifies project settings.
+
+| What you want to adjust | For one workflow only | For one submission only |
+|---|---|---|
+| Concurrency limit | The workflow's [`maxConcurrency`](/docs/reference/workflow-file#max-concurrency) | No corresponding option |
+| Review policy for tasks | The workflow's [`taskAutoAccepted`](/docs/reference/workflow-file#task-auto-accepted), or a task's [`autoAccepted`](/docs/reference/workflow-file#tasks-auto-accepted) | `--task-auto-accepted` |
+| Review policy for the whole workflow | The workflow's [`dagAutoAccepted`](/docs/reference/workflow-file#dag-auto-accepted) | `--dag-auto-accepted` |
+| The agent a task uses | The task's [`agent`](/docs/reference/workflow-file#tasks-agent) | No corresponding option |
+
+For example, the command below makes every task in this one submission stop when it finishes and wait for your review:
+
+```bash title="Terminal"
+cdg dag submit feature --task-auto-accepted none
+```
+
+For the full usage of the two submit options, see [Adjust review settings for a single submission](/docs/reference/cli/validate-and-submit#auto-accept-options).
+
+## Related
+
+- [Share with Your Team](/docs/guides/team-sharing): Push the shared settings and workflows to a remote so that team members use the same defaults.
+- [Workflow File Reference](/docs/reference/workflow-file): The syntax of the fields of the same name in a workflow file, and the precedence order across all sources.
+- [Initialize a Project](/docs/reference/cli/init): The options for `cdg init{:sh}`, and how existing settings are handled when you reinitialize.

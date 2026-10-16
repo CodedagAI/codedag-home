@@ -1,0 +1,15 @@
+{
+  "$schema": "../../../../.source/json-schema/docs.meta.json",
+  "title": "CLI コマンド",
+  "icon": "Terminal",
+  "pages": [
+    "index",
+    "init",
+    "validate-and-submit",
+    "status-and-logs",
+    "control",
+    "review",
+    "plugin",
+    "auth"
+  ]
+}

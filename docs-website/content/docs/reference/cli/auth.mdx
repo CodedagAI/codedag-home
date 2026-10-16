@@ -1,0 +1,65 @@
+---
+title: Auth
+description: What cdg auth login, logout, and status do and what they require, and how to switch the CLI to another account.
+icon: KeyRound
+---
+
+`cdg auth{:sh}` has three commands: one signs you in to CodeDAG, one signs you out, and one shows the current account. You can run them from any directory, inside a project or not. The sign-in is stored per computer, and every project on the same computer shares it. Apart from `--help`, the only option is [`--local`](#status-local), on `cdg auth status{:sh}`. For why you need to sign in, which commands require it, and how long you stay signed in, see [Sign-In and Account](/docs/account/login-and-account).
+
+## cdg auth login [#login]
+
+```bash title="Terminal"
+cdg auth login
+```
+
+This command signs you in to CodeDAG with a Google account in your browser and saves the sign-in on this computer. The first time you sign in with a given Google account, a CodeDAG account is created for it at the same time, so you don't need to register beforehand.
+
+The command needs to reach the CodeDAG service. If it can't, it fails immediately without opening a browser. Sign-in has to be completed in a browser on the same computer that runs the command, so you can't sign in from a remote SSH session, a container, or a server without a graphical interface. See [Without a desktop browser](/docs/account/login-and-account#no-browser). After it opens the browser, the command waits up to 5 minutes. If sign-in isn't complete by then, the command fails, and you can just run it again.
+
+If you run it when you're already signed in, it goes through sign-in again. On success, the new sign-in replaces the existing one on this computer. If the new sign-in doesn't complete, the existing one stays as it is.
+
+You don't normally need to run this command yourself. When `cdg init{:sh}`, `cdg dag submit{:sh}`, or `cdg auth status{:sh}` finds that you aren't signed in, it takes you through the same sign-in first and then carries on with the original command. You mainly run it on its own when you switch accounts, or when a queued workflow has stopped at `on-hold` because this computer isn't signed in.
+
+## cdg auth logout [#logout]
+
+```bash title="Terminal"
+cdg auth logout
+```
+
+This command signs the CLI out on this computer and clears the sign-in saved here. Sign-ins in the web console and on other computers aren't affected. For how signing out affects queued workflows, see [Sign out and switch accounts](#switch-account).
+
+Signing out doesn't require a network connection. If the CodeDAG service can't be reached, the command prints a warning, but the sign-in saved on this machine is still cleared.
+
+## cdg auth status [#status]
+
+```bash title="Terminal"
+cdg auth status [--local]
+```
+
+Without options, this command shows the signed-in account, the subscription status, and credit usage for the current period. For what each item means, see [Check credits and usage](/docs/account/credits-and-subscription#check-usage).
+
+Used this way, the command requires you to be signed in and needs to reach the CodeDAG service. If you aren't signed in, it first takes you through the same sign-in as `cdg auth login{:sh}` and then shows the account information.
+
+### --local [#status-local]
+
+`cdg auth status --local{:sh}` reports whether you're signed in based only on the credentials saved on this computer. It makes no network requests and doesn't start browser sign-in. That makes it suitable for scripts and agents to run before a command that requires sign-in: the exit code is 0 when you're signed in and 1 when you aren't. It shows only the user ID, not the email address, subscription, or credits. If the sign-in has already been invalidated on the server, it still reports that you're signed in.
+
+## Sign out and switch accounts [#switch-account]
+
+To switch the CLI on this computer to another account, sign out, sign in with the other Google account, and then confirm which account is current:
+
+```bash title="Terminal"
+cdg auth logout
+cdg auth login
+cdg auth status
+```
+
+If the web console (app.codedag.com) in your browser is still signed in to the original account, `cdg auth login{:sh}` uses that account directly. In that case, sign out on the web first, then run the sign-in command. For how several computers share one account, and for the full rules on signing out, see [Sign out, use multiple computers, and switch accounts](/docs/account/login-and-account#sign-out).
+
+Signing out and switching accounts don't affect workflows that have already started running. When a queued workflow's turn to run comes, the CLI on this computer must be signed in to the account that submitted it. Otherwise the workflow stops at `on-hold`, and the workflows behind it wait too. Sign in, or switch back to the original account, and then run `cdg dag recover <workflow>{:sh}` to continue.
+
+## Related
+
+- [Sign-In and Account](/docs/account/login-and-account): Which commands require sign-in, how long you stay signed in, and what data the CodeDAG service receives.
+- [Credits, Subscription, and Charges](/docs/account/credits-and-subscription): Free credits, subscriptions, and when credits are charged.
+- [Troubleshooting](/docs/troubleshooting/troubleshooting#sign-in-problems): Find the cause by symptom when sign-in fails, when you're asked to sign in again and again, or when you end up in the wrong account after signing in.

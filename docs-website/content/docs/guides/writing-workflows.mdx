@@ -1,0 +1,151 @@
+---
+title: Write a Workflow File
+description: Start from the minimal structure of a workflow file, add common fields as you need them, and validate the file with cdg dag validate before you submit it.
+icon: FileCode
+---
+
+A [workflow](/docs/concepts/how-it-works#workflow) file is a YAML or JSON file in the primary repository's `.codedag/dags/` directory. It lists the tasks to run and the dependencies between them. Only `id`, `title`, and `prompt` are required for each task. Separate optional fields set which agent runs a task, whether it waits for your approval while it runs, and whether it waits for your review when it finishes. A field you leave out takes its default value.
+
+## If you'd rather not write it by hand
+
+Claude Code or Codex with the CodeDAG Guide plugin installed can write the workflow file from your description, validate it, submit it, and track its progress. See [Let Your Agent Orchestrate](/docs/get-started/let-your-agent-orchestrate). The file it writes is no different from one written by hand and goes in `.codedag/dags/` as well, so the rest of this page also helps you read and check those files.
+
+## Where the file goes
+
+Workflow files go in the `.codedag/dags/` directory of the primary repository, which is the repository that contains `.codedag/`. CodeDAG reads workflows only from there. The file name without its extension is the workflow's name, and commands take just the name. For example, you validate `.codedag/dags/testing-docs.yaml` with `cdg dag validate testing-docs{:sh}`. The name also appears in task branch names and log file names, so a short, lowercase English name is the most convenient choice.
+
+The file can be YAML (`.yaml`, `.yml`) or JSON (`.json`), and the fields are identical in both formats. We recommend YAML because multiline prompts are more natural to write in it and you can add comments. The `untitled_dag.yaml` file that `cdg init` generates in `.codedag/dags/` is a blank template with comments. Copy it, rename the copy, and start from there.
+
+`.codedag/` is a [sidecar repository](/docs/concepts/how-it-works#sidecar-repo) that's separate from the project repository, so new workflow files don't show up in the project repository's `git status`. To keep a version history for them, see [Save workflows and shared configuration separately](/docs/reference/branches-and-files#save-config).
+
+## Minimal structure [#minimal-structure]
+
+At a minimum, a workflow file needs a `tasks` list with at least one task, and every task needs an `id`, a `title`, and a `prompt`. To set the order between tasks, use `dependencies`. The workflow below has two tasks: task 1 collects the project's test commands and writes them to a file, and task 2 reads that file and adds testing instructions to the README.
+
+```yaml title=".codedag/dags/testing-docs.yaml"
+tasks:                                # The task list, with at least one task
+  - id: 1                             # Task number: a positive integer, unique within the workflow
+    title: Collect the test commands  # A short title for human readers, shown on the status board
+    prompt: |                         # Instructions for the task agent. The | means multiline text follows
+      Read the build and test configuration in this repository, such as package.json, a Makefile, or the CI configuration.
+      Find the command that runs all the tests locally and the setup steps it needs,
+      and write them to docs/notes/testing.md. Write only this file (overwrite it if it already exists) and don't modify any other file.
+
+  - id: 2
+    title: Add testing instructions to the README
+    dependencies: [1]                 # Starts only after task 1 finishes and is accepted
+    prompt: |
+      Read docs/notes/testing.md, then add a "Running tests" section to README.md
+      that explains how to run the tests locally in three to five steps. Modify only README.md.
+```
+
+Task 2's prompt spells out the path of the file to read, because each task is a fresh agent session. It can't see the upstream task's conversation and can only read the files that the upstream task left in the repository. For how to split tasks and write prompts, see [Design Tasks and Prompts](/docs/guides/designing-tasks-and-prompts).
+
+A one-line prompt can go right after the colon. But if the text contains a colon followed by a space (for example, `Goal: ...`), YAML treats it as a key-value pair and reports a syntax error, so use the multiline `|` form in that case too.
+
+This file already passes validation, but it doesn't say which agent runs the tasks or which permission mode they use. If you submit it as is, both tasks run with the project's default agent and inherit that agent's own permission settings. If those settings require approval for file edits or commands, the tasks stop and wait for someone to respond. In practice, you'd normally also set `agent` and `mode` on each task before you submit, as shown in [Common fields](#common-fields).
+
+## Common fields [#common-fields]
+
+There's a field for each of the common things you might want to control. Fields marked "task" go inside an item in `tasks` and affect only that task. Fields marked "workflow" go at the top level of the file, alongside `tasks`, and apply to the whole workflow.
+
+| What you want to do | Field | When omitted | Notes |
+|---|---|---|---|
+| Choose which agent runs a task | `agent` (task) | The project's default agent, set during `cdg init` | `claude` means Claude Code, and `codex` means Codex. To split work between the two, see [Mix Claude Code and Codex](/docs/guides/mixing-agents). |
+| Choose the model or reasoning effort | `model`, `effort` (task) | The defaults configured in the agent itself | Passed to the agent as is. That agent's documentation defines the valid values. |
+| Decide whether a task stops to wait for your approval while it runs | `mode` (task) | The agent's own permission settings | The two agents use different values. Unattended runs usually use full access: `bypassPermissions` for Claude Code and `yolo` for Codex. For the tradeoffs, see [Decide between unattended and attended runs](/docs/guides/agents-and-permission-modes#unattended-or-attended). |
+| Make a particular task stop when it finishes and wait for your review | `autoAccepted: none` (task) | Auto-accept | The task's downstream tasks start only after you accept its result. For how to review, see [Review Tasks and Workflows](/docs/guides/review-tasks). |
+| Make every task stop when it finishes and wait for your review | `taskAutoAccepted: none` (workflow) | Auto-accept | Equivalent to setting `autoAccepted: none` on every task. A task that sets its own `autoAccepted` uses its own value. |
+| Have the whole workflow wait for your decision before it ends | `dagAutoAccepted: none` (workflow) | Auto-accept | After all tasks are done, you decide whether to accept, cancel, or defer the result of the whole workflow. |
+| Limit how many tasks run at once | `maxConcurrency` (workflow) | The value in project settings, which `cdg init` sets to 1 plus the number of replicas; 1 if project settings don't have it either | In isolated-branches mode, the actual concurrency also never exceeds the number of available workspaces. See [What determines how many tasks run at once](/docs/guides/parallel-workspaces#concurrency). |
+| Run all tasks directly in the same workspace, with no branches and no commits | `executionMode: shared-workspace` (workflow) | `isolated-branches`: each task runs on its own branch | Shared-workspace mode runs in the primary repository by default and suits tasks that don't compile or run tests, such as documentation and research. For how the two modes differ, see [Execution modes](/docs/concepts/workspaces-and-branches#execution-modes). |
+
+The "When omitted" column shows what you get when nothing else sets the value. Project settings and `cdg dag submit` options can also set some of these. When the same setting appears in more than one place, a submit option overrides a field in the file, a task field overrides a workflow field, and a field in the file overrides project settings. For the full order, see [Defaults and precedence](/docs/reference/workflow-file#precedence).
+
+Here's the example from the minimal structure, filled out the way you'd actually submit it. Pick the version for the agent you use.
+
+<Tabs items={['Claude Code', 'Codex']}>
+  <Tab value="Claude Code">
+
+```yaml title=".codedag/dags/testing-docs.yaml"
+tasks:
+  - id: 1
+    title: Collect the test commands
+    agent: claude             # Run by Claude Code
+    mode: bypassPermissions   # Full access: doesn't stop for approval while it runs
+    model: sonnet             # Gathering information, so use a faster model
+    autoAccepted: none        # Stop when done; continue only after you confirm the result
+    prompt: |
+      Read the build and test configuration in this repository, such as package.json, a Makefile, or the CI configuration.
+      Find the command that runs all the tests locally and the setup steps it needs,
+      and write them to docs/notes/testing.md. Write only this file (overwrite it if it already exists) and don't modify any other file.
+
+  - id: 2
+    title: Add testing instructions to the README
+    dependencies: [1]
+    agent: claude
+    mode: bypassPermissions
+    model: opus               # Prose written for readers, so use a stronger model
+    prompt: |
+      Read docs/notes/testing.md, then add a "Running tests" section to README.md
+      that explains how to run the tests locally in three to five steps. Modify only README.md.
+```
+
+  </Tab>
+  <Tab value="Codex">
+
+```yaml title=".codedag/dags/testing-docs.yaml"
+tasks:
+  - id: 1
+    title: Collect the test commands
+    agent: codex              # Run by Codex
+    mode: yolo                # Full access: doesn't stop for approval while it runs
+    effort: medium            # Gathering information, so use medium reasoning effort
+    autoAccepted: none        # Stop when done; continue only after you confirm the result
+    prompt: |
+      Read the build and test configuration in this repository, such as package.json, a Makefile, or the CI configuration.
+      Find the command that runs all the tests locally and the setup steps it needs,
+      and write them to docs/notes/testing.md. Write only this file (overwrite it if it already exists) and don't modify any other file.
+
+  - id: 2
+    title: Add testing instructions to the README
+    dependencies: [1]
+    agent: codex
+    mode: yolo
+    effort: high              # Prose written for readers, so use higher reasoning effort
+    prompt: |
+      Read docs/notes/testing.md, then add a "Running tests" section to README.md
+      that explains how to run the tests locally in three to five steps. Modify only README.md.
+```
+
+  </Tab>
+</Tabs>
+
+When task 1 finishes, the workflow stops and waits for you. Look over what it wrote, then run `cdg task review accept 1 -w testing-docs{:sh}` to accept the result. Only then does task 2 start.
+
+## Validate [#validate]
+
+`cdg dag validate` checks a workflow file's format, field values, and dependencies locally. It doesn't require you to sign in and doesn't use credits, so you can run it as often as you like while you write. You can also pass several workflow names to validate them in one run.
+
+```bash title="Terminal"
+cdg dag validate testing-docs
+```
+
+There are three possible results: passed, passed with warnings, and failed. When validation fails, the output lists each error. In this example, task 2 depends on a task 3 that doesn't exist:
+
+```bash title="Terminal"
+✗ Validation failed: .codedag/dags/testing-docs.yaml
+  [dag] Task 2: depends on non-existent task 3
+```
+
+Validation looks beyond this one file. It also reads the two project settings files, and if a setting in either has an invalid value, validation fails and tells you which setting in which file. For field values, `mode` is checked against the syntax of the agent the task actually uses, while values that are passed to the agent as is, such as `model` and `effort`, aren't checked. For exactly what's checked for each field, see [Workflow File Reference](/docs/reference/workflow-file).
+
+Warnings don't fail validation, but each one is worth reading. The most common is `unsupported-field`: CodeDAG ignores fields it doesn't recognize in a workflow file, so a misspelled field name isn't an error. It just has no effect. Field names are always camelCase. A snake_case name such as `auto_accepted` is ignored in the same way, and a separate `naming` warning tells you to change it to `autoAccepted`.
+
+`cdg dag submit` validates the file again when you submit and doesn't submit it if there are errors. To troubleshoot a failed validation or submission, see [Submission rejected](/docs/troubleshooting/troubleshooting#submit-rejected).
+
+## Related
+
+- [Design Tasks and Prompts](/docs/guides/designing-tasks-and-prompts): How to split tasks, arrange dependencies, and write prompts that a fresh session can complete on its own.
+- [Submit, Monitor, and Read Logs](/docs/guides/run-and-monitor): Submit the workflow once it passes validation, then follow its progress and logs.
+- [Workflow File Reference](/docs/reference/workflow-file): Each field's type, all of its values, its default, and the precedence order.

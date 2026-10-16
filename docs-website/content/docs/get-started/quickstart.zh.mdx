@@ -1,0 +1,381 @@
+---
+title: 快速开始：第一个工作流
+description: 在自己的 Git 仓库里跑通第一个工作流，全程只新增文件，不改动已有代码。
+icon: Rocket
+---
+
+## 你将完成什么
+
+你要写的工作流有两个任务，前后相连。任务 1 读取你最近一周与 Claude Code 或 Codex 的对话记录，写一份 HTML 报告，分析你现在怎样用 Agent 做开发、哪些工作适合交给 CodeDAG，并为每个场景附上一份可以直接使用的工作流文件。任务 2 换一个 Agent 审查这份报告：两个 Agent 都装了就用另一个，只装了一个就换一个模型。它会留下一份审查意见和一份重写后的报告。两份报告写好后都会在浏览器里自动打开。三份文件都写在 `docs/codedag-reports/run-<序号>/` 下：第一次运行是 `run-1`，再运行一次就新建 `run-2`，不覆盖上一次的结果。
+
+export const firstRunChart = `flowchart LR
+  t1["任务 1<br/>分析最近一周的 Agent 对话<br/>写出报告"] --> t2["任务 2<br/>换一个模型审查<br/>写出审查意见与重写版"]`;
+
+<Tabs items={['图表', '代码']}>
+  <Tab value="图表">
+    <Mermaid chart={firstRunChart} />
+  </Tab>
+  <Tab value="代码">
+    <DynamicCodeBlock lang="mermaid" code={firstRunChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+这个工作流不会动你的代码，因为它使用共享工作区模式（`shared-workspace`）：任务直接在你当前的工作目录里运行，CodeDAG 不创建分支、不合并、不提交。任务 Agent 具体写哪些文件由 prompt 决定，本例的 prompt 只允许它新建一个目录和其中的报告文件。CodeDAG 默认的隔离分支模式会为每个任务建分支并提交，留到[第二个工作流](/zh/docs/get-started/second-workflow)再体验；两种执行模式的区别见[执行模式](/zh/docs/concepts/workspaces-and-branches#execution-modes)。
+
+运行这个工作流会消耗 2 点 CodeDAG 额度，每个任务 1 点。所需时间主要取决于要读的对话记录有多少和所用的模型，任务 1 的 prompt 已经限定只抽样读 20 个左右的会话。
+
+<Callout type="info">
+不想手写 YAML 的话，可以让 Agent 替你写。如果你的 Claude Code 或 Codex 装了 CodeDAG Guide 插件（第 1 步会问你是否安装），把本节描述的两个任务交给它，它会写出同样的工作流，并替你提交和跟踪进度，做法见[让 Agent 帮你编排](/zh/docs/get-started/let-your-agent-orchestrate)。亲手写一遍的好处是，以后你能看懂并修改 Agent 写出来的工作流。
+</Callout>
+
+## 准备
+
+- **装好 CodeDAG 和 Agent。** 已完成[安装与登录](/zh/docs/get-started/installation)，并且 Claude Code 或 Codex 至少有一个能正常使用。
+- **选一个有提交的 Git 仓库。** 终端位于任意一个已有提交的 Git 仓库的根目录。工作流启动时要以当前提交为起点，还没有任何提交的新仓库无法启动。
+- **让 Claude Code 能读仓库以外的文件。** 用 Claude Code、并且没有让它在 auto 模式下读过仓库以外的文件时才需要。本教程的任务要读仓库以外的对话记录，Claude Code 第一次这样读取时会问一次是否允许，留到任务运行时才出现的话，任务会停下来等你。如果想避免，可以提前在终端里运行一次 `claude --permission-mode auto{:sh}`，让它读一个仓库以外的文件，出现询问时选择 “Yes, and keep allowing any reads outside the working directories” 后退出，见[提前允许 Claude Code 读取工作目录以外的文件](/zh/docs/guides/agents-and-permission-modes#allow-outside-reads)。
+
+## 1. 初始化项目 [#init-project]
+
+在仓库根目录运行：
+
+```bash title="Terminal"
+cdg init
+```
+
+如果还没登录，`cdg init` 会先打开浏览器让你登录。之后它会依次问几个问题：
+
+1. `Select your repository setup method`：选 `4. I don't need concurrent tasks, only sequential execution`。本教程的两个任务先后执行，只用主仓库就够了；并行执行需要的副本工作区，在第二个工作流里再准备。如果这个仓库已经有 worktree 或 clone 副本，也可以对应选 1 或 2。
+2. `Which agent would you like to set as the default for this project?`：只有 Claude Code 和 Codex 都装了才会问，任选一个即可。默认 Agent 只决定没写 `agent` 字段的任务由谁执行，而本教程的每个任务都写明了。
+3. `Install the CodeDAG plugin for Claude Code?`，以及针对 Codex 的同样问题：本机装了几个 Agent 就问几次，都选 `User-level`，不要选 `Skip`。插件让 Claude Code 和 Codex 学会操作 `cdg`、编写工作流文件，装在 User 范围后你所有的项目都能用；本教程的任务要靠它为你写出可以直接使用的工作流文件。
+
+完成后会看到类似这样的输出：
+
+```bash title="Terminal"
+✔ Project initialized successfully!
+
+  Project Repository: /Users/you/my-app
+  Project Git workflow stays unchanged.
+  Associated Replica Repositories:
+
+  CodeDAG Sidecar Repository: /Users/you/my-app/.codedag
+  The project repository and the `.codedag` sidecar repository are separate Git repositories, so manage them independently.
+  Use Git inside `.codedag` to manage team-shared workflows and shared settings.
+```
+
+初始化在仓库根目录建了一个 `.codedag/` 目录，它本身是一个独立的 Git 仓库：`dags/` 放工作流文件，`settings.jsonc` 和 `local/settings.local.jsonc` 是项目设置。你的项目仓库通过 `.git/info/exclude` 忽略了这个目录，所以 `git status` 里看不到它，你已跟踪的文件也都没有改动。`.codedag/` 为什么要单独成一个仓库，见[边车仓库](/zh/docs/concepts/how-it-works#sidecar-repo)。
+
+接着运行 `cdg plugin status{:sh}` 确认插件已经装好：你要用的每个 Agent 下面，`Plugin installed` 与 `Enabled` 都应为 `true`。显示未安装时，运行 `cdg plugin install --scope user{:sh}` 补装，见[管理 CodeDAG Guide 插件](/zh/docs/guides/guide-plugin)。
+
+## 2. 写工作流文件
+
+在 `.codedag/dags/` 文件夹下，新建 `first-run.yaml` 文件，按你装的 Agent 选下面一个版本，原样粘贴进去。工作流文件只能放在主仓库的 `.codedag/dags/` 下，文件名就是工作流的名字，后面的命令里用 `first-run` 指代它。
+
+<Tabs items={['Claude Code 与 Codex', '只有 Claude Code', '只有 Codex']}>
+  <Tab value="Claude Code 与 Codex">
+
+```yaml title=".codedag/dags/first-run.yaml"
+executionMode: shared-workspace
+
+tasks:
+  - id: 1
+    title: 分析最近一周的 Agent 对话
+    agent: claude
+    mode: auto
+    prompt: |
+      目标：
+      阅读我最近 7 天与 Claude Code 和 Codex 的对话记录，写一份 HTML 格式的报告并在浏览器里打开，说明我现在如何用 Agent 做开发，哪些工作适合交给 CodeDAG 工作流，以及具体怎么做。
+
+      具体要求：
+      - 只读最近 7 天的对话记录；找不到某个 Agent 的记录就跳过，本任务自己的会话也跳过。会话很多时抽样阅读，优先选当前仓库的会话，总数控制在 20 个左右。
+
+      上下文与必读材料：
+      - 动笔之前，先用 CodeDAG Guide 插件的 codedag-guide 技能了解 CodeDAG 适合做什么，以及工作流文件的字段和写法。
+
+      完成标准：
+      在 docs/codedag-reports/ 下新建目录 run-<序号>，序号取已有 run-* 目录的最大序号加 1，没有时为 1。报告写成这个目录里的 HTML 文件 workflow-review.html，包含三部分：
+      1. 使用画像：简略说明我常做哪几类任务、会话的长度与轮次、哪些步骤反复出现。画像和统计数字只写能支撑第 2 部分的，重点写从中得出的结论：我现在的做法里，哪些可以改用工作流完成。
+      2. 适合交给工作流的三到五个场景：每个场景写出它替代我现在的哪种做法、任务怎么拆、任务之间的依赖、预期能省下什么，并附一份可以直接复制使用的工作流文件。
+      3. 仍然适合在交互会话里完成的工作，并说明原因。
+      每条结论注明依据来自哪些会话（写出日期和项目名即可）。
+      工作流文件按 codedag-guide 技能的说明来写，并注明建议的文件名。第一个场景的工作流文件默认展开，其余场景的默认收起，点击可以展开；每份文件带一个复制按钮。
+      HTML 报告是单个文件，样式和脚本都写在文件内，不引用外部资源。写完后用系统默认浏览器打开它，让我可以直接阅读：macOS 用 open，Linux 用 xdg-open。
+      如果这台电脑没有图形界面，或者打开失败，再写一份内容相同的 Markdown 文件 workflow-review.md 作为兜底。
+
+      约束：
+      - 只新建上面这个目录和其中的报告文件，不修改、不删除仓库里任何已有文件。
+      - 报告中不要摘录密钥、令牌、密码等敏感信息。
+
+  - id: 2
+    title: 审查并重写报告
+    dependencies: [1]
+    agent: codex
+    mode: auto
+    prompt: |
+      目标：
+      审查 docs/codedag-reports/ 下最新的一份报告，写出审查意见，并给出一份改进后的完整版本。
+
+      上下文与必读材料：
+      - 每次运行的结果放在 docs/codedag-reports/run-<序号>/ 下，序号最大的目录就是最新的一次，报告是其中的 workflow-review.html。
+      - 这份报告由另一个 Agent 根据我最近 7 天与 Claude Code 和 Codex 的对话记录写成，结论后面注明了依据的会话；核对关键结论时，可以抽查这些会话。
+      - 报告里每个场景附有一份工作流文件。核对它们能不能直接使用之前，先用 CodeDAG Guide 插件的 codedag-guide 技能了解工作流文件的字段和写法。
+
+      完成标准：
+      - 审查意见写到同一目录的 workflow-review-comments.md：逐条列出事实错误、证据不足的结论、遗漏的重要场景、难以执行的建议，以及不能直接使用的工作流文件，每条说明理由。
+      - 改进后的完整报告写成同一目录的 HTML 文件 workflow-review-v2.html，吸收所有成立的审查意见，保留原报告的三部分结构：第 1 部分保持简略，只留能支撑第 2 部分的内容；第 2 部分每个场景附一份可以直接复制使用的工作流文件，第一份默认展开，其余默认收起，每份带复制按钮。它是单个文件，样式和脚本都写在文件内，不引用外部资源。写完后用系统默认浏览器打开它，让我可以直接阅读：macOS 用 open，Linux 用 xdg-open。
+      - 如果这台电脑没有图形界面，或者打开失败，再写一份内容相同的 Markdown 文件 workflow-review-v2.md 作为兜底。
+
+      约束：
+      - 只新建上面提到的文件，不修改原报告，也不修改、删除仓库里任何其他文件。
+      - 报告中不要摘录密钥、令牌、密码等敏感信息。
+```
+
+  </Tab>
+  <Tab value="只有 Claude Code">
+
+```yaml title=".codedag/dags/first-run.yaml"
+executionMode: shared-workspace
+
+tasks:
+  - id: 1
+    title: 分析最近一周的 Agent 对话
+    agent: claude
+    mode: auto
+    model: sonnet
+    prompt: |
+      目标：
+      阅读我最近 7 天与 Claude Code 和 Codex 的对话记录，写一份 HTML 格式的报告并在浏览器里打开，说明我现在如何用 Agent 做开发，哪些工作适合交给 CodeDAG 工作流，以及具体怎么做。
+
+      具体要求：
+      - 只读最近 7 天的对话记录；找不到某个 Agent 的记录就跳过，本任务自己的会话也跳过。会话很多时抽样阅读，优先选当前仓库的会话，总数控制在 20 个左右。
+
+      上下文与必读材料：
+      - 动笔之前，先用 CodeDAG Guide 插件的 codedag-guide 技能了解 CodeDAG 适合做什么，以及工作流文件的字段和写法。
+
+      完成标准：
+      在 docs/codedag-reports/ 下新建目录 run-<序号>，序号取已有 run-* 目录的最大序号加 1，没有时为 1。报告写成这个目录里的 HTML 文件 workflow-review.html，包含三部分：
+      1. 使用画像：简略说明我常做哪几类任务、会话的长度与轮次、哪些步骤反复出现。画像和统计数字只写能支撑第 2 部分的，重点写从中得出的结论：我现在的做法里，哪些可以改用工作流完成。
+      2. 适合交给工作流的三到五个场景：每个场景写出它替代我现在的哪种做法、任务怎么拆、任务之间的依赖、预期能省下什么，并附一份可以直接复制使用的工作流文件。
+      3. 仍然适合在交互会话里完成的工作，并说明原因。
+      每条结论注明依据来自哪些会话（写出日期和项目名即可）。
+      工作流文件按 codedag-guide 技能的说明来写，并注明建议的文件名。第一个场景的工作流文件默认展开，其余场景的默认收起，点击可以展开；每份文件带一个复制按钮。
+      HTML 报告是单个文件，样式和脚本都写在文件内，不引用外部资源。写完后用系统默认浏览器打开它，让我可以直接阅读：macOS 用 open，Linux 用 xdg-open。
+      如果这台电脑没有图形界面，或者打开失败，再写一份内容相同的 Markdown 文件 workflow-review.md 作为兜底。
+
+      约束：
+      - 只新建上面这个目录和其中的报告文件，不修改、不删除仓库里任何已有文件。
+      - 报告中不要摘录密钥、令牌、密码等敏感信息。
+
+  - id: 2
+    title: 审查并重写报告
+    dependencies: [1]
+    agent: claude
+    mode: auto
+    model: opus
+    prompt: |
+      目标：
+      审查 docs/codedag-reports/ 下最新的一份报告，写出审查意见，并给出一份改进后的完整版本。
+
+      上下文与必读材料：
+      - 每次运行的结果放在 docs/codedag-reports/run-<序号>/ 下，序号最大的目录就是最新的一次，报告是其中的 workflow-review.html。
+      - 这份报告由另一个 Agent 根据我最近 7 天与 Claude Code 和 Codex 的对话记录写成，结论后面注明了依据的会话；核对关键结论时，可以抽查这些会话。
+      - 报告里每个场景附有一份工作流文件。核对它们能不能直接使用之前，先用 CodeDAG Guide 插件的 codedag-guide 技能了解工作流文件的字段和写法。
+
+      完成标准：
+      - 审查意见写到同一目录的 workflow-review-comments.md：逐条列出事实错误、证据不足的结论、遗漏的重要场景、难以执行的建议，以及不能直接使用的工作流文件，每条说明理由。
+      - 改进后的完整报告写成同一目录的 HTML 文件 workflow-review-v2.html，吸收所有成立的审查意见，保留原报告的三部分结构：第 1 部分保持简略，只留能支撑第 2 部分的内容；第 2 部分每个场景附一份可以直接复制使用的工作流文件，第一份默认展开，其余默认收起，每份带复制按钮。它是单个文件，样式和脚本都写在文件内，不引用外部资源。写完后用系统默认浏览器打开它，让我可以直接阅读：macOS 用 open，Linux 用 xdg-open。
+      - 如果这台电脑没有图形界面，或者打开失败，再写一份内容相同的 Markdown 文件 workflow-review-v2.md 作为兜底。
+
+      约束：
+      - 只新建上面提到的文件，不修改原报告，也不修改、删除仓库里任何其他文件。
+      - 报告中不要摘录密钥、令牌、密码等敏感信息。
+```
+
+  </Tab>
+  <Tab value="只有 Codex">
+
+```yaml title=".codedag/dags/first-run.yaml"
+executionMode: shared-workspace
+
+tasks:
+  - id: 1
+    title: 分析最近一周的 Agent 对话
+    agent: codex
+    mode: auto
+    prompt: |
+      目标：
+      阅读我最近 7 天与 Claude Code 和 Codex 的对话记录，写一份 HTML 格式的报告并在浏览器里打开，说明我现在如何用 Agent 做开发，哪些工作适合交给 CodeDAG 工作流，以及具体怎么做。
+
+      具体要求：
+      - 只读最近 7 天的对话记录；找不到某个 Agent 的记录就跳过，本任务自己的会话也跳过。会话很多时抽样阅读，优先选当前仓库的会话，总数控制在 20 个左右。
+
+      上下文与必读材料：
+      - 动笔之前，先用 CodeDAG Guide 插件的 codedag-guide 技能了解 CodeDAG 适合做什么，以及工作流文件的字段和写法。
+
+      完成标准：
+      在 docs/codedag-reports/ 下新建目录 run-<序号>，序号取已有 run-* 目录的最大序号加 1，没有时为 1。报告写成这个目录里的 HTML 文件 workflow-review.html，包含三部分：
+      1. 使用画像：简略说明我常做哪几类任务、会话的长度与轮次、哪些步骤反复出现。画像和统计数字只写能支撑第 2 部分的，重点写从中得出的结论：我现在的做法里，哪些可以改用工作流完成。
+      2. 适合交给工作流的三到五个场景：每个场景写出它替代我现在的哪种做法、任务怎么拆、任务之间的依赖、预期能省下什么，并附一份可以直接复制使用的工作流文件。
+      3. 仍然适合在交互会话里完成的工作，并说明原因。
+      每条结论注明依据来自哪些会话（写出日期和项目名即可）。
+      工作流文件按 codedag-guide 技能的说明来写，并注明建议的文件名。第一个场景的工作流文件默认展开，其余场景的默认收起，点击可以展开；每份文件带一个复制按钮。
+      HTML 报告是单个文件，样式和脚本都写在文件内，不引用外部资源。写完后用系统默认浏览器打开它，让我可以直接阅读：macOS 用 open，Linux 用 xdg-open。
+      如果这台电脑没有图形界面，或者打开失败，再写一份内容相同的 Markdown 文件 workflow-review.md 作为兜底。
+
+      约束：
+      - 只新建上面这个目录和其中的报告文件，不修改、不删除仓库里任何已有文件。
+      - 报告中不要摘录密钥、令牌、密码等敏感信息。
+
+  - id: 2
+    title: 审查并重写报告
+    dependencies: [1]
+    agent: codex
+    mode: auto
+    model: gpt-6-sol
+    prompt: |
+      目标：
+      审查 docs/codedag-reports/ 下最新的一份报告，写出审查意见，并给出一份改进后的完整版本。
+
+      上下文与必读材料：
+      - 每次运行的结果放在 docs/codedag-reports/run-<序号>/ 下，序号最大的目录就是最新的一次，报告是其中的 workflow-review.html。
+      - 这份报告由另一个 Agent 根据我最近 7 天与 Claude Code 和 Codex 的对话记录写成，结论后面注明了依据的会话；核对关键结论时，可以抽查这些会话。
+      - 报告里每个场景附有一份工作流文件。核对它们能不能直接使用之前，先用 CodeDAG Guide 插件的 codedag-guide 技能了解工作流文件的字段和写法。
+
+      完成标准：
+      - 审查意见写到同一目录的 workflow-review-comments.md：逐条列出事实错误、证据不足的结论、遗漏的重要场景、难以执行的建议，以及不能直接使用的工作流文件，每条说明理由。
+      - 改进后的完整报告写成同一目录的 HTML 文件 workflow-review-v2.html，吸收所有成立的审查意见，保留原报告的三部分结构：第 1 部分保持简略，只留能支撑第 2 部分的内容；第 2 部分每个场景附一份可以直接复制使用的工作流文件，第一份默认展开，其余默认收起，每份带复制按钮。它是单个文件，样式和脚本都写在文件内，不引用外部资源。写完后用系统默认浏览器打开它，让我可以直接阅读：macOS 用 open，Linux 用 xdg-open。
+      - 如果这台电脑没有图形界面，或者打开失败，再写一份内容相同的 Markdown 文件 workflow-review-v2.md 作为兜底。
+
+      约束：
+      - 只新建上面提到的文件，不修改原报告，也不修改、删除仓库里任何其他文件。
+      - 报告中不要摘录密钥、令牌、密码等敏感信息。
+```
+
+  </Tab>
+</Tabs>
+
+“只有 Codex”的版本里，任务 1 用 Codex 的默认模型，任务 2 指定了 `gpt-6-sol`，目的只是让两个任务用不同的模型。Codex 的模型列表更新较快，如果这个名字在你的账号里不可用，换成 Codex 的 `/model` 菜单里另一个模型即可。
+
+这个文件只用到八个字段，除 `executionMode` 属于整个工作流外，其余都写在每个任务下面：
+
+| 字段 | 在这个工作流里的作用 |
+|---|---|
+| `executionMode` | 设为 `shared-workspace`，所有任务都在当前工作目录里运行，不建分支、不提交。不写时使用默认的隔离分支模式。 |
+| `id` | 任务编号，是工作流内唯一的正整数。命令和 `dependencies` 都用它指代任务。 |
+| `title` | 给人看的短标题，会显示在状态看板上。 |
+| `prompt` | 任务 Agent 会话收到的第一条消息，也是它从工作流里得到的全部指令。 |
+| `dependencies` | 这个任务要等哪些任务完成并被接受后才开始。任务 2 写的是 `[1]`。 |
+| `agent` | 由哪个 Agent 执行：`claude` 指 Claude Code，`codex` 指 Codex。 |
+| `mode` | 任务 Agent 的权限模式。本例两个 Agent 都写 `auto`：常规操作直接执行，有风险的操作由 Agent 自带的自动审查把关，任务运行中一般不会停下来等你审批。 |
+| `model` | 原样传给 Agent 的模型名。不写时用 Agent 自己配置的默认模型。 |
+
+任务 2 的 prompt 里写明了报告的路径，这一句不能省：两个任务是两个互不相通的会话，任务 2 看不到任务 1 的对话，只能读到任务 1 留在仓库里的文件。所有字段的完整说明见[工作流文件参考](/zh/docs/reference/workflow-file)。
+
+<Callout type="info">
+`auto` 让 Agent 用自带的自动审查代替你逐项批准。在 Claude Code 里，它就是 Claude Code 自己的 auto 权限模式，由安全分类器在后台审查操作；在 Codex 里，它相当于 Codex 的 Approve for me 权限，Codex 在只能写入工作区的沙箱里运行，要越出沙箱时先交给自动审查。安全的操作直接执行，有风险的会被拦下，少数情况下任务仍会停下来等你应答，做法见第 4 步。想让工作流在没人看着的时候也能一路跑完，要换成完全授权，各授权档的取舍见[决定无人值守还是有人值守](/zh/docs/guides/agents-and-permission-modes#unattended-or-attended)。
+</Callout>
+
+## 3. 校验并提交
+
+先校验工作流文件：
+
+```bash title="Terminal"
+cdg dag validate first-run
+```
+
+校验通过时输出：
+
+```bash title="Terminal"
+✔ Validation passed: .codedag/dags/first-run.yaml
+```
+
+如果报错，按提示修改文件后再校验一次。通过之后提交，并让当前终端跟随日志：
+
+```bash title="Terminal"
+cdg dag submit first-run --attach
+```
+
+```bash title="Terminal"
+✔ Submitted successfully: .codedag/dags/first-run.yaml
+
+Queue position:
+  #1  .codedag/dags/first-run.yaml (now running in background)
+
+📊 Following logs... (Ctrl+C to detach logs, Ctrl+\ to kill current workflow)
+```
+
+`--attach` 让这个终端接着滚动显示两个任务的日志，每一行都以任务编号和时间开头。按 Ctrl+C 只是让终端不再跟随日志，工作流会在后台继续执行，关掉终端也不影响它。
+
+## 4. 观察执行
+
+另开一个终端，进入同一个仓库，就可以查看进度。先用 `cdg status{:sh}` 看整个项目：`first-run` 出现在 `Submitted Workflows` 一组，状态是 `[in-progress] [working]`；`Planning Workflows` 一组里的 `untitled_dag.yaml` 就是初始化生成的那个模板。
+
+想看工作流里每个任务的情况，运行：
+
+```bash title="Terminal"
+cdg dag status first-run --watch
+```
+
+任务 1 执行期间，看板是这样的：
+
+```bash title="Terminal"
+[TZ: +08:00] 2026-10-08 10:02:15
+
+Workflow: .codedag/dags/first-run.yaml
+  Phase: 📤 submitted
+  Queue Position: 1
+  Status: 🟢 in-progress
+  Substatus: working
+
+Submitted Tasks (2):
+  🟢 [in-progress] [working]  Task 1: 分析最近一周的 Agent 对话
+  🔘 [pending]     [blocked]  Task 2: 审查并重写报告
+
+Progress: 0/2 tasks completed (0%)
+```
+
+每个任务一行，先是状态，再是子状态。`[in-progress] [working]` 表示任务 Agent 正在工作；`[pending] [blocked]` 表示任务在等上游，任务 2 要等任务 1 完成并被接受之后才会启动。任务 1 做完时，状态先变成 `done`，随即被自动接受，移到看板下方的 `Reviewed Tasks` 一组，显示为 `[auto-accepted]`；紧接着任务 2 变成 `[in-progress] [working]`。`--watch` 会一直刷新，直到工作流结束。看板上其他状态的含义见[状态含义](/zh/docs/reference/states)。
+
+如果第 3 步没有加 `--attach`，或者已经按 Ctrl+C 离开了日志，可以用 `cdg dag logs first-run -f{:sh}` 重新跟随日志。
+
+想直接看任务 Agent 自己的界面，可以在真实终端里运行 `cdg task view 1 -w first-run{:sh}` 进入它的会话，看完按 Ctrl+C 退出，任务会继续执行；什么时候适合这样介入，见[选择观察与修改方式](/zh/docs/guides/intervene-and-control#choose-intervention)。任务停下来等你应答时，也是用这条命令进入会话作答。停下期间看板上仍显示 `[in-progress] [working]`，怎样分辨见[怎样判断它是不是卡住了](/zh/docs/guides/run-and-monitor#is-it-stuck)。
+
+## 5. 读结果
+
+两个任务都完成后，工作流被自动接受。如果第 3 步的终端还在跟随日志，它会随之结束，最后一行是：
+
+```bash title="Terminal"
+✔ Workflow auto-accepted: .codedag/dags/first-run.yaml
+```
+
+两份报告各自写好时，已经在你的默认浏览器里打开：先是任务 1 的第一版，然后是任务 2 的重写版。文件都在 `docs/codedag-reports/run-1/` 下；以前运行过这个教程的话，看序号最大的那个目录：
+
+- `workflow-review.html`：任务 1 写的报告。
+- `workflow-review-comments.md`：任务 2 的审查意见。
+- `workflow-review-v2.html`：任务 2 重写后的报告。
+
+如果浏览器没有打开，比如这台电脑没有图形界面，任务会按 prompt 里的兜底要求，在同一目录另写一份同名的 `.md` 文件，可以直接在终端或编辑器里读。
+
+建议先读审查意见，再读重写版。审查意见指出了第一版哪里证据不足或判断有误，带着它读 v2，更容易看出每处改动的依据。
+
+报告第 2 部分的每个场景都附有一份工作流文件，第一份直接展开，其余的点击后展开，都可以一键复制。想试其中一个，把它存成 `.codedag/dags/` 下的 YAML 文件，先用 `cdg dag validate{:sh}` 校验，通过后再提交。这些文件由 Agent 生成，提交之前先读一遍它的 prompt 和权限模式。
+
+这些文件没有被提交。共享工作区模式下，任务的产出直接留在你的工作目录里，你原来未提交的改动保持原样。要不要提交由你决定。报告里可能概括了你其他项目的对话，提交或分享之前先通读一遍。
+
+## 你刚刚经历了什么
+
+- **每个任务都是一个全新的会话。** 任务 2 的 Agent 启动时，对任务 1 做过什么一无所知，prompt 是它收到的第一条消息。所以 prompt 要写到一个陌生的会话也能独立完成工作；为什么这样设计，见[任务与会话](/zh/docs/concepts/tasks-and-sessions)。
+- **任务之间靠仓库里的文件传递信息。** 任务 1 把结论写进 `workflow-review.html`，任务 2 的 prompt 指名去读它，而 `dependencies: [1]` 保证读的时候文件已经写好。prompt 里约定的文件路径，就是任务之间的接口。
+- **任务完成后默认自动接受，工作流继续执行。** 任务 1 一完成就被接受，任务 2 随即启动，最后整个工作流也被自动接受，这几步都不需要你操作。想在某个任务之后停下来先看结果，可以关掉那里的自动接受，见[自动接受](/zh/docs/concepts/review-gates#auto-accept)。
+
+## 下一步
+
+- [第二个工作流：让它改代码](/zh/docs/get-started/second-workflow)：用默认的隔离分支模式并行完成两个待办，看到任务分支、自动合并和集成分支。
+- [让 Agent 帮你编排](/zh/docs/get-started/let-your-agent-orchestrate)：把目标交给装了 CodeDAG Guide 插件的 Claude Code 或 Codex，由它写工作流、提交并跟踪。
+- [工作原理](/zh/docs/concepts/how-it-works)：工作流、队列、状态与项目如何组织在一起。

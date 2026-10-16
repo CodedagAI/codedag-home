@@ -1,0 +1,191 @@
+---
+title: 混合使用 Claude Code 与 Codex
+description: 在同一个工作流里让 Claude Code 与 Codex 分工或互相检查，以及混用时要注意的配置。
+icon: Blend
+---
+
+工作流里的每个任务都可以用 `agent` 字段单独指定由 Claude Code 还是 Codex 执行，所以同一个工作流既可以让两家 Agent 分工，也可以让一家检查另一家的结果。下面的内容假定你的电脑上两家都已安装，并且都能正常使用。
+
+## 为什么要混用 [#why]
+
+两家模型的判断习惯不同，看同一份代码时漏掉的往往不是同一处问题。让一家检查另一家的结果，或者两家各做一遍再比较，能发现只用一家时漏掉的问题；一家做不好或拒绝执行的任务，也可以换另一家来做。两家的用量限额也各算各的，一家撞上限额时，交给另一家的任务还能继续，见[两家的用量限额互不影响](#usage-limits)。
+
+## 三种分工方式 [#patterns]
+
+常用的分工方式有三种，区别在于第二家 Agent 扮演什么角色：检查并修复另一家的结果，和另一家把同一件事各做一遍，或者只接手更适合它的那部分任务。前两种用来互相核查，第三种用来各用所长。
+
+下面的示例都是完整的工作流文件，可以直接保存到 `.codedag/dags/` 中运行。为了突出分工，其中的 prompt 写得比较简短，实际使用时可以按[拆分任务与编写 prompt 中的结构](/zh/docs/guides/designing-tasks-and-prompts#prompt-structure)写完整。
+
+### 一家做完，另一家检查并修复 [#review-and-fix]
+
+最常见的方式是让一家完成任务，下一个任务交给另一家审查并修复，需要时再交回第一家复核，每一步检查都由没有写上一步代码的那一家来做。下面的工作流先由 Codex 重构一个过长的函数，再由 Claude Code 审查并修复这次重构，最后由 Codex 复核 Claude Code 的修复：
+
+```yaml title=".codedag/dags/refactor-review.yaml"
+tasks:
+  - id: 1
+    title: 重构一个过长的函数
+    agent: codex
+    mode: yolo
+    prompt: |
+      找出项目中最长、最难读懂的一个函数，在不改变行为的前提下重构它：先补充覆盖它现有行为的测试，再动手重构，最后运行测试确认全部通过。
+      把选了哪个函数、为什么选它、做了哪些改动，写到 docs/reviews/refactor.md。
+
+  - id: 2
+    title: 审查并修复重构
+    dependencies: [1]
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      上一个任务重构了一个函数，说明见 docs/reviews/refactor.md。
+      运行 git diff main...HEAD 查看它的全部改动，检查重构是否改变了原有行为、新增的测试能否发现行为变化、代码是否真的更易读。
+      修复确认存在的问题，运行测试确认全部通过；把发现的问题和处理方式追加到 docs/reviews/refactor.md 的“审查与修复”一节。
+
+  - id: 3
+    title: 复核修复
+    dependencies: [2]
+    agent: codex
+    mode: yolo
+    prompt: |
+      阅读 docs/reviews/refactor.md 的“审查与修复”一节，那是另一个 Agent 对这次重构的审查和修复。
+      运行 git diff main...HEAD 查看目前的全部改动，逐条确认修复是否正确、完整，有没有引入新问题；修复不当的直接改正。
+      运行测试确认全部通过，把复核结论追加到同一文件的“复核”一节。
+```
+
+三个任务先后执行，使用默认的隔离分支模式，只有主仓库一个工作区也能运行。下游开始之前，上游的改动已经以提交的形式合并进它的分支，所以审查任务用 `git diff main...HEAD` 就能看到本次工作流开始以来的全部改动；工作流不是从 `main` 开始时，把 `main` 换成开始时所在的分支。
+
+审查的发现和处理都写进 `docs/reviews/refactor.md`，下一家从这个文件读到上一家的结论（见[把结论传给下游](/zh/docs/guides/designing-tasks-and-prompts#pass-results)）。没有发现问题时也要写下结论，否则下游无从得知；而且在隔离分支模式下，没有留下任何改动的任务[不会被自动接受](/zh/docs/concepts/review-gates#zero-output)，会停下来等你审核。
+
+这种方式在完成工作的任务之外只多出检查的任务，是互相核查中成本最低的做法，适合实现功能、修复缺陷、重构代码这类写完就要检查的工作。它的局限在于审查者会顺手修掉自己认定的问题，其中不成立的问题也可能被“修”掉，后一家的复核就是为了发现这类改动。希望每个问题先经过另一家判断再动手时，可以把检查和修复拆成两个任务：检查任务只把问题列成清单、不改代码，修复任务交给另一家，逐条判断问题是否成立，只修复成立的那些。要检查的阶段更多时，沿着链条继续交替即可。
+
+交替检查仍然代替不了你最后的把关。CodeDAG 以 Agent 结束工作作为任务完成的依据，不读检查的结论，复核任务即使没能修好、最后放弃，也会变为 `done`，默认情况下随即被自动接受（见[验证节点](/zh/docs/concepts/review-gates#verification-task)）。想在结果交出之前亲自看一眼，给最后一个任务写上 `autoAccepted: none`，审核的做法见[审核任务与工作流](/zh/docs/guides/review-tasks)。
+
+### 两家各做一遍，再综合 [#dual-path]
+
+想尽量不漏掉问题时，让两家把同一件事各做一遍、互不参考，再由一个依赖两者的任务核实、去重、合并。下面的工作流让两家分别审查最近一次提交，最后综合成一份问题清单；把审查范围换成你要审查的提交区间或目录，就能用在自己的审查上：
+
+```yaml title=".codedag/dags/cross-review.yaml"
+executionMode: shared-workspace   # 三个任务都只写报告文件，不需要分支
+maxConcurrency: 2                 # 让两路审查同时执行
+
+tasks:
+  - id: 1
+    title: 审查最近一次提交（Claude Code）
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      审查最近一次提交引入的改动（用 git show HEAD 查看），找出缺陷、遗漏的边界情况和难以维护的写法。
+      每个问题写明位置、原因和修改建议，写到 docs/reviews/review-claude.md（已存在时直接覆盖）。
+      独立完成审查，不阅读 docs/reviews/ 下的其他文件。只读代码，不运行测试，不修改其他已有文件。
+
+  - id: 2
+    title: 审查最近一次提交（Codex）
+    agent: codex
+    mode: yolo
+    prompt: |
+      审查最近一次提交引入的改动（用 git show HEAD 查看），找出缺陷、遗漏的边界情况和难以维护的写法。
+      每个问题写明位置、原因和修改建议，写到 docs/reviews/review-codex.md（已存在时直接覆盖）。
+      独立完成审查，不阅读 docs/reviews/ 下的其他文件。只读代码，不运行测试，不修改其他已有文件。
+
+  - id: 3
+    title: 综合两份审查意见
+    dependencies: [1, 2]
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      docs/reviews/review-claude.md 和 docs/reviews/review-codex.md 是两个 Agent 对同一次提交的独立审查。
+      对照代码逐条核实：合并重复的问题，删去不成立的问题，保留两份各自独有的发现。
+      把结果写到 docs/reviews/review.md，每条注明出自哪一份，或两份都提到。只写这一个文件（已存在时直接覆盖）。
+```
+
+两个审查任务的 prompt 只有输出路径不同，各写各的文件，两路的结果才不会互相覆盖。综合任务不只是把两份清单拼在一起，还要对照代码逐条核实，因为两家都可能报出不成立的问题；它交给哪一家都可以，选你更信任的那一家，需要时再用 `model` 给它指定更强的模型。
+
+这个例子用的是[共享工作区模式](/zh/docs/concepts/workspaces-and-branches#execution-modes)。三个任务都只写报告文件，用不着分支和提交；两路审查也不需要副本就能同时执行，此时同时执行的任务数只由 `maxConcurrency` 决定，而项目设置里的默认值在没有副本时是 1，所以在工作流里写成 2。提交时 CodeDAG 会提示 `Non-isolated concurrency mode.`，提醒你同时执行的任务写入不再相互隔离；这里两路各写各的文件，不受影响。两路在同一个目录里工作，能看到彼此正在写的文件，所以 prompt 要求它们不读 `docs/reviews/` 下的其他文件，以保持独立；也要求它们不运行测试，免得两边的构建和测试在同一个目录里互相干扰。
+
+两路都要修改代码时，改用默认的隔离分支模式：两路在各自的分支上工作，天然互不可见，综合任务开始之前，两路的改动会先合并进它的分支。要让两路同时执行，至少需要两个工作区，准备方法见[并行执行与工作区](/zh/docs/guides/parallel-workspaces)。
+
+同样的工作要做两遍，所以这种方式适合漏掉问题代价大的场合，例如合并前的重要审查、安全检查和疑难缺陷的原因分析；也可以让两家各写一版方案，再由综合任务比较两版，择优或合成一版。
+
+### 按任务需要分配 [#by-task]
+
+不需要互相核查时，混用也可以只是把每个任务交给更适合它的那一家。下面的工作流由 Claude Code 制定方案、Codex 按方案实现、Claude Code 写变更说明，这样的分配只是示意：
+
+```yaml title=".codedag/dags/todo-fix.yaml"
+tasks:
+  - id: 1
+    title: 制定方案
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      在项目中找出一个最值得处理、改动范围又小的待办（TODO 或 FIXME 注释）；找不到时，选一处改动很小的改进。
+      把方案写到 docs/plans/todo.md：要改什么、涉及哪些文件、怎样验证。只写方案，不改代码。
+
+  - id: 2
+    title: 按方案实现
+    dependencies: [1]
+    agent: codex
+    mode: yolo
+    prompt: |
+      按 docs/plans/todo.md，先写出最小的测试，再实现，运行测试确认全部通过。不修改方案文件。
+
+  - id: 3
+    title: 写变更说明
+    dependencies: [2]
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      运行 git diff main...HEAD 查看本次的全部改动，对照 docs/plans/todo.md，
+      写一份给代码审查者看的变更说明到 docs/plans/todo-pr.md：改了什么、为什么这样改、怎样验证。
+```
+
+一个任务交给哪一家，依据应当来自你自己的项目，而不是固定的规则。常见的考虑有这几条：
+
+- **配置。** 两家的技能和 MCP 服务器是分别配置的。任务要用到的技能或 MCP 服务器只在一家配好时，交给那一家。
+- **表现。** 在你的代码库里，同一类任务哪一家做得更稳，可以把同一个任务交给两家各做一次来比较。
+- **拒绝与卡住。** 一家拒绝执行或反复做不好的任务，换另一家来做。例如安全审查中描述攻击路径的内容，可能被其中一家的安全策略拦下。
+- **用量。** 哪一家的用量限额余量多，就多分一些任务给它。
+
+把任务换给另一家时，要改的不只是 `agent`，`mode` 也要换成那一家的写法，见[每个任务都写明 agent 与 mode](#agent-and-mode)。
+
+## 每个任务都写明 agent 与 mode [#agent-and-mode]
+
+混用的工作流里，每个任务都写明 `agent` 和 `mode`，文件本身就说清了每个任务由谁、以什么授权执行。两家的 `mode` 写法不同，校验会按任务实际使用的 Agent 检查，一家的写法用在另一家的任务上就会失败，例如给 Codex 任务写 `bypassPermissions`，校验会报 `Invalid codex mode 'bypassPermissions'`，并列出 Codex 能写的简写和键。两家都接受的只有两个简写：`yolo` 在两家都表示完全授权，`auto` 在两家都表示把审批交给 Agent 一侧的自动审查，只是 Claude Code 的 `auto` 少数情况仍会停下请你批准。两家各自怎么写、无人值守时选哪一档，见 [Claude Code 的写法](/zh/docs/guides/agents-and-permission-modes#claude-code)与 [Codex 的写法](/zh/docs/guides/agents-and-permission-modes#codex)。
+
+只写 `mode`、不写 `agent` 的任务交给项目的默认 Agent，换到默认 Agent 不同的机器上，就会改由另一家执行；除非写的是 `yolo` 或 `auto` 这两个两家通用的简写，原来的 `mode` 也无法再通过校验。
+
+## 混用前的准备 [#prerequisites]
+
+混用前要确认两件事：这个项目没有被限制成只能用一家，两家读得到同一套项目规则。
+
+项目默认不限制用哪几家 Agent，初始化之后才装上的那一家，不用改任何设置就能写进任务和 `mergeConflictAgent`。只有项目设置里写了 `availableAgents` 时，可用的 Agent 才受它限制，这个字段表示你或团队有意设下的限制。工作流用到被它挡住的 Agent 时，校验会报错，并指出这个字段写在哪个文件：按提示把要用的 Agent 加进那个文件的 `availableAgents`，不再需要这道限制时把整个字段删掉，见项目设置的 [`availableAgents`](/zh/docs/reference/settings#available-agents)。
+
+另一件事是，两家读取的项目规则文件不同。Codex 读 `AGENTS.md`；Claude Code 以 `CLAUDE.md` 为准，项目里有 `CLAUDE.md` 时不会直接读 `AGENTS.md`。想让两家遵守同一套规则，常见的做法是把规则写在 `AGENTS.md` 里，再在 `CLAUDE.md` 中用 `@AGENTS.md` 引用它，细节见 Claude Code 的[记忆文档](https://code.claude.com/docs/en/memory#agents-md)和 Codex 的 [AGENTS.md 文档](https://learn.chatgpt.com/docs/agent-configuration/agents-md)。
+
+## 合并冲突交给谁 [#merge-conflicts]
+
+在隔离分支模式下，并行的几路都修改了代码时，它们的改动合到一起可能发生冲突，CodeDAG 会另开一个 Agent 会话来解决（见[汇聚节点的合并与冲突](/zh/docs/concepts/workspaces-and-branches#merge-and-conflicts)）。不写 `mergeConflictAgent` 时，由哪一家来解决取决于冲突发生在哪里：
+
+- **汇聚任务开始前合并上游结果时**，由这个汇聚任务自己的 Agent 用它的 `model` 解决。比如一个 Codex 任务依赖一个 Claude Code 任务和一个 Codex 任务，两路的冲突就由 Codex 来解决。
+- **全部任务结束、结果合并到集成分支时**，由项目的默认 Agent 解决，取的是提交这个工作流时生效的那一个。
+
+所以在混用的工作流里，冲突可能由不同的 Agent 解决，而且未必是你想交给的那一家。想把所有合并冲突固定交给一家，就在工作流文件顶层写上 `mergeConflictAgent`：
+
+```yaml title="yaml"
+mergeConflictAgent:    # 所有合并冲突都交给 Codex
+  agent: codex
+```
+
+写了之后，两处冲突都由它解决，`model` 也用它的，不沿用任务的。`mode` 不必写：冲突会话不沿用任务的 `mode`，没写时一律按完全授权运行，本来就不会停下等人；它没有应答审批的入口，写成会请你批准的档位，反倒会让它停在审批上。字段的完整说明见 [`mergeConflictAgent`](/zh/docs/reference/workflow-file#merge-conflict-agent)。
+
+## 两家的用量限额互不影响 [#usage-limits]
+
+Claude Code 和 Codex 的用量限额各算各的，一家撞上限额，只影响交给它的任务。受限的任务会停在 `on-hold`，之后开始的同一家任务也会很快停下；交给另一家的任务，只要不依赖停下的任务，就照常执行。
+
+所以在并行的几路之间把任务分给两家，一家受限时，另一家的那一路还能继续推进；而在两家交替的链条上，一家停下，后面的任务不论交给谁，都要等它恢复。撞上限额之后怎样只停下受影响的任务、在限额重置后恢复，见[Agent 用量限额或速率限制](/zh/docs/troubleshooting/troubleshooting#agent-usage-limits)；怎样结合并发数安排用量，见[并发与限额](/zh/docs/account/cost-control#concurrency)。
+
+这里说的限额是两家 Agent 各自账号的用量限制，与 CodeDAG 额度无关：无论任务交给哪一家，都按每个任务 1 点消耗 CodeDAG 额度。
+
+## 相关
+
+- [选择 Agent、模型与权限模式](/zh/docs/guides/agents-and-permission-modes)：为每个任务选择授权档，以及 Claude Code 与 Codex 各自的写法。
+- [审核任务与工作流](/zh/docs/guides/review-tasks)：在交叉检查之后亲自查看结果，接受或提出修改要求。
+- [控制成本](/zh/docs/account/cost-control)：估算工作流的 CodeDAG 额度与 Agent 用量，按任务选择模型。

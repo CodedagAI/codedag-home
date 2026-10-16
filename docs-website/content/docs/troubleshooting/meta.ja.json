@@ -1,0 +1,9 @@
+{
+  "$schema": "../../../.source/json-schema/docs.meta.json",
+  "title": "トラブルシューティングと FAQ",
+  "icon": "LifeBuoy",
+  "pages": [
+    "troubleshooting",
+    "faq"
+  ]
+}

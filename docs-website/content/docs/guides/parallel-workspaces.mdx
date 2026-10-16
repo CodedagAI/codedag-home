@@ -1,0 +1,160 @@
+---
+title: Run in Parallel with Workspaces
+description: Set up worktree or clone replicas and register them with CodeDAG so that several tasks can run at once, and keep the primary repository free for your own development if you like.
+icon: Copy
+---
+
+In the default isolated-branches mode, each running task has a [workspace](/docs/concepts/workspaces-and-branches#workspaces) to itself, so running several tasks at once takes that many workspaces. The primary repository counts as one, and the rest are replicas that you set up. You create each replica yourself with git worktree or git clone, install its dependencies, and then run `cdg init{:sh}` to register it. CodeDAG doesn't create replicas for you, and it doesn't detect new ones on its own. Tasks that don't compile code or run tests can use [shared-workspace mode](/docs/concepts/workspaces-and-branches#execution-modes) instead, which needs no replicas.
+
+## Choose worktrees or clones [#worktree-or-clone]
+
+You can create replicas with git worktree or with git clone, but a project can use only one of the two. Worktrees are less work for most projects. They share the primary repository's Git data, so task branches are visible from every workspace.
+
+Clones are for projects where worktrees aren't a good fit, such as projects with submodules, for which the [Git documentation](https://git-scm.com/docs/git-worktree#_bugs) advises against multiple worktree checkouts. Clones differ from worktrees in two ways:
+
+- **A task branch stays in the clone that ran the task.** Each clone has its own branches. CodeDAG passes task results between clones, but when a task runs in a clone, its task branch isn't visible in the primary repository.
+- **Each workspace gains a remote named `codedag-mirror`.** It appears in the primary repository and in every clone once a workflow starts running. It points to a sync repository that CodeDAG maintains on your machine to pass branches between clones, and it has nothing to do with your own remote repository. Leave it as it is. Changing its URL makes tasks stop at `on-hold`. To fix that, see [Sync repository unavailable](/docs/troubleshooting/troubleshooting#mirror-unavailable).
+
+## Set up replicas [#prepare-replicas]
+
+Create the replicas with Git ahead of time, then treat each one like a freshly cloned copy of the project: install its dependencies and copy over your local configuration, so that tasks can run in it properly. How many you need depends on the largest number of tasks in your workflow that can start at the same time. The primary repository counts as one workspace, so to run three tasks at once, set up two replicas. If you plan to keep the primary repository for yourself (see [Keep developing while a workflow runs](#keep-main-repo)), set up three. Running more tasks at once also uses up your agent usage faster. See [Concurrency and usage limits](/docs/account/cost-control#concurrency).
+
+The steps below use worktrees as the example and set up two replicas next to the primary repository. You can also hand both steps to Claude Code or Codex. Just tell it how many replicas you want, where to put them, how to install dependencies, and which files to copy.
+
+### 1. Create the replicas
+
+From the root of the primary repository, run the following commands, replacing `my-app` with the name of your project directory:
+
+```bash title="Terminal"
+git worktree add ../my-app-wt-1 -b wt-1
+git worktree add ../my-app-wt-2 -b wt-2
+```
+
+Each worktree checks out a placeholder branch of its own. When a task starts, CodeDAG switches the worktree to the task branch. Put replicas outside the primary repository's directory. A replica inside it shows up as an untracked directory in the primary repository's `git status{:sh}`, so CodeDAG considers the primary repository dirty, and any task assigned to the primary repository stops at `on-hold`.
+
+To use clones instead, run `git clone . ../my-app-clone-1{:sh}` from the root of the primary repository, once for each replica.
+
+### 2. Get each replica ready to run the project
+
+Install dependencies in each replica as you normally would, such as `node_modules` or a Python virtual environment, and copy over uncommitted local configuration files such as `.env`. Task agents need them to build and run tests in the replica.
+
+When that's done, run `git status{:sh}` once in each replica to confirm that it's clean. CodeDAG switches branches only in a clean workspace. If a dependency directory or a copied file isn't ignored by `.gitignore`, it counts as an uncommitted change, and tasks assigned to that replica stop at `on-hold`.
+
+## Register the replicas with CodeDAG [#register]
+
+Once the replicas are ready, run `cdg init{:sh}` from the root of the primary repository to register them as workspaces for this project. CodeDAG doesn't detect added or removed replicas on its own, so run it again every time you add or remove one.
+
+To register them interactively, run:
+
+```bash title="Terminal"
+cdg init
+```
+
+The first question, `Select your repository setup method`, determines the type of replica:
+
+- For worktrees, choose `1. I have set up git worktrees for this project`. The command then lists the worktrees other than the primary repository and lets you select the ones to register, so you don't type any paths. Worktrees that Claude Code and Codex created for their own sessions aren't selected by default, and all the others are. CodeDAG runs tasks in every selected worktree and switches its branch, so press Space to deselect any that you don't want to hand over. See [Select the worktrees to register](/docs/reference/cli/init#select-worktrees).
+- For clones, choose `2. I have cloned this repository into multiple directories`. Confirm the primary repository's path first, then enter the path of each clone, separated by spaces.
+
+When it finishes, the top of the output lists the registered replicas under `Associated Replica Repositories`.
+
+To register them non-interactively, pass the paths as options. The syntax is the same for worktrees and clones. Use absolute paths throughout:
+
+```bash title="Terminal"
+cdg init --primary-workdir /Users/you/my-app --replica-workdirs /Users/you/my-app-wt-1 /Users/you/my-app-wt-2
+```
+
+Each run replaces the whole set of registered replicas with the list you give, so include every replica you still want to use. For the other options, see the [options in Initialize a Project](/docs/reference/cli/init#options).
+
+The concurrency limit, `maxConcurrency`, has to keep up with the number of workspaces, or tasks won't actually run at the same time. The first time you initialize, `cdg init{:sh}` sets it to 1 plus the number of replicas. If the project was already initialized and you kept its local settings, for example after running the quickstart, `cdg init{:sh}` notices that the concurrency limit there is lower than the number of workspaces and asks `Update maxConcurrency to 3?`. The default is Yes, so press Enter. When you run it non-interactively, it prints a warning instead of asking. Add `--max-concurrency 3` to the command to write the value directly. For how existing files are handled when you reinitialize, see [Reinitialize and keep existing configuration](/docs/reference/cli/init#reinitialize).
+
+To remove a replica, delete it with `git worktree remove{:sh}` first, then run `cdg init{:sh}` again to update the registration. A deleted directory that's still registered doesn't stop a workflow. For each missing directory the workflow would use, validation gives a warning that says the workflow will run in the remaining workspaces and suggests reinitializing. Confirm the warnings when you submit. Validation reports an error only when every workspace directory the workflow would use is gone. A workflow that's already submitted stops at `on-hold` in that case. Run `cdg init{:sh}` again, then let it continue with `cdg dag recover{:sh}`.
+
+## What determines how many tasks run at once [#concurrency]
+
+Two things limit how many tasks run at once: the concurrency limit, `maxConcurrency`, and the number of available workspaces. The smaller of the two applies. So with a concurrency limit of 4 and only two workspaces, at most two tasks run at once.
+
+The concurrency limit comes from the first of these sources that has a value:
+
+| Order | Source | Notes |
+|---|---|---|
+| 1 | `maxConcurrency` at the top level of the workflow file | Applies to this workflow only. |
+| 2 | `maxConcurrency` in project settings | Used when the workflow doesn't set it. `cdg init{:sh}` writes it to the local settings, `.codedag/local/settings.local.jsonc`. You can also set it in the shared settings, `.codedag/settings.jsonc`, and when both have it, the local settings win. See [`maxConcurrency`](/docs/reference/settings#max-concurrency) in Project Settings. |
+| 3 | The default, 1 | When neither of the above sets it, tasks run one at a time. |
+
+Project settings are read at submission, so a changed setting applies only to workflows you submit afterward.
+
+The available workspaces are the registered primary repository and replicas, minus any that the workflow excludes with `excludeWorkspaces`. In a workflow that uses isolated-branches mode, `maxConcurrency: 0` means no separate limit: as many tasks run at once as there are available workspaces, and you don't have to change it when you add or remove replicas later. Shared-workspace mode is the exception. All tasks run in the same workspace, so the number that run at once depends on `maxConcurrency` alone, and setting it to 0 lets every task that's ready start at once. See [`maxConcurrency`](/docs/reference/workflow-file#max-concurrency).
+
+For example, suppose a project has registered the primary repository and two worktrees, for three workspaces in all. The `four-notes` workflow has four tasks that don't depend on one another, and it sets `maxConcurrency: 4`. Because the tasks aren't connected, validation gives a `disconnected-dag` warning that reminds you to check for a missing dependency. Once you've confirmed that nothing is missing, answer Yes to `Submit anyway?` when you submit. After submission, `cdg dag status four-notes{:sh}` shows:
+
+```bash title="Terminal"
+[TZ: -04:00] 2026-09-30 11:24:31
+
+Workflow: .codedag/dags/four-notes.yaml
+  Phase: 📤 submitted
+  Queue Position: 1
+  Status: 🟢 in-progress
+  Substatus: working
+
+Submitted Tasks (4):
+  🟢 [in-progress] [working]  Task 1: Write note one
+  🟢 [in-progress] [working]  Task 2: Write note two
+  🟢 [in-progress] [working]  Task 3: Write note three
+  🔘 [pending]     [blocked]  Task 4: Write note four
+
+Progress: 0/4 tasks completed (0%)
+```
+
+The first three tasks run at the same time, each in its own workspace. Task 4 has no dependencies, yet it shows as `[pending] [blocked]` because it's waiting for a workspace to free up. When task 1 finishes and is auto-accepted, the primary repository becomes free, and task 4 starts there right away.
+
+A task holds its workspace from the time it starts until its review is finished. A task sitting at `done` waiting for your review still holds its workspace, and so does one that's paused, killed, or stopped at `on-hold`. Until those tasks are finished, the tasks behind them have to wait. The more nodes in a workflow that are set for manual review, the more it matters to review promptly or to set up an extra replica.
+
+## Keep developing while a workflow runs [#keep-main-repo]
+
+Add `excludeWorkspaces: ["."]` at the top level of the workflow file to exclude the primary repository. Tasks then run only in replicas, so the project needs at least one registered replica. The primary repository isn't switched to another branch, and uncommitted changes you leave in it don't hold up the workflow, so you can keep developing there as usual while you wait for the results.
+
+```yaml title=".codedag/dags/my-workflow.yaml"
+excludeWorkspaces: ["."]   # Don't use the primary repository; tasks run only in replicas
+baseRef: main              # Start from the commit main points to when the workflow starts running
+# Write tasks as usual
+```
+
+When you exclude the primary repository, it's best to set `baseRef` as well. Without `baseRef`, the base is the commit checked out in the first replica at the moment the workflow starts. After a replica has run tasks, it's left on some task branch or integration branch, so the base ends up there instead of on `main`, where you'd expect it.
+
+`baseRef` isn't resolved until the workflow starts running. With `baseRef: main`, the base is the commit that `main` points to at that moment, whichever branch you've switched to in the primary repository. Anything you commit to `main` while the workflow waits in the queue is included too. To pin the base to a specific version, use a tag or a commit ID. For the syntax, see [`baseRef`](/docs/reference/workflow-file#base-ref). With clones, `baseRef` is resolved in the first clone, and `main` means that clone's own `main`, so update it to the commit you want in that clone first.
+
+After the workflow finishes, the integration branch is created in the first replica, and that replica has it checked out. With worktrees, the branch is visible in the primary repository as well, and you can merge it by running `git merge cdg/<workflow-name>/integration{:sh}` right there. With clones, the branch is in that clone, and you have to fetch it from there. For how to check and merge the result, see [Check the results on the integration branch](/docs/guides/finish-and-merge#inspect) and [Merge into the main branch](/docs/guides/finish-and-merge#merge).
+
+You can also do the reverse: keep one replica for yourself and let the primary repository run tasks as usual. Put that replica's path in `excludeWorkspaces`. Relative paths are resolved from the root of the primary repository, for example `excludeWorkspaces: ["../my-app-wt-2"]`. For the syntax, see [`excludeWorkspaces`](/docs/reference/workflow-file#exclude-workspaces).
+
+## Run commands from a replica directory [#run-from-replica]
+
+Whichever registered workspace you run `cdg` in, it acts on the same project. Workflow names resolve to the primary repository's `.codedag/dags/`, submissions go into the same queue, and you see the same status. Which workspace a task runs in and which commit it starts from depend only on the workflow's configuration, not on the directory you run the command from. When you submit from a replica, the command prints an extra notice that begins with `Warning: You submitted this workflow from a registered replica/worktree.` to remind you of exactly that.
+
+Replicas have no `.codedag/` directory, so edit workflow files in the primary repository's `.codedag/dags/`. A replica that isn't registered yet doesn't belong to any project, and commands you run in it report `Cannot find initialized CodeDAG project.` Go back to the primary repository and run `cdg init{:sh}` again, as described in [Register the replicas with CodeDAG](#register).
+
+`cdg init{:sh}` acts on the same project too. If you run it in a registered replica, it still initializes the project that the replica belongs to, and the replica doesn't get a `.codedag/` of its own. See [Where to run it](/docs/reference/cli/init#where-to-run).
+
+## Common questions
+
+### Concurrency stays at 1
+
+There are three common causes: only the primary repository is registered; you added replicas and reinitialized but answered No when asked whether to update the concurrency limit, so `maxConcurrency` in your local settings is still 1; or the tasks depend on one another and couldn't run at the same time anyway. For the first two, follow [Register the replicas with CodeDAG](#register). For the full troubleshooting sequence, see [Concurrency is only 1](/docs/troubleshooting/troubleshooting#concurrency-one).
+
+### The primary repository was switched to another branch
+
+That's expected in isolated-branches mode. The primary repository is a workspace too. It's switched to task branches during the run and left on the integration branch when the workflow finishes. Your main branch itself doesn't change. See [Where the repository is left after a workflow finishes](/docs/guides/finish-and-merge#where-repo-stays). If you don't want the primary repository to take part in the run, exclude it as described in [Keep developing while a workflow runs](#keep-main-repo).
+
+### A task's tests fail in a replica but pass in the primary repository
+
+Most likely the replica is missing dependencies or local configuration files. Follow step 2 of [Set up replicas](#prepare-replicas): install the dependencies and copy the configuration in each replica, and confirm that `git status{:sh}` is clean. If the task is still running, you can then enter its session with `cdg task view{:sh}` and have it run the tests again. See [Enter a session, make changes, and exit](/docs/guides/intervene-and-control#task-view). If the task is already done and waiting for review, you can [have it keep working on the existing result](/docs/guides/review-tasks#request-changes).
+
+### Do I need to merge parallel tasks' branches for the downstream task myself?
+
+No. In isolated-branches mode, before a downstream task starts, CodeDAG automatically merges the accepted results of the upstream tasks it depends on into its task branch, and it hands any conflicts to an agent to resolve first. So you don't need to add a separate merge task to the workflow. See [Merges and conflicts at join nodes](/docs/concepts/workspaces-and-branches#merge-and-conflicts).
+
+## Related
+
+- [Workspaces and Branches](/docs/concepts/workspaces-and-branches): Why workspaces are a prerequisite for running in parallel, and how task branches and the integration branch are organized.
+- [Second Workflow: Let It Change Code](/docs/get-started/second-workflow): A complete walkthrough of running two tasks in parallel with the primary repository plus one worktree.
+- [Initialize a Project](/docs/reference/cli/init): All the options for `cdg init` and the rules for reinitializing.

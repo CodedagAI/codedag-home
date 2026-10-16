@@ -1,0 +1,138 @@
+---
+title: 干预与控制
+description: 工作流运行时怎样查看现场、和任务 Agent 对话纠偏、应答审批，以及暂停、立即中断和恢复执行。
+icon: SquareTerminal
+---
+
+工作流提交之后会在后台自己推进，但你随时可以介入。想看[任务 Agent](/zh/docs/concepts/tasks-and-sessions#task-agent) 在做什么、给它补充要求，或者应答它的审批请求，用 `cdg task view{:sh}` 进入它的会话，这个会话和你平时在终端里打开的 Claude Code 或 Codex 是同一种。想让执行停下，`pause` 等任务 Agent 把手头的工作做完再停，`kill` 立即中断它；被中断的任务之后可以用 `recover` 在原来的会话里接着做。
+
+下面的命令都用 `-w <工作流>` 指明任务所在的工作流，省略时指向队首的工作流，通常就是正在执行的那一个；示例中的工作流名为 `feature`。暂停、继续、中断和恢复还可以一次作用于多个任务：在命令后写多个任务 ID，或者用任务选择器按依赖关系圈定一组任务，写法见[指定范围与批量控制](/zh/docs/reference/cli/control#control-scope)。
+
+## 选择观察与修改方式 [#choose-intervention]
+
+只想了解进展，读日志就够了；任务正在执行、想看原生现场或纠正方向，进入它的会话；任务已经完成、等你审核，想让它在现有结果上接着改，就提出修改要求。
+
+| 你想做的事 | 用什么 | 前提与特点 |
+|---|---|---|
+| 回看或跟随执行过程 | `cdg task logs <任务 ID> -w <工作流>{:sh}`，整个工作流用 `cdg dag logs <工作流>{:sh}`，用法见 [cdg dag logs 与 cdg task logs](/zh/docs/reference/cli/status-and-logs#logs) | 只读，任何环境都能用，不影响任务 |
+| 任务执行中看原生现场、随时插话纠偏或应答审批 | `cdg task view <任务 ID> -w <工作流>{:sh}`，见[进入会话、修改与退出](#task-view) | 需要真实可交互的终端，任务要已经开始 |
+| 任务完成、等待审核时，让它在现有结果上接着改 | `cdg task review request-changes <任务 ID> -w <工作流> -m "<修改要求>"{:sh}`，见[想让它在现有结果上接着改：request-changes](/zh/docs/guides/review-tasks#request-changes) | 不需要交互终端，一次交代完整要求，改完后重新进入审核 |
+
+后两种方式都能让任务 Agent 接着修改，区别在于时机和交流方式。进入会话适合执行途中的实时交流：你能看到它的每一步，可以连着发几条消息，交流完退出，任务继续执行。提出修改要求适合在任务做完之后一次说清楚：隔离分支模式下，CodeDAG 默认先把当前改动提交一次，再把你的要求交给任务 Agent。
+
+两者在各自的前提下可以互相替代。等待审核的任务也可以进入会话，向 Agent 追问它的做法，或者让它直接修改，之后再由你给出审核结论；执行中的任务也可以先中断或等它收尾，再提出修改要求。后一种做法不需要交互终端，所以在脚本或 Agent 的命令工具这类环境里，想给执行中的任务纠偏时可以改用它，写法见[对运行中的任务执行 request-changes](/zh/docs/reference/cli/review#running-request-changes)。由装了 CodeDAG Guide 的 Agent 替你操作时，它也可以借助 tmux 进入会话，见[编排 Agent 会做什么](/zh/docs/get-started/let-your-agent-orchestrate#what-it-does)。
+
+## 进入会话、修改与退出 [#task-view]
+
+在真实的终端里运行 `cdg task view{:sh}`，就能进入任务 Agent 的原生会话，观察它正在做什么，或者直接发消息纠正方向；交流完按 Ctrl+C 退出，任务会接着执行。
+
+```bash title="Terminal"
+cdg task view 2 -w feature
+```
+
+进入之后看到的就是 Claude Code 或 Codex 自己的界面，和你在终端里直接打开它时一样。你的按键原样交给 Agent，所以在里面的操作也和平时一样：输入消息、选择审批选项，或者按 Esc 打断它当前的动作，再告诉它新的要求。只有 Ctrl+C 例外，它不会传给 Agent，而是让你离开会话。
+
+这个命令需要真实可交互的终端，在脚本或 Agent 的命令工具里画面会错乱、按键也没有反应，这时可以改用[选择观察与修改方式](#choose-intervention)中的替代做法。任务也要已经开始执行：还没开始的任务没有会话可进，命令提示 `Task has not started yet.` 后直接退出。其他进不去的情况见 [task view 连不上或没反应](/zh/docs/troubleshooting/troubleshooting#task-view-problems)，命令的其他参数与会话的定位方式见[命令参考](/zh/docs/reference/cli/control#task-view)。
+
+在会话里发的消息直接交给任务 Agent，CodeDAG 不会先替你提交当前的改动。在隔离分支模式下，你插话前后的改动会在任务结束时作为这个任务的结果一起提交。如果希望留下一个分界，方便事后对比纠偏前后各改了什么，就在消息里要求它先提交，例如：
+
+```text title="提示词"
+先把当前的改动提交一次，提交说明写“调整方向前的进度”。然后不要再修改 src/legacy/ 下的文件，改为在新模块里实现同样的功能。
+```
+
+交流完要及时退出。会话连着的时候，CodeDAG 不会判定任务已经完成：即使 Agent 已经做完、停下来等待输入，任务也一直显示 `working`，依赖它的下游不会开始。你按 Ctrl+C 离开之后，任务才按正常流程结束。
+
+<Callout type="warn">离开会话请按 Ctrl+C。任务执行期间，如果在会话里输入 Agent 自己的退出命令（例如 Claude Code 的 `/exit`），结束的是任务 Agent 的会话本身，任务随即被搁置（`on-hold`），原因是 `agent-session-ended`；用 `cdg task recover{:sh}` 重新打开原来的会话之后，任务带着之前的上下文照常做完，按审核设置进入审核或被自动接受。</Callout>
+
+## 想应答一个审批 [#approval]
+
+任务 Agent 停下来等审批时，运行 `cdg task view 2 -w feature{:sh}` 进入它的会话，看清它要执行什么，用界面上提示的按键同意或拒绝，再按 Ctrl+C 退出，任务就会接着执行。Agent 向你提问、等你回答时，处理方法相同。
+
+CodeDAG 不会为“等审批”单独显示一个状态：任务仍然是 `working`，只是迟迟没有进展，日志的末尾停在 Agent 的确认界面上。怎样确认它是不是在等你，见[怎样判断它是不是卡住了](/zh/docs/guides/run-and-monitor#is-it-stuck)。
+
+这一次执行中的审批都要这样逐个应答，因为每个任务的权限模式在提交时就已经定下。想让以后的工作流不在审批上停住，在工作流文件里为任务写上合适的 `mode`，各授权档的取舍见[决定无人值守还是有人值守](/zh/docs/guides/agents-and-permission-modes#unattended-or-attended)。即使用了完全授权，Claude Code 仍会对少数操作坚持询问，见 [Agent 在等你审批或回答](/zh/docs/troubleshooting/troubleshooting#approval-waiting)。
+
+## 想暂停一下：`pause` 与 `unpause` [#pause]
+
+`pause` 不打断正在工作的任务 Agent，而是等它把手头的工作做完再停下；还没开始的任务立即暂停，不再启动。`unpause` 让暂停的任务继续。
+
+```bash title="Terminal"
+# 暂停整个工作流
+cdg dag pause feature
+# 只暂停工作流 feature 中的任务 2
+cdg task pause 2 -w feature
+```
+
+对正在执行的任务，命令会显示它进入 `draining`（排空）：
+
+```bash title="Terminal"
+Pausing task 2 in .codedag/dags/feature.yaml...
+
+Task draining: [Task 2] 实现登录接口
+  Task will pause gracefully after current step completes.
+
+→ Use 'cdg task unpause 2 -w feature' to unpause this task
+→ Use 'cdg task kill 2 -w feature' to kill this task immediately (may cause unintended side effects, requires more complex recovery)
+→ Use 'cdg task logs 2 -w feature -f' to view task logs
+→ Use 'cdg task status 2 -w feature --watch' to view task status
+```
+
+`draining` 表示暂停已经生效，正在等任务 Agent 收尾。这期间 Agent 仍在工作，仍可能修改文件；等它把当前这一轮做完停下来，任务变为 `paused`，不进入审核，下游也不开始。
+
+用 `cdg dag unpause feature{:sh}` 或 `cdg task unpause 2 -w feature{:sh}` 让暂停的任务继续；它只对被暂停的任务起作用，被中断（`killed`）或被搁置（`on-hold`）的任务要用 `recover`。继续之后怎样，取决于任务此刻的情况：
+
+- **还没开始就被暂停：** 任务回到等待，条件满足后照常启动。
+- **暂停时正在执行，已经做完这一轮、停在 `paused`：** 任务按完成处理，变为 `done` 进入审核（默认自动接受），它的下游随之开始。
+- **还在 `draining`：** 任务回到 `working`，照常完成。
+
+所以，`pause` 适合“手上的工作做完就好，但先别往下推进”的场合，例如你要离开一阵，或者想先处理别的事再让工作流继续。想让 Agent 停在半路、之后再接着做，用 [`kill`](#kill) 和 [`recover`](#recover)。
+
+## 想立刻停下：`kill` [#kill]
+
+`kill` 立即打断正在工作的任务 Agent，任务变为 `killed`。这相当于在 Agent 里按下 Esc：它当前的回复和操作被中断，但 Agent 进程和会话都保留下来，之后可以在原会话里接着做。
+
+```bash title="Terminal"
+# 中断工作流 feature 中的任务 2
+cdg task kill 2 -w feature
+# 中断整个工作流
+cdg dag kill feature
+```
+
+还没开始的任务没有可以打断的会话，`kill` 对它们的效果和暂停相同：任务变为 `paused`，不会再启动。所以用 `cdg dag kill{:sh}` 停下整个工作流时，正在执行的任务被中断，还没开始的任务也都不会再启动。
+
+`kill` 不会删除任何东西。会话里的上下文还在，Agent 已经写进工作区的改动也都留在原处，既不会回滚，也不会被提交。需要留意的是，被打断的那一步可能只做了一半，例如一条命令执行到中途，或一个文件只改了一部分；继续之前，可以先在任务的工作区里用 `git status` 和 `git diff` 看一眼。
+
+中断之后只想看看它停在哪里，用 `cdg task logs 2 -w feature{:sh}` 读日志。用 `cdg task view{:sh}` 进入被中断任务的会话时，命令会先说明进入会话需要恢复这个任务，并询问是否恢复；确认之后任务才继续执行，选择不恢复则什么都不改变，细节见[命令参考](/zh/docs/reference/cli/control#task-view)。
+
+被中断的任务不会自己继续。工作流里还有停着的任务时，这个工作流就不会结束，排在它后面的工作流也跟着一直等待；暂停的任务同样如此。要让队列继续推进，用 `recover` 恢复这些任务，或者在不再需要它们时，用审核命令 `cancel` 或 `defer` 结束它们，见[任务没有停在门禁前时](/zh/docs/guides/review-tasks#not-at-gate)。
+
+## 想恢复：`recover` [#recover]
+
+`recover` 让停下来的任务继续：被中断的任务在原会话里接着做，被暂停的任务与 `unpause` 效果相同，被搁置的任务在你处理完原因之后继续。
+
+```bash title="Terminal"
+# 恢复工作流 feature 中的任务 2
+cdg task recover 2 -w feature
+# 恢复整个工作流中所有能恢复的任务
+cdg dag recover feature
+```
+
+恢复被中断的任务时，CodeDAG 在原来的会话里向 Agent 发送一句 `continue`，它带着之前的上下文，从被打断的地方接着做，不必从头开始。用 `cdg dag kill{:sh}` 停下整个工作流之后，用 `cdg dag recover{:sh}` 一次恢复全部任务最方便。恢复不会再次消耗 CodeDAG 额度。
+
+被搁置（`on-hold`）的任务要先处理原因。用 `cdg task status 2 -w feature{:sh}` 查看输出中的 `Reason:` 行，按原因处理之后再执行 `recover`。`recover` 具体做什么取决于原因，例如重新打开意外结束的会话、重新投递没能送达的修改要求，或者让没能开始的任务重新尝试开始；原因还没有消除时，任务会再次停在 `on-hold`。各种原因的处理步骤见[任务或工作流停在 on-hold](/zh/docs/troubleshooting/troubleshooting#on-hold)。
+
+## 常见问题
+
+### 停下一个任务，为什么其他任务还是不能开始
+
+在隔离分支模式下，已经开始执行的任务会一直占着分配给它的工作区和并发名额，直到它审核结束才释放。`pause` 和 `kill` 只让它停止工作，不解除这份占用，所以其他独立的任务不会因此提前开始；命令输出会对这样的任务说明它仍占着工作区和名额。想让别的任务先跑，就让这个任务做完后审核它，或者用 `cdg task review cancel{:sh}` 或 `defer` 结束它，见[任务没有停在门禁前时](/zh/docs/guides/review-tasks#not-at-gate)。
+
+### 暂停或中断时提示 `Workflow startup billing is being committed`
+
+工作流刚轮到开始执行、CodeDAG 正在为它扣除 CodeDAG 额度时，`pause` 和 `kill` 会暂时被拒绝，并给出这条提示。这个窗口通常只有几秒，网络不畅时可能持续到约 3 分钟，稍后重试即可。
+
+## 相关
+
+- [审核任务与工作流](/zh/docs/guides/review-tasks)：任务完成后检查结果、提出修改要求或给出结论。
+- [故障排除](/zh/docs/troubleshooting/troubleshooting)：任务停在 `on-hold` 或迟迟没有进展时，按症状找到处理步骤。
+- [控制与干预](/zh/docs/reference/cli/control)：各控制命令的完整写法、作用范围，以及恢复受阻时使用的选项。

@@ -1,0 +1,179 @@
+---
+title: 控制与干预
+description: 暂停、继续、中断、恢复、cdg task view 与 cdg branch release 的写法、作用范围和使用前提。
+icon: CirclePause
+---
+
+工作流提交之后，可以用 `pause`、`unpause`、`kill` 和 `recover` 暂停、继续、中断或恢复它的执行，用 `cdg task view{:sh}` 进入某个任务的 Agent 会话。几种操作各自适合什么情况、进入会话后怎样交流，见[干预与控制](/zh/docs/guides/intervene-and-control)。最后两节只在少数情况下用到：恢复受阻时的两个确认选项，以及释放被占用分支名的 `cdg branch release{:sh}`。
+
+## 控制命令语法与适用状态 [#syntax]
+
+暂停、继续、中断、恢复这四个命令都有工作流级与任务级两种写法：工作流级对工作流中的全部任务执行同一操作，任务级只处理你指定的任务。每个命令只改变处在特定状态的任务，其余任务保持原样。
+
+| 操作 | 工作流级 | 任务级 | 作用于哪些任务 |
+|---|---|---|---|
+| 暂停 | `cdg dag pause [工作流...]{:sh}` | `cdg task pause <任务> [-w <工作流>]{:sh}` | 执行中（`working`）的任务不被打断，Agent 停下后变为 `paused`，在此之前显示为 `draining`；等待上游（`blocked`）和搁置（`on-hold`）的任务直接变为 `paused`，不再启动 |
+| 继续 | `cdg dag unpause [工作流...]{:sh}` | `cdg task unpause <任务> [-w <工作流>]{:sh}` | 还没开始就被暂停的任务回到等待，条件满足后照常启动；暂停时正在执行、已经做完当前一轮而停在 `paused` 的任务按完成处理，变为 `done` 进入审核；仍在 `draining` 的任务回到 `working`，照常完成；对搁置（`on-hold`）的任务没有作用，搁置后又被暂停的任务回到原来的搁置；`killed` 的任务不恢复，改用 `recover` |
+| 中断 | `cdg dag kill [工作流...]{:sh}` | `cdg task kill <任务> [-w <工作流>]{:sh}` | `working`、`draining` 与 `on-hold` 的任务立即中断，变为 `killed`；还没开始的 `blocked` 任务变为 `paused` |
+| 恢复 | `cdg dag recover [工作流...]{:sh}` | `cdg task recover <任务> [-w <工作流>]{:sh}` | `killed` 的 Agent 任务在原会话中继续，没有可恢复会话的重新准备并启动；`paused` 与 `draining` 的任务效果同 `unpause`；`on-hold` 的任务在你处理完搁置原因后继续 |
+
+`<任务>` 写一个或多个任务 ID，或任务选择器；工作流与任务省略时指向什么，见[指定范围与批量控制](#control-scope)。工作流级命令除工作流外没有其他参数；`cdg task kill{:sh}` 与 `cdg task recover{:sh}` 各有一个处理异常情况的选项，见[恢复受阻时使用的选项](#recovery-options)。
+
+控制命令只作用于已经提交、仍在队列中的工作流，也就是处在 `submitted` 阶段的工作流。还没提交的工作流，以及审核已经结束、离开队列的工作流，控制命令不会执行；想让审核结束的工作流重新执行，先清除审核记录再提交，见[清除审核记录与重新提交](/zh/docs/reference/cli/review#clear-and-resubmit)。队列中的工作流里，已经执行完、等待审核的 `done` 任务和已经单独审核过的任务也不受这些命令影响，`done` 任务用[审核命令](/zh/docs/reference/cli/review)处理。
+
+隔离分支模式下，已经开始执行的任务在审核之前一直占着自己的工作区和一个并发名额，暂停或中断不会把它们交还出来；命令处理完这样的任务后会输出一行占用说明。想让其他独立任务先跑，让这个任务做完后审核，或者用 `cdg task review cancel{:sh}` / `defer` 结束它。
+
+### 任务或工作流已被搁置、中断时 [#held-or-killed]
+
+- **`killed` 任务不接受 `unpause`：** 这些任务保持原样，命令输出 `Not unpaused` 并提示改用 `cdg task recover{:sh}`，退出码为 1；一次处理多个任务时，它们在结果列表中标为 `killed (not unpaused, use recover)`。
+- **启动前准备停住的任务：** 任务因启动前的准备停在 `on-hold`，或者停住之后又被 `kill` 时，处理好现场后执行 `cdg task recover{:sh}`，CodeDAG 重新做一次准备并启动一个新的 Agent 会话；不想再跑它，用 `cdg task review cancel{:sh}` 或 `defer` 直接结束。Agent 已经起来、但停在完全授权警告或登录引导这类启动界面上被中断的任务，同样可以这样重新启动。
+- **会话还在运行的搁置任务被暂停：** Codex 任务因 Agent 会话的问题停在 `on-hold`、而会话还在运行时，`pause` 让它停在 `paused`，搁置原因照原样保留；暂停期间不管会话里发生什么，任务都停在 `paused`。`unpause` 让它回到原来的搁置状态，解除搁置仍然要用 `cdg task recover{:sh}`。
+- **工作流本身被搁置：** 工作流级的搁置由 `cdg dag recover{:sh}` 解除，原因显示在 `cdg dag status{:sh}` 中工作流的 `Reason:` 行，例如因 CodeDAG 额度不足或需要登录而无法启动时为 `startup-gate-blocked`。原因是 `startup-gate-blocked` 时，在它被解除之前，`cdg task recover{:sh}` 与两个 `unpause` 命令都会拒绝执行；处理完原因后执行 `cdg dag recover{:sh}`，工作流会重新尝试启动，不会重复扣费。各种搁置原因的处理步骤见[任务或工作流停在 on-hold](/zh/docs/troubleshooting/troubleshooting#on-hold)。
+
+## 指定范围与批量控制 [#control-scope]
+
+工作流级控制命令一次可以处理多个工作流，任务级控制命令一次处理同一个工作流中的一个或多个任务；省略目标时，两者都作用于队首工作流。
+
+工作流级命令的 `[工作流...]` 可以省略，也可以写一个或多个工作流，用空格分隔，写法见[指定工作流](/zh/docs/reference/cli#specify-workflow)。写出的工作流可以是队列中的任何一个，包括还在排队、尚未开始的工作流。对这样的工作流执行 `pause` 或 `kill`，效果相同：它的任务全部变为 `paused`，轮到它时不会启动，而是一直停在队首，排在它后面的工作流也跟着等待，直到你恢复它，或用审核命令结束它。
+
+写出的工作流里有找不到、没有提交或状态改不动的，不影响其余工作流：命令为每个这样的工作流输出一条错误，照常处理剩下的，最后以退出码 1 结束。成功摘要会写出成功数与目标总数，例如 `Paused successfully for 1 of 2 workflows:`，只列成功的工作流；全部成功时为 `Paused successfully for all 2 workflows:`，退出码为 0。`unpause` 与 `kill` 的摘要形式相同。
+
+任务级命令一次只处理一个工作流中的任务，这个工作流用 `-w` 指定，省略时为队首工作流。任务本身没有默认值，必须写出：可以写一个或多个任务 ID，也可以用任务选择器按依赖关系圈定一组任务。在这四个命令中，每个选择器都能跟多个任务 ID，结果取并集；具体写法见[指定一个或多个任务](/zh/docs/reference/cli#task-ids)与[任务选择器](/zh/docs/reference/cli#task-selectors)。
+
+选择器只按依赖关系圈定任务，不看它们当前的状态。圈中的每个任务按自己的状态处理，命令对它适用就改变它，不适用就保持原样，不会因为其中有不适用的任务而中止处理。两个恢复相关的选项另有限制：`--acknowledge-unconfirmed` 每次只能用于一个任务，`--force-owner-release` 只处理停在特定原因的任务，见[恢复受阻时使用的选项](#recovery-options)。
+
+下面的例子中，工作流 `feature` 是队首，任务 2、3 依赖任务 1，任务 4 依赖任务 2 和 3，任务 5 依赖任务 4；工作流 `docs` 排在它后面，还没有开始。
+
+| 想做什么 | 命令 | 作用范围与结果 |
+|---|---|---|
+| 暂停队首工作流 | `cdg dag pause{:sh}` | `feature` 中执行中的任务在 Agent 停下后暂停，尚未开始的任务不再启动 |
+| 让排在后面的工作流轮到时先不启动 | `cdg dag pause docs{:sh}` | `docs` 的任务全部变为 `paused` |
+| 立即中断任务 3，其后的任务也不再启动 | `cdg task kill --downfrom 3 -w feature{:sh}` | 任务 3、4、5：执行中的任务 3 变为 `killed`，尚未开始的任务 4、5 变为 `paused` |
+| 恢复之前用 `--below 2` 暂停的下游 | `cdg task unpause --below 2 -w feature{:sh}` | 任务 4、5 回到等待，条件满足后照常启动 |
+| 一次恢复两个工作流中停下的任务 | `cdg dag recover feature docs{:sh}` | `feature` 与 `docs` 中所有可以恢复的任务 |
+
+## cdg task view [#task-view]
+
+`cdg task view{:sh}` 把当前终端接到任务 Agent 的原生会话上，可以按任务定位，也可以直接按会话 ID 定位。进入会话后怎样发 prompt、怎样退出，见[进入会话、修改与退出](/zh/docs/guides/intervene-and-control#task-view)。
+
+### 语法与会话定位
+
+```bash title="Terminal"
+cdg task view <任务 ID> [-w <工作流>] [--session-id <会话 ID>] [--recover]
+cdg task view --session-id <会话 ID>
+```
+
+| 参数 | 含义 |
+|---|---|
+| `<任务 ID>` | 要进入的任务，只能写一个，不支持任务选择器。省略时必须提供 `--session-id`。 |
+| `-w <工作流>` | 任务所在的工作流，省略时为队首工作流。审核已经结束、离开队列的工作流也可以指定，用来重新打开其中任务的会话。 |
+| `--session-id <会话 ID>` | Claude Code 或 Codex 的会话 ID。与任务 ID 一起写时，在重新打开已结束的会话时代替 CodeDAG 记录的会话 ID；单独写时，用它查找所属的任务。 |
+| `--recover` | 任务已经中断、它的 Agent 会话又不在运行时，不经确认直接恢复任务并进入恢复后的会话。任务还没开始、会话仍在运行或者任务已经完成时，它不改变命令的行为。 |
+
+命令进入哪一段会话，取决于任务的情况。任务正在执行，或者停下后会话仍然开着，命令连接到这个正在运行的会话；任务已经完成或审核已经结束、会话也已经结束，命令用 Agent 自己的恢复功能，在任务原来的工作目录中重新打开这段会话，之前的对话都还在。任务还在队列中、会话却已经不在运行时，要先把任务恢复起来才能进入，规则见下面的“使用前提”。
+
+重新打开已结束的会话需要会话 ID。CodeDAG 通常会自动记录它；没能记录时，命令会提示你补上 `--session-id`，Codex 任务的日志中也会出现一条无法自动提取会话 ID 的警告。会话 ID 可以从 Agent 自己的记录中找到，例如 Codex 退出时打印的 `codex resume <会话 ID>` 提示。
+
+```bash title="Terminal"
+# 任务 3 的会话 ID 没有被记录时，手动补上
+cdg task view 3 -w feature --session-id <会话 ID>
+```
+
+只知道会话 ID、不知道它属于哪个工作流时，可以省略任务 ID 与 `-w`：
+
+```bash title="Terminal"
+cdg task view --session-id <会话 ID>
+```
+
+这时 CodeDAG 在队列和已审核的工作流中查找使用这个会话的任务。找到的是已经离开队列的任务，就在它原来的工作目录中打开会话；找到的是队列中的活动任务，就按写出任务 ID 时的规则处理，需要恢复时同样先询问。找到多个，命令会要求你补上任务 ID 与 `-w`；一个也没找到，就在当前目录中按这个会话 ID 直接打开。
+
+### 使用前提
+
+`cdg task view{:sh}` 需要一个真实可交互的终端。它把你的按键原样转给 Agent 的原生界面，在脚本、CI 或 Agent 的命令工具这类没有交互终端的环境里无法正常使用；这时可以改用的做法见[选择观察与修改方式](/zh/docs/guides/intervene-and-control#choose-intervention)。
+
+任务必须已经开始执行。还没开始的任务没有会话，命令输出 `Task has not started yet.` 后结束，不会进入，也不会要求你补上 `--session-id`。还在等待上游的任务、因启动前准备停住的任务，以及从未开始就被暂停或中断的任务，都算在内。
+
+任务已经停下、它的 Agent 会话也不在运行时，要进入会话就得先把任务恢复起来，而恢复会让它接着执行，所以命令会先问你一次。这适用于 `killed`、`paused`、搁置（`on-hold`）的任务，以及状态还是 `working` 或 `draining`、但执行进程已经退出的任务。命令先说明这一点，再以默认 No 的确认询问：
+
+```bash title="Terminal"
+Task 3 is killed and its Agent session is not running.
+Entering the session requires recovering the task, which resumes its execution.
+To read what the task has done without resuming it, run 'cdg task logs 3 -w feature'.
+? Recover the task and enter its session? › No / Yes
+```
+
+选 Yes，命令按 `cdg task recover{:sh}` 的规则恢复任务，等恢复后的会话就绪再连接；选 No，命令输出 `Operation cancelled.` 后结束，任务和队列都保持原样。没有交互终端时命令不显示这个询问，直接报错并以退出码 1 结束，这时要恢复就加 `--recover`。
+
+先执行过 `cdg task recover{:sh}`、任务显示 `on-hold (agent-recovery-queued)` 时，恢复已经在排队，命令不再询问，等恢复后的会话就绪再进入。
+
+搁置（`on-hold`）的任务里有两种不必恢复就能进入：会话还在运行的任务直接连上，进入不会解除搁置，在会话里处理完让它停下的问题后，还要执行 `cdg task recover{:sh}`，任务才会继续；停在 `merge-conflict` 的任务由命令重新打开那段合并冲突会话供你手工处理，任务状态不变。
+
+## 恢复受阻时使用的选项 [#recovery-options]
+
+`--acknowledge-unconfirmed` 与 `--force-owner-release` 是两个确认用的选项，只在任务停在对应的搁置原因时使用。这两种情况下，CodeDAG 无法确认任务上一次的执行是否已经完全结束；为了不让同一个任务重复执行，或留下来历不明的改动，不带选项的 `recover` 会把任务留在 `on-hold`，等你核实后用选项明确确认。
+
+### --acknowledge-unconfirmed [#acknowledge-unconfirmed]
+
+```bash title="Terminal"
+cdg task recover <任务 ID> -w <工作流> --acknowledge-unconfirmed
+```
+
+这个选项只用于 Codex 任务，用来放行那些结局无从查证的子 Agent。CodeDAG 要确认任务派出的每个子 Agent 都已经结束，才会判定任务完成；某个子 Agent 没有留下 CodeDAG 能读取的会话记录时，它是否结束、做了什么都无从确认，任务就会被搁置。不带选项的 `recover` 只放行有记录可查的子 Agent，不会放行这一个。
+
+遇到这种情况时，`cdg task status <任务 ID> -w <工作流>{:sh}` 的 `Diagnostic:` 中会列出这个子 Agent，并标为 `state=unconfirmed`；执行不带选项的 `cdg task recover{:sh}` 后，任务仍然停在 `on-hold`，命令会提示你核实后使用这个选项。
+
+确认之前，先核实这个子 Agent 上一次执行留下了什么：
+
+- 任务所在的工作区里没有意料之外的改动，可以在工作区中用 `git status` 和 `git diff` 查看。
+- 没有仍在运行的子 Agent，也没有由它启动、仍在运行的命令。可以用 `cdg task view{:sh}` 进入任务会话，查看 Codex 当前的界面。
+
+确认之后，CodeDAG 把列出的这些子 Agent 视为已经结束，重新判断任务是否完成：主会话已经做完的，任务按正常流程完成，随后自动接受或等待审核；还没做完的，任务继续执行。这次确认只覆盖当时列出的子 Agent，之后如果又出现无法确认的子 Agent，任务会再次被搁置。
+
+每条命令只能用这个选项恢复一个任务，圈中多个任务时命令会报错；`cdg dag recover{:sh}` 没有这个选项。
+
+### --force-owner-release [#force-owner-release]
+
+```bash title="Terminal"
+cdg task kill <任务 ID> -w <工作流> --force-owner-release
+cdg task recover <任务 ID> -w <工作流>
+```
+
+只有任务停在 `agent-worker-liveness-unknown` 时才需要这个选项，原因可以在 `cdg task status <任务 ID> -w <工作流>{:sh}` 的 `Reason:` 行看到。它表示 CodeDAG 记录的执行进程号上仍有进程在运行，但无法确认那就是当初执行这个任务的进程。为了避免同一个任务同时有两个 Agent 在工作，`recover` 在这种情况下不会启动新的执行，任务会一直停在 `on-hold`。
+
+使用之前，先确认原任务确实没有在继续执行：
+
+- 用 `cdg task view <任务 ID> -w <工作流>{:sh}` 连原会话，命令报 `Cannot reach the existing session of task …`；能连上说明会话还在工作，不要释放。
+- 用 `cdg task logs <任务 ID> -w <工作流> -f{:sh}` 观察一段时间，日志没有新的输出。
+- 任务所在工作区中的文件不再变化，可以隔一段时间再用 `git status` 对比。
+
+执行后，任务变为 `killed`。CodeDAG 不会向原来的进程发送任何信号，也不会启动新的执行，只是不再等待确认那个进程，命令会提醒你原进程可能仍在运行。随后执行 `cdg task recover{:sh}`，CodeDAG 在新的进程中恢复原来的 Agent 会话，任务接着执行。
+
+加上这个选项后，`cdg task kill{:sh}` 只处理停在这个原因的任务，同一条命令圈中的其他任务不会被中断。
+
+<Callout type="warn">如果原来的进程其实还在运行，恢复之后会有两个 Agent 同时修改同一个工作区，改动可能相互覆盖。拿不准时，等日志和工作区都确认原任务已经停下，再执行这两条命令。</Callout>
+
+## cdg branch release [#branch-release]
+
+```bash title="Terminal"
+cdg branch release <分支名...>
+```
+
+`cdg branch release{:sh}` 释放被 CodeDAG 的同步仓库占着的分支名。用 clone 做副本的项目通过同步仓库（远程 `codedag-mirror`）在各个工作区之间共享分支；留在那里的分支与某个任务的 [`branchName`](/zh/docs/reference/workflow-file#tasks-branch-name) 同名时，工作流不能用这个名字，执行到这个任务时任务会停在 `on-hold`（`branch-name-conflict`）。
+
+释放时，命令删除同步仓库中的这条分支，再清掉各个已登记工作区里对它的远程跟踪引用。各工作区中的同名本地分支不在释放范围内，仍要你自己[删除或改名](/zh/docs/reference/branches-and-files#branch-name)，命令会逐个列出还留着本地分支的工作区。队列与任务状态都不改动。
+
+一次可以写多个分支名，用空格分隔，重复的名字只处理一次；命令在项目内的任一已登记工作区中执行。这一批分支先整体检查，其中有一个不能释放就都不释放。命中下面任一条的分支不释放：
+
+- **还在用的分支：** 队列中某个工作流的集成分支，或者队列中某个任务已经检出的任务分支。要等那个工作流审核结束、离开队列。
+- **快照分支：** 某次审核保存的快照分支，不论那个工作流是否还在队列中。它保存着当时的代码，释放之后就取不回来了。
+- **保留任务结果的唯一引用：** 同步仓库里只剩这条分支还能找到某个任务的结果提交，命令的提示里称它为 merge source。任务结果正常由 CodeDAG 自己的引用保留着，只有那条引用已经丢失时才会碰到这一条。
+
+因同名分支而停住的任务不算“还在用”，释放正是为它让出名字。释放成功，或者同步仓库里本来就没有这个分支时，退出码为 0，所以同一条命令可以重复执行；命中上面的拒绝条件、分支名不合法，或者命令不在已初始化的项目中时，退出码为 1，任何引用都不改动。
+
+释放之后，命令对因这个分支名停住的任务给出 `cdg task recover{:sh}` 提示，照着执行，任务就会在这条分支上重新启动；某个工作区里还留着同名的本地分支时，命令不给这个提示，先把本地分支删掉或改名。
+
+## 相关
+
+- [干预与控制](/zh/docs/guides/intervene-and-control)：暂停、中断、恢复各自适合什么情况，以及进入会话后怎样纠偏和退出。
+- [审核](/zh/docs/reference/cli/review)：给执行完的任务与工作流下结论，或在审核前先停下仍在执行的任务。
+- [故障排除](/zh/docs/troubleshooting/troubleshooting#on-hold)：任务或工作流停在 `on-hold` 时，按原因处理后再恢复。

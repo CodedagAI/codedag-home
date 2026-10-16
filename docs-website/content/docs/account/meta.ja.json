@@ -1,0 +1,10 @@
+{
+  "$schema": "../../../.source/json-schema/docs.meta.json",
+  "title": "アカウント、クレジット、コスト",
+  "icon": "CreditCard",
+  "pages": [
+    "login-and-account",
+    "credits-and-subscription",
+    "cost-control"
+  ]
+}

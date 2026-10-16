@@ -1,0 +1,46 @@
+name: Documentation or website issue
+description: Report something wrong, unclear, out of date or broken on codedag.com.
+labels: [documentation]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues are public. Don't paste API keys, tokens or private code.
+  - type: input
+    id: url
+    attributes:
+      label: Page URL
+      placeholder: https://codedag.com/docs/...
+    validations:
+      required: true
+  - type: dropdown
+    id: language
+    attributes:
+      label: Page language
+      options:
+        - English
+        - 简体中文
+        - 日本語
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Type of problem
+      options:
+        - Incorrect or out of date
+        - Unclear or confusing
+        - Missing information
+        - Broken link or page
+        - Translation problem
+        - Typo or formatting
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What's wrong on the page, and what you expected to find. If it's about specific text, quote it.
+    validations:
+      required: true

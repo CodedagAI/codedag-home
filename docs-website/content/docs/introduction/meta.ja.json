@@ -1,0 +1,11 @@
+{
+  "$schema": "../../../.source/json-schema/docs.meta.json",
+  "title": "CodeDAG について",
+  "icon": "Telescope",
+  "defaultOpen": true,
+  "pages": [
+    "overview",
+    "when-to-use",
+    "design-philosophy"
+  ]
+}

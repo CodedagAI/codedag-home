@@ -1,0 +1,150 @@
+---
+title: 项目设置
+description: 项目设置文件的位置与覆盖规则，以及每个字段的取值和默认值。
+icon: Settings
+---
+
+项目设置为一个项目里的所有工作流提供默认值：同时执行多少个任务，任务和整个工作流完成后是否自动接受，可以使用哪几家 Agent，以及没有指定 Agent 的任务交给谁执行。工作流文件里的对应字段和提交命令的选项都优先于它；修改项目设置只影响此后提交的工作流。
+
+## 设置写在哪 [#files]
+
+项目设置分成两个文件，都在主仓库的 `.codedag/` 目录里：共享设置放团队共同的默认值，本机设置放只属于这台电脑的值。
+
+| 文件 | 作用范围 | 是否随 `.codedag` 仓库共享 | 适合放什么 |
+|---|---|---|---|
+| `.codedag/settings.jsonc` | 共享设置，对使用同一个 `.codedag` 仓库的所有成员生效 | 是 | 团队统一的审核策略，以及并发上限和默认 Agent 的团队默认值 |
+| `.codedag/local/settings.local.jsonc` | 本机设置，只对这台电脑上的这个项目生效 | 否，`cdg init{:sh}` 生成的 `.codedag/.gitignore` 忽略了 `local/` | 与团队不同的并发上限与默认 Agent |
+
+`cdg init{:sh}` 会生成这两个文件：共享设置是一个空对象 `{}`，本机设置里只有初始化确定的默认 Agent 和并发上限中与共享设置不同的值。两个文件都可以删掉，缺少的文件按空对象处理。
+
+### 文件格式与写错时的结果 [#format]
+
+两个文件都是 JSONC 格式，即在标准 JSON 的基础上可以写 `//` 和 `/* */` 注释。其余写法仍要符合 JSON：顶层必须是一个对象，最后一个字段后面不能有逗号。
+
+文件无法解析，或者下文五个字段中有取值不合法的字段时，校验、提交等需要读取项目设置的命令都会失败，不会退回默认配置继续执行。报错指出出错的文件，以及解析出错的行列或取值不合法的原因，每个文件只报第一处。
+
+字段名写错不影响其余字段生效：字段名区分大小写，CodeDAG 不认识的键会被跳过，`cdg dag validate{:sh}` 和提交时的校验为每个含这种键的文件给出一条 `unsupported-setting` 警告，列出写错的键和全部支持的字段名。警告不会让校验失败，提交时按警告确认一次即可继续。
+
+## 同一个字段设置了多次 [#precedence]
+
+同一个字段在两个文件里都写了时，以本机设置为准。覆盖以整个字段为单位，数组也不例外：共享设置写 `["claude", "codex"]`、本机设置写 `["claude"]` 时，生效的是 `["claude"]`，两个列表不会合并。
+
+本机设置里没有写的字段取共享设置中的值，团队之后修改共享设置，这台电脑也随之改变；初始化只把与共享设置不同的值写进本机设置，所以团队写在共享设置里的值对新成员直接生效。想让某个已经覆盖的字段改回共享设置中的值，从本机设置里删掉它即可。两个文件都没有写的字段，使用[字段](#fields)表中的默认值。
+
+项目设置的优先级低于工作流文件和提交命令：工作流文件里写了对应的字段，或者提交时加了覆盖选项，都以它们为准，见[只调整一个工作流或一次提交](#per-workflow)。所有来源的完整先后顺序见[默认值与覆盖顺序](/zh/docs/reference/workflow-file#precedence)。
+
+## 修改何时生效 [#when-applied]
+
+修改设置只影响此后提交的工作流。工作流的并发上限、审核策略、每个任务使用的 Agent，以及合并冲突会话使用的默认 Agent，都在提交时按当时的设置确定，已经提交的工作流不受之后修改的影响。
+
+## 字段 [#fields]
+
+项目设置共有五个字段，每个都可以省略。
+
+| 字段 | 类型 | 两个文件都没写时 | `cdg init{:sh}` 是否写入本机设置 |
+|---|---|---|---|
+| [`maxConcurrency`](#max-concurrency) | 整数 | `1` | 与共享设置里的值不同时写入 |
+| [`taskAutoAccepted`](#task-auto-accepted) | `always`、`done` 或 `none` | `always` | 否 |
+| [`dagAutoAccepted`](#dag-auto-accepted) | `always`、`done` 或 `none` | `done` | 否 |
+| [`availableAgents`](#available-agents) | 由 `claude`、`codex` 组成的非空数组 | 全部受支持的 Agent 都可以使用 | 否 |
+| [`defaultAgent`](#default-agent) | `claude` 或 `codex` | `codex`，不在可用列表中时取列表第一项 | 与共享设置里的值不同时写入 |
+
+### maxConcurrency [#max-concurrency]
+
+`maxConcurrency` 是同时执行任务数的默认上限，用于没有在工作流文件里写 [`maxConcurrency`](/zh/docs/reference/workflow-file#max-concurrency) 的工作流。它只能是整数：正整数表示最多同时执行这么多个任务，0 或负数表示不设上限，写成小数或带引号的 `"3"` 都会报错。两个文件都没有写时为 1，任务逐个执行。
+
+没有给 `--max-concurrency`、共享设置里也没有这个字段时，`cdg init{:sh}` 写入本机设置的值是 1 加上登记的副本数，也就是工作区的总数。之后新增副本并重新初始化时这个值怎样更新，见[保留本机设置时](/zh/docs/reference/cli/init#kept-local-settings)。
+
+默认的隔离分支模式下，实际并发还不会超过可用的工作区数，所以这个值设得再大，也只在工作区数之内起作用。共享工作区模式不受工作区数限制，这个值就是实际的上限：它大于 1 时，没写 `maxConcurrency` 的共享工作区工作流也会让互不依赖的任务在同一个工作区里同时执行，需要任务逐个执行时，在工作流文件里写 `maxConcurrency: 1`。
+
+```jsonc title=".codedag/local/settings.local.jsonc"
+{
+  // 其余字段保持不变
+  "maxConcurrency": 3 // 主仓库加两个副本，最多同时执行 3 个任务
+}
+```
+
+### taskAutoAccepted [#task-auto-accepted]
+
+`taskAutoAccepted` 是项目中任务的默认审核策略，决定任务完成后自动接受，还是停下来等你审核。只有任务没写 `autoAccepted`、工作流没写 `taskAutoAccepted`、提交时也没加 `--task-auto-accepted` 时，才会用到它。取值为 `always`、`done` 或 `none`，含义见[自动接受的取值](/zh/docs/reference/workflow-file#auto-accept-values)；两个文件都没有写时为 `always`，即自动接受。
+
+想让团队的任务默认都停下来等人审核，在共享设置里写 `none`：
+
+```jsonc title=".codedag/settings.jsonc"
+{
+  "taskAutoAccepted": "none" // 每个任务完成后都停下，等人审核
+}
+```
+
+### dagAutoAccepted [#dag-auto-accepted]
+
+`dagAutoAccepted` 是项目中工作流的默认审核策略，决定全部任务都审核结束后，自动接受整个工作流，还是停下来等你对整套结果给出结论。只有工作流文件没写 `dagAutoAccepted`、提交时也没加 `--dag-auto-accepted` 时，才会用到它。取值为 `always`、`done` 或 `none`，含义见[自动接受的取值](/zh/docs/reference/workflow-file#auto-accept-values)；两个文件都没有写时为 `done`，即自动接受。
+
+它与任务的审核策略相互独立。只想在每个工作流结束前确认一次、任务仍然自动接受时，只设置这一个字段：
+
+```jsonc title=".codedag/local/settings.local.jsonc"
+{
+  // 其余字段保持不变
+  "dagAutoAccepted": "none" // 任务照常自动接受，整个工作流结束前等我确认
+}
+```
+
+设为 `none` 后，在你给出结论之前，队列中排在这个工作流后面的工作流都不会开始。
+
+### availableAgents [#available-agents]
+
+`availableAgents` 列出这个项目的工作流可以使用的 Agent：`claude` 表示 Claude Code，`codex` 表示 Codex。校验和提交时，CodeDAG 检查两处 Agent：每个任务实际使用的 Agent（任务写的 `agent`，没写时为[默认 Agent](#default-agent)），以及 [`mergeConflictAgent`](/zh/docs/reference/workflow-file#merge-conflict-agent) 中的 `agent`。它们都必须在这个列表里，否则校验失败。报错会写明限制来自哪个文件，并给出两条处理办法：把这个 Agent 加进那个文件的 `availableAgents`，或者删掉该字段。
+
+这个字段只用来有意限制，例如团队约定这个项目只用 Claude Code：
+
+```jsonc title=".codedag/settings.jsonc"
+{
+  "availableAgents": ["claude"]
+}
+```
+
+不写它时，全部受支持的 Agent 都可以使用，新安装的 Agent 直接就能用。不想再限制时，删掉这个字段：空数组会报错 `availableAgents must list at least one agent; remove the field to allow all supported agents`，列表里出现 `claude`、`codex` 以外的值同样报错。
+
+这个列表与这台电脑装了哪几家 Agent 无关。校验和提交另有一项独立的安装检查：工作流实际用到的 Agent 命令不在 PATH 中时，报 `agent-not-installed` 错误，见[提交被拒绝](/zh/docs/troubleshooting/troubleshooting#submit-rejected)。
+
+### defaultAgent [#default-agent]
+
+`defaultAgent` 是项目的默认 Agent，取值为 `claude` 或 `codex`。没写 `agent` 的任务交给它执行，这些任务的 `mode` 也按它的写法校验；工作流没写 [`mergeConflictAgent`](/zh/docs/reference/workflow-file#merge-conflict-agent) 时，全部任务结束后合并到集成分支如果出现冲突，也由它来解决。
+
+两个文件都没写时，默认 Agent 是 `codex`；写了 `claude`、`codex` 以外的值时报错，取值本身不区分大小写，首尾的空白会被忽略。这样得到的 Agent 不在 [`availableAgents`](#available-agents) 中时，改用 `availableAgents` 的第一项，例如只允许 `claude` 的项目，不写 `defaultAgent` 时默认 Agent 就是 Claude Code。
+
+`cdg init{:sh}` 怎样确定默认 Agent、何时把它写进本机设置，见[默认 Agent 怎样确定](/zh/docs/reference/cli/init#default-agent)。之后想换，修改本机设置里的这个字段：
+
+```jsonc title=".codedag/local/settings.local.jsonc"
+{
+  // 其余字段保持不变
+  "defaultAgent": "claude"
+}
+```
+
+换了默认 Agent，所有没写 `agent` 的任务都会改由另一家执行，其中写了 `mode` 的任务可能因为写法不符而校验失败。默认 Agent 又可能被各人在自己的本机设置里覆盖，所以要在多台电脑上运行的工作流，最好给每个任务写明 [`agent`](/zh/docs/reference/workflow-file#tasks-agent)。
+
+## 只调整一个工作流或一次提交 [#per-workflow]
+
+项目设置是所有工作流共用的默认值。只想改变一个工作流时，在它的工作流文件里写对应的字段；只想改变某一次提交时，用 `cdg dag submit{:sh}` 的选项。这两种做法都不会修改项目设置。
+
+| 想调整什么 | 只对一个工作流 | 只对一次提交 |
+|---|---|---|
+| 并发上限 | 工作流的 [`maxConcurrency`](/zh/docs/reference/workflow-file#max-concurrency) | 没有对应的选项 |
+| 任务的审核策略 | 工作流的 [`taskAutoAccepted`](/zh/docs/reference/workflow-file#task-auto-accepted)，或任务的 [`autoAccepted`](/zh/docs/reference/workflow-file#tasks-auto-accepted) | `--task-auto-accepted` |
+| 整个工作流的审核策略 | 工作流的 [`dagAutoAccepted`](/zh/docs/reference/workflow-file#dag-auto-accepted) | `--dag-auto-accepted` |
+| 任务使用的 Agent | 任务的 [`agent`](/zh/docs/reference/workflow-file#tasks-agent) | 没有对应的选项 |
+
+例如下面的命令让这一次提交的每个任务完成后都停下等你审核：
+
+```bash title="Terminal"
+cdg dag submit feature --task-auto-accepted none
+```
+
+两个提交选项的完整用法见[只对这一次提交调整审核设置](/zh/docs/reference/cli/validate-and-submit#auto-accept-options)。
+
+## 相关
+
+- [团队共享](/zh/docs/guides/team-sharing)：把共享设置和工作流推到远程，让团队成员使用同一套默认值。
+- [工作流文件参考](/zh/docs/reference/workflow-file)：工作流文件中同名字段的写法，以及所有来源的覆盖顺序。
+- [初始化项目](/zh/docs/reference/cli/init)：`cdg init{:sh}` 的选项，以及重新初始化时怎样处理已有的设置。

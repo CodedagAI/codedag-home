@@ -1,0 +1,22 @@
+{
+  "$schema": "../../../.source/json-schema/docs.meta.json",
+  "title": "ガイド",
+  "icon": "Compass",
+  "pages": [
+    "---ワークフローを書く---",
+    "writing-workflows",
+    "designing-tasks-and-prompts",
+    "agents-and-permission-modes",
+    "parallel-workspaces",
+    "mixing-agents",
+    "---実行と監視---",
+    "run-and-monitor",
+    "intervene-and-control",
+    "---レビューと仕上げ---",
+    "review-tasks",
+    "finish-and-merge",
+    "---拡張とチーム---",
+    "guide-plugin",
+    "team-sharing"
+  ]
+}

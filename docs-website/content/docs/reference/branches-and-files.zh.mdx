@@ -1,0 +1,156 @@
+---
+title: 文件与分支操作
+description: 从快照分支取回改动、为任务分支指定名字、单独保存工作流配置，以及找到日志文件。
+icon: FolderTree
+---
+
+CodeDAG 的执行结果和项目配置，都以普通的 Git 分支和文件留在你的电脑上。大多数事情用 `cdg` 命令就能完成，但有几件要你直接用 Git 或在文件系统里处理。检查结果、合入主分支和清理分支的完整步骤，见[收口、合入主分支与清理](/zh/docs/guides/finish-and-merge)。
+
+## 取回快照中的部分改动 [#restore-from-snapshot]
+
+在隔离分支模式下，被取消、推迟或重做的任务，以及被取消或推迟的整个工作流，结果默认（`--code snapshot`）存进一条快照分支，这条分支会一直留在仓库里，直到你自己删除它。任务快照里不只有任务自己的改动，还有它开始时的代码和合并进来的上游结果，所以取回之前，先拿它和任务分支比较，分清哪些是这个任务改的，再用 Git 取回需要的部分。快照分支为什么存在，见[不满意时的退路](/zh/docs/concepts/workspaces-and-branches#fallback)。
+
+### 快照里保存了什么 [#snapshot-contents]
+
+快照分支有两种，一种保存单个任务的结果，一种保存整个工作流的结果：
+
+| 快照 | 分支名 | 保存的内容 | 与之比较的分支 |
+|---|---|---|---|
+| 任务快照 | `cdg/<工作流名>/snapshots/t<任务 ID>-<标题>-<时间>` | 审核那一刻任务分支上的全部内容，还没提交的改动会先提交进去 | 这个任务的任务分支 |
+| 工作流快照 | `cdg/<工作流名>/snapshots/dag-review-<时间>` | 集成分支上合并好的整套结果 | 集成分支 `cdg/<工作流名>/integration` |
+
+分支名里的标题会转成小写，空格等不能用在分支名里的字符换成 `-`；时间是本机时间，精确到秒。例如工作流 `add-helpers` 中标题为 `Add mul helper` 的任务 2 在 2026-09-30 11:39:55 被要求重做，它的快照分支就是 `cdg/add-helpers/snapshots/t2-add-mul-helper-20260930-113955`。
+
+分支名里的 `<工作流名>` 由工作流文件相对 `.codedag/dags/` 的路径得出，例如子目录中的 `team-a/build.yaml` 是 `team-a_build`，规则见[文件位置与格式](/zh/docs/reference/workflow-file#file-location)。不确定时，以 `cdg dag status{:sh}` 输出的 `Integration Branch` 为准。
+
+下面几种情况没有快照可取：
+
+- **没有改动可存：** 不会建快照分支。
+- **审核时写了 `--code discard`：** 改动直接丢弃，之后无法取回。
+- **任务级的 `cancel` 或 `defer` 写了 `--code commit`：** 改动提交在任务分支上，不另建快照分支。
+- **共享工作区模式：** 没有快照，取消的任务写下的文件仍留在工作区里，见[共享工作区模式下审核有什么不同](/zh/docs/guides/review-tasks#shared-workspace)。
+
+`--code` 在各个审核动作下允许的取值和默认值见[任务级参数表](/zh/docs/reference/cli/review#task-review-options)。
+
+### 找到快照分支 [#find-snapshot]
+
+快照分支都以 `cdg/<工作流名>/snapshots/` 开头，用 `git branch --list` 就能列出。比较时还要用到对应的任务分支，它的名字以 `cdg/<工作流名>/t<任务 ID>-` 开头：
+
+```bash title="Terminal"
+# 列出仓库中所有工作流的快照分支
+git branch --list 'cdg/*/snapshots/*'
+
+# 找到工作流 add-helpers 中任务 2 的任务分支
+git branch --list 'cdg/add-helpers/t2-*'
+```
+
+同一个任务可能有几条快照分支，例如先重做过一次、后来又被取消，按名字末尾的时间区分即可。重新运行过的工作流，分支名里的工作流名会带上时间后缀，例如 `cdg/add-helpers-20260930-105924/snapshots/...`，第一条命令同样能列出它们。任务用 `branchName` 指定了分支名时，任务分支就是那个名字，快照分支仍以 `cdg/<工作流名>/snapshots/` 开头。
+
+worktree 副本与主仓库共用同一套分支，在主仓库里就能看到全部快照分支。clone 副本各有自己的分支：在某个 clone 里执行的任务，任务分支和快照分支都只在那个 clone 里，可以直接在那个 clone 里比较和取回，也可以先把两条分支取到主仓库：
+
+```bash title="Terminal"
+git fetch ../my-app-clone-1 <快照分支>:<快照分支> <任务分支>:<任务分支>
+```
+
+不确定任务在哪个 clone 里执行时，在各个 clone 里分别列一下快照分支即可。工作流快照建在集成分支所在的工作区里，通常就是主仓库。
+
+### 只看任务自己的改动 [#compare-snapshot]
+
+用三个点比较任务分支和快照分支，得到的就是这个任务自己的改动：
+
+```bash title="Terminal"
+# 任务改了哪些文件
+git diff --stat cdg/add-helpers/t2-add-mul-helper...cdg/add-helpers/snapshots/t2-add-mul-helper-20260930-113955
+
+# 快照里属于这个任务的提交
+git log --oneline cdg/add-helpers/t2-add-mul-helper..cdg/add-helpers/snapshots/t2-add-mul-helper-20260930-113955
+```
+
+三个点的 `git diff` 从两条分支分开的地方算起。任务被取消或推迟之后，任务分支停在干净起点；被要求重做之后，新的会话也从干净起点开始，所以两条分支总是在干净起点分开，比较结果里只有任务自己的改动。直接拿快照和 `main` 比较，上游任务的改动也会算在里面。
+
+工作流快照也是同样的比较方法，换成集成分支：工作流被取消或推迟之后，集成分支回到了本次工作流的起点，比较结果就是这次执行的全部改动。
+
+```bash title="Terminal"
+git diff --stat cdg/add-helpers/integration...cdg/add-helpers/snapshots/dag-review-20260930-114306
+```
+
+### 取回需要的部分 [#restore-changes]
+
+取回之前，先确认这个工作流已经审核结束，再切到你想放这些改动的分支，例如 `main` 或一个新分支。工作流还在队列中时，主仓库和副本都可能被它使用，在里面留下未提交的改动，之后开始的任务或合并到集成分支的步骤会因为工作区不干净而停在 `on-hold`，见[工作区有未提交的改动](/zh/docs/troubleshooting/troubleshooting#hold-workspace)。
+
+```bash title="Terminal"
+# 取回整个文件：用快照中的版本替换当前的文件
+git checkout <快照分支> -- src/mul.js
+
+# 只取回任务对某个文件的改动，应用到当前的文件上
+git diff --binary <任务分支>...<快照分支> -- README.md | git apply --3way
+
+# 取回任务自己的全部改动
+git diff --binary <任务分支>...<快照分支> | git apply --3way
+```
+
+第一种做法得到的是快照里这个文件的完整内容；如果上游任务也改过这个文件，这些改动会一起带过来。后两种做法只应用任务自己的改动，与文件里的其他内容合在一起，遇到冲突时 `--3way` 会在文件里留下冲突标记，由你解决。没有冲突时，取回的改动都已加入暂存区，检查之后自己提交。命令里的 `--binary` 让图片、字体这类二进制文件的改动也写进补丁；少了它，任务改过二进制文件时 `git apply` 会失败。想连同原来的提交一起取回，也可以用 `git cherry-pick` 挑选上一节 `git log` 列出的提交。
+
+工作流快照保存的是一整套结果。想全部取回时，像合并集成分支一样合并它即可，例如 `git merge cdg/add-helpers/snapshots/dag-review-20260930-114306{:sh}`；只要其中一部分时，用上面的方法按文件取回。
+
+## 使用指定的任务分支名 [#branch-name]
+
+想让某个任务的结果落在一个固定名字的分支上，例如之后要单独推送这个分支开 PR，就在这个任务里写 `branchName`。CodeDAG 会原样使用这个名字，不加 `cdg/` 前缀；它只能在隔离分支模式下使用，名字要满足的要求和不能占用的名称见 [`branchName`](/zh/docs/reference/workflow-file#tasks-branch-name)。
+
+```yaml title=".codedag/dags/search-api.yaml"
+tasks:
+  - id: 1
+    title: 实现搜索接口
+    branchName: feature/search-api
+    prompt: 按 docs/plans/search.md 实现搜索接口，并补充对应的单元测试。
+```
+
+固定名字的代价是不能与已有的分支重名。自动命名的分支在上一次的分支还在时会带上时间，避开重名，`branchName` 指定的名字则不会改变：同名分支已经存在时，校验会给出 `branch-name-conflict` 警告，不处理就提交，工作流执行到这个任务时它会停在 `on-hold`。警告会写明这个名字被谁占着，以及对应的处理办法；占用解除之后，就可以继续用原来的名字，不必改名。
+
+占用分两种。一种是工作区里的同名本地分支，由你自己删除或改名：
+
+```bash title="Terminal"
+# 还想保留上一次的结果：改名
+git branch -m feature/search-api feature/search-api-prev
+
+# 不再需要：删除
+git branch -D feature/search-api
+```
+
+分支正被某个工作区检出时，Git 不允许删除它，要先让那个工作区切到别的分支。用 clone 做副本时，每个 clone 里的同名分支都要分别处理。
+
+另一种只出现在用 clone 做副本时。CodeDAG 通过本机上的一个同步仓库在各个工作区之间传递分支，主仓库和各个 clone 里名为 `codedag-mirror` 的远程就指向它；上一次取消或推迟这个任务时用了 `--code commit`，这个名字就留在了同步仓库里。用 `cdg branch release{:sh}` 释放它，不用自己去动 `codedag-mirror` 远程：
+
+```bash title="Terminal"
+cdg branch release feature/search-api
+```
+
+队列中的工作流还在用的分支和快照分支不能释放，完整的条件见 [`cdg branch release`](/zh/docs/reference/cli/control#branch-release)。
+
+任务已经因为同名分支停在 `on-hold` 时，占用解除之后用 `cdg task recover{:sh}` 恢复它，排查步骤见[分支问题](/zh/docs/troubleshooting/troubleshooting#hold-branch)。处理过旧分支仍然提示 `branch-name-conflict` 时，在工作流文件里改用一个新的 `branchName`，或者去掉它，让 CodeDAG 自动命名。
+
+## 单独保存工作流与共享配置 [#save-config]
+
+工作流文件和项目设置都在主仓库根目录的 `.codedag/` 里。它是项目的[边车仓库](/zh/docs/concepts/how-it-works#sidecar-repo)，一个独立于项目仓库的 Git 仓库，所以这些文件要在 `.codedag` 里单独提交，项目仓库的提交里不会有它们。
+
+提交用普通的 git 命令。`cdg init{:sh}` 生成的 `.codedag/.gitignore` 已经排除了 `local/`，本机设置 `settings.local.jsonc` 和日志都在这个目录里，所以 `git add -A` 只会加入 `dags/` 下的工作流文件、共享设置 `settings.jsonc` 这些可以共享的文件：
+
+```bash title="Terminal"
+cd .codedag
+git add -A
+git commit -m "Add search-api workflow"
+```
+
+CodeDAG 不会在这个仓库里提交、推送或拉取，什么时候保存由你决定。想把它推到远程、与团队同步，做法见[把 `.codedag` 推到远程](/zh/docs/guides/team-sharing#push)。
+
+## 日志文件位置 [#log-files]
+
+每个工作流文件对应一个日志文件，放在主仓库的 `.codedag/local/logs/` 下。日志的路径按工作流文件相对 `.codedag/dags/` 的位置来排，扩展名换成 `.log`：`.codedag/dags/add-helpers.yaml` 的日志是 `.codedag/local/logs/add-helpers.log`，子目录中 `.codedag/dags/team-a/build.yaml` 的日志写在同名子目录里，也就是 `.codedag/local/logs/team-a/build.log`，目录名和文件名都沿用原来的大小写与写法。任务在副本里执行时，日志同样写在主仓库的这个目录里。
+
+同一个工作流的历次执行都追加在同一个文件里，`cdg dag logs{:sh}` 和 `cdg task logs{:sh}` 读取的就是这个文件。日志行都以任务 ID 和时间开头，例如 `[Task   2] [2026-09-30 11:38:20]`，直接打开文件时，可以用 `grep`、`less` 这类工具按任务或时间查找。
+
+日志在 `local/` 下，不进入 `.codedag` 的版本管理，只留在这台电脑上。查看日志的命令和参数见 [cdg dag logs 与 cdg task logs](/zh/docs/reference/cli/status-and-logs#logs)；旧日志不再需要时，直接删除文件即可。
+
+## 清理分支或移除工作区 [#cleanup]
+
+工作流审核结束、需要的结果也已经合入之后，它留下的 `cdg/<工作流名>/` 分支、日志文件和不再使用的副本都可以清理，步骤见[清理分支与工作区](/zh/docs/guides/finish-and-merge#cleanup)。快照分支也在这些分支之中，删除之后其中的改动就无法再取回，删除之前先按[取回快照中的部分改动](#restore-from-snapshot)确认没有要保留的内容。

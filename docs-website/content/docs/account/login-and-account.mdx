@@ -1,0 +1,92 @@
+---
+title: Sign-In and Account
+description: Why CodeDAG requires you to sign in, how to sign in and out, and what data the CodeDAG service receives from you.
+icon: KeyRound
+---
+
+To use CodeDAG, you need to sign in to a CodeDAG account. You sign in with a Google account in your browser, and your CodeDAG account is created the first time you do. Signing in only tells CodeDAG which account is submitting a workflow and how many credits that account has left. Workflows still run on your own computer. The CodeDAG service receives only the workflow file and a small amount of environment information, which it needs to calculate credits. It doesn't receive your code or logs.
+
+## Why you need to sign in [#why-sign-in]
+
+Workflows consume CodeDAG credits by task count, and signing in tells CodeDAG which account is submitting a workflow and how many credits that account has left. The workflow itself still runs on your own computer. Signing in doesn't move execution to the cloud.
+
+Only these three commands require you to be signed in:
+
+| Command | Why it requires sign-in |
+|---|---|
+| `cdg init{:sh}` | Confirms your account when you start using CodeDAG in a repository. |
+| `cdg dag submit{:sh}` | Checks at submission that you have enough credits. When the workflow starts running, credits are deducted by task count. |
+| `cdg auth status{:sh}` | Shows the signed-in account, subscription status, and credit usage. |
+
+If you aren't signed in when you run one of these commands, it takes you through sign-in first and then carries on with the original command, so you don't need to run `cdg auth login{:sh}` separately before you use CodeDAG for the first time.
+
+## Sign in [#sign-in]
+
+```bash title="Terminal"
+cdg auth login
+```
+
+The command opens a browser on this computer. A Google account is currently the only supported way to sign in. The first time you sign in with a given Google account, CodeDAG also creates an account for it, and every new account comes with free credits. For the amount and how long they're valid, see [Free credits](/docs/account/credits-and-subscription#free-credits). If the browser is already signed in to the CodeDAG web console, sign-in uses that account directly.
+
+### If sign-in doesn't complete [#sign-in-failed]
+
+If sign-in times out, you cancel it in the browser, or the CodeDAG service can't be reached, just run the command again. If `cdg init{:sh}` or `cdg dag submit{:sh}` triggered the sign-in, that command exits too, without creating `.codedag` or adding the workflow to the queue. If sign-in keeps failing, work through the [sign-in problems](/docs/troubleshooting/troubleshooting#sign-in-problems) section of Troubleshooting.
+
+### Without a desktop browser [#no-browser]
+
+You currently can't sign in from an SSH remote session, a container, or a server without a graphical interface. That means `cdg init{:sh}` and `cdg dag submit{:sh}`, which require sign-in, can't be used there either.
+
+The reason is how sign-in works. After you complete sign-in in the browser, the browser has to hand the result back to the CLI that's waiting on this computer, so the browser and the CLI must be on the same computer. Neither of these workarounds works:
+
+- **Opening the sign-in link on another computer.** The browser on that computer can't find the CLI that's waiting for the result, so sign-in can't complete.
+- **Signing in on another computer and copying the credentials over.** Once the copied credentials are used, every CLI sign-in for the account is revoked, on all computers.
+
+Support for signing in to and using CodeDAG in environments without a browser, such as remote servers, is planned for a later release.
+
+## How long you stay signed in [#credentials]
+
+A sign-in on this computer is valid for 90 days. Submitting a workflow or checking your account status restarts the 90 days, so on a computer you use regularly you rarely need to sign in again.
+
+After the sign-in expires, commands that require it ask you to sign in, just like the first time. A queued workflow that hasn't started yet stops at `on-hold` when its turn comes. Sign in again and run `cdg dag recover <name>{:sh}` to continue.
+
+## Sign out, use multiple computers, and switch accounts [#sign-out]
+
+```bash title="Terminal"
+cdg auth logout
+```
+
+Signing out ends only the CLI sign-in on this computer. The CLI and the web console (app.codedag.com) are signed in independently. Signing out on the web doesn't sign the CLI out, and signing out of the CLI doesn't affect the web console or your other computers.
+
+You sign in once on each computer, and all computers on the same account share the same credits. You can't share a sign-in between computers by copying credentials. As soon as copied credentials are used again, every CLI sign-in for the account is revoked, on all computers, and you have to sign in again on each one.
+
+To switch to another account, run `cdg auth logout{:sh}`, then run `cdg auth login{:sh}` and choose a different Google account. If the web console in your browser is still signed in to the original account, sign out there first. Otherwise, sign-in uses that account directly.
+
+Neither signing out nor switching accounts affects workflows that have already started running. A queued workflow that hasn't started uses this computer's sign-in only when its turn comes. If you aren't signed in at that point, or you're signed in to an account other than the one that submitted it, it stops at `on-hold`. Sign in again or switch back to the original account, then run `cdg dag recover <name>{:sh}` to continue.
+
+## Where your data goes [#data-boundary]
+
+Workflows run on your computer. The CodeDAG service receives only the workflow file and a small amount of environment information, which it needs to calculate credits. It doesn't receive your code or logs.
+
+Apart from the account information exchanged when you sign in or check your account, the CLI sends data to the CodeDAG service only when you submit a workflow and when a workflow starts running. It sends:
+
+- The full contents of the workflow file, along with its relative path in the repository and its file format
+- The IDs of the tasks to run this time
+- The CLI version, operating system, and processor architecture
+
+The workflow file's contents and path are used only to calculate the credits for this run. They're discarded as soon as the calculation is done, and the CodeDAG service doesn't store them. The charge record keeps only the task IDs, CLI version, operating system, processor architecture, and a checksum of the file contents. The file contents can't be recovered from the checksum.
+
+The code and other files in your repository, the tasks' run logs, and the task agents' session content and output all stay on your computer and aren't sent to CodeDAG. While a task runs, Claude Code or Codex sends code and context to the model service it's connected to, just as it does when you use it directly. That data doesn't pass through CodeDAG, and it's handled under that service's terms.
+
+Prompts are part of the workflow file, so they're uploaded along with it. If a task needs information that shouldn't leave your machine, such as secret keys or internal addresses, put it in a local file and tell the agent in the prompt which file to read. That way only the file path is uploaded, not the file's contents.
+
+CodeDAG records the name, email address, and profile picture of the Google account you use, to identify your account. For the full description of how your data is handled, see the [Privacy Policy](/privacy).
+
+## When the service is unavailable [#service-unavailable]
+
+When the CodeDAG service is temporarily unreachable, commands that don't require sign-in and workflows that are already running usually keep working as normal. On a computer that's already signed in, `cdg init{:sh}` also initializes a project as usual. The following are affected:
+
+- `cdg auth login{:sh}` and `cdg auth status{:sh}` fail.
+- `cdg dag submit{:sh}` fails, and the workflow doesn't enter the queue. Submit it again once the service is back.
+- When a queued workflow's turn comes, its credits can't be deducted, so it stops at `on-hold` with the reason shown as `startup-gate-blocked`. Once the service is back, run `cdg dag recover <name>{:sh}`. The credits are then deducted and the workflow starts running.
+
+A workflow that's already running also stops at `on-hold` if it has to be recovered during the outage, for example after the computer restarts. Handle it the same way.

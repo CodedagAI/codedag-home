@@ -1,0 +1,250 @@
+---
+title: Review
+description: The syntax of the review commands, each option's values and defaults, the combinations allowed, and the rules for resubmitting after you clear the review.
+icon: Table
+---
+
+`cdg task review{:sh}` reviews tasks, and `cdg dag review{:sh}` reviews a whole workflow. Each gives a decision to accept, cancel, or defer. For a task, you can also give no decision and have work on it continue. For which action fits which assessment and how to check the result before you review, see [Review Tasks and Workflows](/docs/guides/review-tasks).
+
+## Actions and syntax [#actions]
+
+The actions of the review commands fall into three groups. `accept`, `cancel`, and `defer` are final actions: they give a decision, and the task or workflow enters `reviewed`. `revise`, `request-changes`, and `rework` are continuation actions: they apply only to tasks and give no decision, and work on the task continues. `clear` clears an existing review. For how final actions and continuation actions differ, see [Review actions](/docs/concepts/review-gates#review-actions).
+
+| Action | Task level | Workflow level | Result |
+|---|---|---|---|
+| `accept` | `cdg task review accept{:sh}` | `cdg dag review accept{:sh}` | Final action, recorded as `accepted` |
+| `cancel` | `cdg task review cancel{:sh}` | `cdg dag review cancel{:sh}` | Final action, recorded as `cancelled` |
+| `defer` | `cdg task review defer{:sh}` | `cdg dag review defer{:sh}` | Final action, recorded as `deferred` |
+| `revise` (revise it yourself) | `cdg task review revise{:sh}` | None | Continuation action. The task stays at `done` for you to edit |
+| `request-changes` | `cdg task review request-changes{:sh}` | None | Continuation action. The original session keeps working on the existing result |
+| `rework` | `cdg task review rework{:sh}` | None | Continuation action. A fresh session redoes the task from the clean baseline |
+| `clear` | `cdg task review clear{:sh}` | `cdg dag review clear{:sh}` | Clears the review. See [Clear the review and resubmit](#clear-and-resubmit) |
+
+```bash title="Terminal"
+cdg task review <action> <task> [-w <workflow>] [options]
+cdg dag review <action> [<workflow>...] [options]
+cdg task review clear <task> -w <workflow>
+cdg dag review clear <workflow>...
+```
+
+All six task-level actions can be written without `review`, for example `cdg task request-changes 2 -w feature{:sh}`. The three workflow-level actions have the same shorthand, for example `cdg dag accept feature{:sh}`. The two `clear` commands have no shorthand.
+
+Review actions act on workflows that have been submitted and are still in the queue. A task-level action handles tasks in one of those workflows. Specify the workflow with `-w`. When `-w` is omitted, the command uses the workflow at the head of the queue. A workflow-level action can handle the running workflow at the head of the queue or a later workflow that hasn't started. If you run `accept`, `cancel`, or `defer` on a workflow that hasn't been submitted, the command still succeeds and records the result, but `cdg dag submit{:sh}` then refuses to submit that workflow until you clear those review records. See [Clear the review and resubmit](#clear-and-resubmit).
+
+## Arguments and options [#options]
+
+A review command's arguments come in two parts. The tasks and workflows say what to review, and the options decide how the code is handled, what happens downstream, and whether a target that's still running is stopped first.
+
+| Argument or option | Applies to | Syntax and default |
+|---|---|---|
+| `<task>` | Every task-level action and `clear` | Required, with no default. One or more task IDs separated by spaces, or task selectors that pick a group of tasks |
+| `-w <workflow>` | Every task-level action and `clear` | The workflow the tasks belong to. Can also be written `--workflow-file` or `--dag`. When omitted, it defaults to the workflow at the head of the queue. Required for `cdg task review clear{:sh}` |
+| `[<workflow>...]` | Every workflow-level action and `clear` | One or more workflows separated by spaces. When omitted, it defaults to the workflow at the head of the queue. Required for `cdg dag review clear{:sh}` |
+| `--code <handling>` | Every action except `clear` | `commit`, `snapshot`, `none`, or `discard`. See [`--code`](#code) |
+| `--downstream <handling>` | `accept`, `cancel`, `defer` | `proceed`, `hold`, or `cascade`. See [`--downstream`](#downstream) |
+| `-m`, `--message <message>` | Every action except `clear` | A review note, or a request passed to the task agent. See [`-m` / `--message`](#message) |
+| `-k`, `--kill` and `-p`, `--pause` | Every action except `clear` | Stops the target first when it's still running. See [`-k` and `-p`](#stop-before-review) |
+| `-y`, `--yes` | Every action except `cdg task review clear{:sh}` | Continues without asking when some of the selected targets are going to be skipped, or when `accept` selects tasks that haven't started. It doesn't replace `--downstream`, `-k`, or `-p` |
+
+For the general syntax for tasks and workflows, see [Specify one or more tasks](/docs/reference/cli#task-ids), [Task selectors](/docs/reference/cli#task-selectors), and [Specify a workflow](/docs/reference/cli#specify-workflow). Selectors in review commands differ from those in control commands in one respect: every selector except `--only` takes only one task ID, whereas selectors in control commands such as `pause` and `kill` can take several. If you write `--upto 2 3`, the extra `3` is treated as a task ID written directly, and the command reports an error because task IDs and a selector are used together.
+
+### --code [#code]
+
+`--code` decides how a review handles the changes a task left. It's available only in isolated-branches mode. In shared-workspace mode, using this option is an error. Here, "changes" means everything modified since the task started, including files in the workspace that aren't committed yet and commits the task agent made itself. When the task branch is rolled back, it returns to the clean baseline it had before the task started, and the results merged in from upstream tasks are kept. For what that means, see [When a result isn't good enough](/docs/concepts/workspaces-and-branches#fallback).
+
+| Value | What happens to the task's changes | When to use |
+|---|---|---|
+| `commit` | Commits the uncommitted changes to the task branch. With `accept`, the result goes downstream. With `cancel` or `defer`, the changes stay on the task branch and aren't passed downstream or merged into the integration branch | You're accepting the result, or you aren't using the result but want to keep the changes on the task branch as they are |
+| `snapshot` | Saves the changes to a snapshot branch first, then rolls the task branch back to the clean baseline | You aren't using the result, or you're scrapping it and starting over, but you may still want to compare against it or restore part of it later |
+| `none` (leave as is) | Touches no files, and the workspace stays as it is | You're going to keep editing yourself, or have the agent keep working on top of the uncommitted state |
+| `discard` | Rolls the task branch straight back to the clean baseline with no snapshot, and the changes can't be restored | You're sure you don't need the changes |
+
+When a task left no changes, none of these values has anything to handle, and no snapshot branch is created. For what a snapshot branch holds and how to find it and restore the parts you need, see [Restore some of the changes from a snapshot](/docs/reference/branches-and-files#restore-from-snapshot). For each action's default and allowed values, see the [task-level](#task-review-options) and [workflow-level](#dag-review-options) combination tables.
+
+Workflow-level review accepts `--code` too, with the values `commit`, `snapshot`, and `discard`, but not `none`. It first handles each task in the workflow that has run but has no decision yet, as described in the table above, and then handles the integration branch. `accept` keeps the merged results on the integration branch. `cancel` and `defer` return the integration branch to this workflow's base: `snapshot` first saves the full set of results to a workflow snapshot branch, while `commit` and `discard` don't save the full set of results separately. A workflow that hasn't started running has no integration branch, so there's no code to handle.
+
+### --downstream [#downstream]
+
+`--downstream` decides what happens, after a final decision, to the downstream tasks that depend on this task, or to the workflows behind this workflow in the queue. Only `cancel` and `defer` give you a choice. `accept` is fixed at `proceed`, and any other value is an error. The three continuation actions don't accept this option.
+
+| Value | Task level: tasks that depend on it | Workflow level: workflows behind it in the queue |
+|---|---|---|
+| `proceed` | Run as usual, as if this task didn't exist. They follow directly after its upstream tasks instead and get the upstream results, without this task's own changes | Start as usual |
+| `hold` | Tasks that depend on it directly and haven't started stop at `on-hold` with the reason `downstream-hold`, and tasks further downstream wait behind them. Release them with `cdg task recover{:sh}` | Every workflow that's still waiting stops at `on-hold` with the reason `downstream-hold`. Release them with `cdg dag recover <workflow>{:sh}` |
+| `cascade` | Every task that depends on it directly or indirectly and hasn't started gets the same decision (`cancelled` or `deferred`) and doesn't run | Every later workflow gets the same decision and doesn't run |
+
+When you omit this option, `defer` defaults to `cascade`. `cancel` has no default: when there's anything downstream, the command asks you to choose in the terminal, and when there's nothing downstream, it uses `proceed`. In an environment without an interactive terminal, such as a script or an agent's shell tool, the question can't be answered. The command reports an error and exits with code 1 without changing anything, and it tells you to retry with `--downstream` set explicitly. For how downstream work continues after you release a hold, see [Downstream tasks or workflows put on hold](/docs/troubleshooting/troubleshooting#downstream-hold).
+
+### -m / --message [#message]
+
+`-m` attaches a piece of text, and what it's used for depends on the action. Final actions and `revise` record it as a review note, and `request-changes` and `rework` pass it to the task agent.
+
+| Action | What `-m` is used for | When omitted |
+|---|---|---|
+| `accept`, `cancel`, `defer` (task level and workflow level) | A review note. When the review has to create a commit for uncommitted changes (`--code` is `commit` or `snapshot`), it's also that commit's message | The commit message is the task title |
+| `revise` | A review note. If you later run `rework` on the same task, it's passed to the new session along with the other feedback | No note is recorded |
+| `request-changes` | Passed as is to the original session, as the request for further changes | A built-in request is sent that has the agent reread the original task, find what it hasn't satisfied yet, and keep working |
+| `rework` | Passed to the new session, together with the original prompt and the feedback from earlier rounds on this task | The new session still receives the original prompt and the earlier feedback |
+
+Continuation actions may create commits too. For example, `request-changes` commits the current changes first by default. The message of such a commit is always `CodeDAG review <action> task <task-id>` and doesn't use the `-m` text. For how to write a clear change request, see [Have it keep working on the existing result: request-changes](/docs/guides/review-tasks#request-changes).
+
+### -k / --kill and -p / --pause [#stop-before-review]
+
+When the target of a review is still running, use `-k` or `-p` to stop it first and then apply the review action. The two options work with the six task-level actions and the three workflow-level actions, and you give only one of them per command. When the target isn't running, they have no effect. On a workflow-level command, they apply to every running task in the workflow.
+
+- **`-k`, `--kill`:** Kills immediately, with the same effect as `cdg task kill{:sh}` or `cdg dag kill{:sh}`. Whatever the task agent is doing is interrupted, and the session is kept. The changes it leaves may be only half done, so check them before you accept or commit.
+- **`-p`, `--pause`:** Pauses first, with the same effect as `cdg task pause{:sh}` or `cdg dag pause{:sh}`. The command waits for the task agent to finish what it's doing and stop, and then applies the review. It waits at most 60 seconds. If the agent hasn't stopped by then, the command exits with an error and the review isn't applied. The task is still `draining` (finishing its current step). Run the review again once it has stopped, and you don't need `-p` that time.
+
+Without either option, if the target is running (`working` or `draining`), `accept`, `defer`, and the three continuation actions fail right away without changing anything. `cancel` asks you in the terminal whether to kill first, pause first, or abandon the review. Without an interactive terminal, it reports an error, exits with code 1, and tells you to specify `-k` or `-p`. To cancel without anyone having to choose, specify both how to stop the target and what happens downstream:
+
+```bash title="Terminal"
+# Kill task 3 first, then cancel it; the downstream tasks that depend on it run as usual
+cdg task review cancel 3 -w feature -k --downstream proceed
+# Kill the whole workflow first, then cancel it; later workflows in the queue start as usual
+cdg dag review cancel feature -k --downstream proceed
+```
+
+For how to use a continuation action on a running task, see [Use request-changes on a running task](#running-request-changes).
+
+## Action and option combinations [#combinations]
+
+### Task level [#task-review-options]
+
+In isolated-branches mode, each of the six task-level actions has its own default and allowed values for `--code` and `--downstream`, and the continuation actions also require the task to have stopped. `-m` is optional for all six actions. For what it's used for, see [`-m` / `--message`](#message). For how shared-workspace mode differs, see [Shared-workspace mode](#shared-workspace).
+
+| Action | `--code` default | `--code` allowed | `--downstream` default | `--downstream` allowed | Required task state |
+|---|---|---|---|---|---|
+| `accept` | `commit` | `commit` only | `proceed` | `proceed` only | Any, as long as the task has no decision yet |
+| `cancel` | `snapshot` | `snapshot`, `commit`, `discard` | None. Asks when there are downstream tasks, and uses `proceed` when there are none | `proceed`, `hold`, `cascade` | Any, as long as the task has no decision yet |
+| `defer` | `snapshot` | `snapshot`, `commit`, `discard` | `cascade` | `proceed`, `hold`, `cascade` | Any, as long as the task has no decision yet |
+| `revise` | `none` | `none`, `commit`, `snapshot`, `discard` | Not accepted | Not accepted | `done`, `paused`, or `killed` |
+| `request-changes` | `commit` | `commit`, `none` | Not accepted | Not accepted | `done`, `paused`, or `killed` |
+| `rework` | `snapshot` | `snapshot`, `discard` | Not accepted | Not accepted | `done`, `paused`, or `killed`; available only in isolated-branches mode |
+
+A final action can be used on any task that doesn't have a decision yet, including tasks that are waiting for upstream or on hold, tasks that have been paused or killed, and tasks that have finished running. A task that hasn't started doesn't run once it's canceled or deferred. It has no changes, so `--code` has no effect on it. When a task is running, add `-k` or `-p`.
+
+`cancel` and `defer` can end a task directly when it stopped because its startup preparation failed. You don't have to clean anything up or run `cdg task recover{:sh}` first. Such a task is stopped at `on-hold`, or was killed after stopping there and is now `killed`, for a reason such as a workspace that isn't clean or a fixed branch name that's already taken. It has never run, so the review doesn't check its workspace or touch the uncommitted changes there, and neither the default nor an explicit `--code` value has any effect on it. If the workspace it holds is also the integration workspace (typically the primary repository of a single-workspace project), you still have to clean up that workspace before you end the whole workflow with `cdg dag review{:sh}`. `accept` and the three continuation actions still fail on a task stopped this way, and the error gives two ways out: deal with the cause and then recover the task, or use `cancel` or `defer` instead. For the steps for each reason, see [A task or workflow is on hold](/docs/troubleshooting/troubleshooting#on-hold).
+
+`accept` works only with `commit` and `proceed`, because an accepted result is always committed to the task branch and passed downstream. By default, `request-changes` commits the current changes to the task branch before it hands the request to the agent, so that you can see what the new round changed on its own.
+
+Continuation actions require the task to have stopped: it must be `done`, `paused`, or `killed`. If you run `revise` on a paused or killed task, the task returns to `done` and waits for you to finish your edits and give a decision. `request-changes` hands the request to the original session. When the agent finishes that round, the task returns to `done` and, according to its workflow's review settings, waits for your review or is auto-accepted. `rework` switches to a fresh session that redoes the task from the clean baseline. The task no longer refers to the original session, and from then on `cdg task view{:sh}` enters the new one. Continuation actions can't be used directly on an `on-hold` task. Deal with the cause and recover the task with `cdg task recover{:sh}` first, or end it with a final action.
+
+### Workflow level [#dag-review-options]
+
+The three workflow-level actions have the same defaults as the task-level actions of the same names. They differ in that `--code` has no `none` and `--downstream` applies to the later workflows in the queue. `-m` is optional here too.
+
+| Action | `--code` default | `--code` allowed | `--downstream` default | `--downstream` allowed |
+|---|---|---|---|---|
+| `accept` | `commit` | `commit` only | `proceed` | `proceed` only |
+| `cancel` | `snapshot` | `snapshot`, `commit`, `discard` | None. Asks when there are later workflows, and uses `proceed` when there are none | `proceed`, `hold`, `cascade` |
+| `defer` | `snapshot` | `snapshot`, `commit`, `discard` | `cascade` | `proceed`, `hold`, `cascade` |
+
+A workflow-level review doesn't have to wait for the workflow-level gate. You can give a decision on the whole workflow at any time. Tasks that already have a decision keep it. Tasks that have run but have no decision yet get the same decision as the workflow, and their changes are handled one by one according to `--code`. Tasks that haven't started don't run and get no review result. The workflow then enters `reviewed` and leaves the queue. If you run `cancel` or `defer` on a later workflow that hasn't started, it never runs.
+
+<Callout type="warn">Without `--downstream`, `cdg dag review defer{:sh}` defaults to `cascade`: every workflow behind it in the queue is deferred along with it and doesn't run. To defer just this one workflow, set `--downstream proceed` explicitly.</Callout>
+
+### Shared-workspace mode [#shared-workspace]
+
+Shared-workspace mode has no task branches and no integration branch, so a review only decides how the process continues and doesn't handle files. At the task level, you can use `accept`, `cancel`, `defer`, `revise`, and `request-changes`. At the workflow level, you can use `accept`, `cancel`, and `defer`. `rework` isn't available, and no action can take `--code`: using it is an error. That error depends only on the workflows the command names. When a workflow-level review of a workflow in isolated-branches mode cascades with `--downstream cascade` to workflows in shared-workspace mode, those workflows end with that action as usual, just without any code handling. The usage and defaults of `--downstream`, `-m`, `-k`, and `-p` are unchanged.
+
+The files a task writes all stay in the workspace the workflow runs in, which is the primary repository by default. Canceling or deferring doesn't take those files back, and downstream tasks still see them. To keep or undo them, commit or revert them yourself with Git in that workspace. For how to check such changes before a review, see [How does review differ in shared-workspace mode?](/docs/guides/review-tasks#shared-workspace).
+
+## Recipes [#recipes]
+
+### Cancel a task but let downstream tasks proceed [#cancel-and-proceed]
+
+When you cancel a task with `--downstream proceed` set explicitly, the downstream tasks skip it and run as usual on top of its upstream results. In the example below, task 2 of the `feature` workflow depends on task 1, and task 4 depends on task 2:
+
+```bash title="Terminal"
+# Cancel task 2 and save its changes to a snapshot branch; task 4 runs as usual
+cdg task review cancel 2 -w feature --downstream proceed
+# Cancel task 2 and discard its changes outright; task 4 runs as usual
+cdg task review cancel 2 -w feature --downstream proceed --code discard
+```
+
+After either command, task 4 starts with task 1's results and without task 2's changes. You can later restore changes from the snapshot branch that the first command leaves. See [Restore some of the changes from a snapshot](/docs/reference/branches-and-files#restore-from-snapshot). You can cancel task 2 the same way before it has started, and it then doesn't run. If it's running, add `-k`.
+
+### Defer a result and keep the code to restore later [#defer-with-snapshot]
+
+`defer` means you're not using this step's result this time. By default it already uses `--code snapshot` to save the changes to a snapshot branch. The commands below spell the option out to make the intent clearer:
+
+```bash title="Terminal"
+# Defer task 2 and save its changes to a snapshot branch; the downstream tasks that depend on it are deferred along with it
+cdg task review defer 2 -w feature --code snapshot
+# Defer only task 2; the downstream tasks that depend on it run as usual
+cdg task review defer 2 -w feature --code snapshot --downstream proceed
+# Defer the whole workflow and save the full set of results to a workflow snapshot branch; later workflows in the queue start as usual
+cdg dag review defer feature --code snapshot --downstream proceed
+```
+
+Both task-level and workflow-level `defer` cascade by default. For what counts as downstream, see [`--downstream`](#downstream). For how to restore from a snapshot branch, see [Restore some of the changes from a snapshot](/docs/reference/branches-and-files#restore-from-snapshot). To pick up the deferred work later, write it into a new workflow. See [Run only a few of the tasks](/docs/guides/finish-and-merge#continue-remaining).
+
+### Use request-changes on a running task [#running-request-changes]
+
+While a task is still running, you can add `-k` or `-p` to stop it first and then use `request-changes` to hand a new request to its original session. No interactive terminal is needed:
+
+```bash title="Terminal"
+# Kill task 2 immediately, then hand the requested changes to its original session
+cdg task review request-changes 2 -w feature -k -m "<requested-changes>"
+# Wait for task 2 to finish what it's doing and stop, then hand it the requested changes
+cdg task review request-changes 2 -w feature -p -m "<requested-changes>"
+```
+
+When `-m` is omitted, the built-in request is sent. For how the two ways of stopping differ, see [`-k` and `-p`](#stop-before-review). By default, the current changes are committed before the agent starts on the request. For the default and the other allowed values, see the [task-level combination table](#task-review-options). For when to use this approach and when to enter the session and talk to the agent directly, see [Choose how to observe and make changes](/docs/guides/intervene-and-control#choose-intervention).
+
+With `-k`, the command waits briefly to confirm that the request has been delivered to the session, and it exits once delivery is confirmed. If the wait runs out while it's still confirming, the command exits anyway, and delivery continues in the background. If the request can't be delivered in the end, the task stops at `on-hold` with the reason `continuation-dispatch-failed`, and running `cdg task recover 2 -w feature{:sh}` delivers the same request again.
+
+Until the request is delivered, the task doesn't accept new review commands, and the same is true while CodeDAG is recovering the task. The command tells you that an operation is already in progress. Wait for it to finish, and then review. If the task is stopped at `on-hold`, run `cdg task recover{:sh}` first.
+
+### Review several tasks at once [#batch-review]
+
+A single review command can handle several tasks in the same workflow, and all of them get the same action and the same options. You can write several task IDs directly, or use a task selector to pick tasks by their dependencies:
+
+```bash title="Terminal"
+# Accept tasks 2 and 3
+cdg task accept 2 3 -w feature
+# Defer task 4 and every task that depends on it
+cdg task defer --downfrom 4 -w feature
+```
+
+Selectors pick tasks by their dependencies alone and don't look at their state, and final actions also apply to tasks that haven't started. So when you use `accept` with a range selector such as `--upto` or `--downfrom` and the selection includes tasks that haven't started, the command lists them first and then asks whether to accept them without running them. The default is not to accept. With `-y`, they're accepted without asking. Without an interactive terminal and without `-y`, the command reports an error and exits with code 1. The question doesn't come up when you write task IDs directly or name tasks one by one with `--only`. For the full selector syntax, see [Task selectors](/docs/reference/cli#task-selectors).
+
+If some of the selected tasks already have a decision, the command skips them and first asks whether to go ahead with the rest. Without an interactive terminal, it reports an error and exits with code 1. With `-y`, it handles the rest without asking.
+
+A workflow-level command can also take several workflows at once, for example `cdg dag review accept feature docs{:sh}`. They likewise get the same action and the same options, and those whose review is already finished are skipped under the same rule as above, with the same question. With `cascade`, the decision also goes to every workflow queued behind whichever of the named workflows is nearest the head of the queue.
+
+## Clear the review and resubmit [#clear-and-resubmit]
+
+A workflow whose review is finished can be run again only as a whole. First clear its review with `cdg dag review clear{:sh}`, which returns it to `planning`, and then submit it with `cdg dag submit{:sh}`. Both commands require you to name the workflow:
+
+```bash title="Terminal"
+cdg dag review clear feature
+cdg dag submit feature
+```
+
+`cdg dag review clear{:sh}` can take several workflows at once. It clears the review of each workflow and of every task in it. The task branches, integration branch, and snapshot branches all stay in the repository and aren't affected. A workflow that's still in the queue is skipped. When some of the workflows you name are still in the queue, the command first asks whether to go ahead and clear the rest. Without an interactive terminal, it reports an error and exits with code 1. With `-y`, it goes ahead without asking. To rerun a workflow that hasn't finished yet, first end the current run with `cdg dag review accept{:sh}`, `cancel`, or `defer`, and then clear the review. For the full steps, see [Modify a submitted workflow](/docs/reference/cli/validate-and-submit#modify-submitted).
+
+Resubmitting starts a new run, which uses CodeDAG credits again, by task count, when it starts running. For where the new run starts and how its branches are named, see [Run the workflow again](/docs/guides/finish-and-merge#run-again). If you only want to run a few tasks that were left undone, or redo a few, see [Run only a few of the tasks](/docs/guides/finish-and-merge#continue-remaining).
+
+### Clear the review of individual tasks [#task-review-clear]
+
+```bash title="Terminal"
+cdg task review clear <task> -w <workflow>
+```
+
+`cdg task review clear{:sh}` clears the review of the selected tasks only. The tasks return to `planning` and don't run again. On a workflow whose review is finished, it doesn't make the workflow submittable again either, and the workflow stays at `reviewed`. The command's output says so and tells you to run `cdg dag review clear{:sh}` and then `cdg dag submit{:sh}`, that is, to clear the whole workflow as described above. So you can't use it to rerun a single task.
+
+It handles only workflows that aren't in the queue. `-w` has no default and is required: when it's omitted, the command reports `Missing required option '--workflow-file/--dag/-w'` and doesn't read or change any workflow. Selected tasks that have no decision yet are skipped. Tasks are specified the same way as in the other review commands, and every selector except `--only` takes only one task ID.
+
+### Task review records in a workflow that hasn't been submitted [#unsubmitted-task-reviews]
+
+After you use `accept`, `cancel`, or `defer` with `cdg task review{:sh}` on tasks in a workflow that hasn't been submitted, `cdg dag submit{:sh}` refuses to submit the workflow as long as any reviewed task remains in it. The error reads `Workflow has review snapshot state`. To submit, clear those tasks' review records first. Either clear command works:
+
+- **`cdg dag review clear <workflow>{:sh}`:** Clears the review of every task in the workflow, after which you can submit it right away.
+- **`cdg task review clear <task> -w <workflow>{:sh}`:** Clears the review of the selected tasks. If no reviewed task is left in the workflow afterward, the workflow can be submitted. If other reviewed tasks remain, it still can't be submitted, and the command's output lists those tasks and tells you to clear every task's review with `cdg dag review clear <workflow>{:sh}`.
+
+## Related
+
+- [Review Tasks and Workflows](/docs/guides/review-tasks): Which of the six actions fits which assessment, and how to check the result before you review.
+- [Finish, Merge, and Clean Up](/docs/guides/finish-and-merge): After a workflow's review is finished, how to check the integration branch, merge into the main branch, and run the workflow again.
+- [Auto-accept values](/docs/reference/workflow-file#auto-accept-values): Decide in the workflow file which tasks and workflows stop and wait for your review.

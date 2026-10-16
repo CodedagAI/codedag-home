@@ -1,0 +1,96 @@
+---
+title: Review Gates and Auto-Accept
+description: How a finished task's result gets its sign-off at a review gate, and which nodes are worth stopping at for a person to review.
+icon: ClipboardCheck
+---
+
+When a task finishes, its result has to pass review before it goes to downstream tasks. Once the results of all the tasks have been merged, the workflow as a whole goes through one more review. Both reviews pass automatically by default, and an automatic pass doesn't check whether the result is correct. So any node that needs a person's sign-off has to be set ahead of time to stop and wait for you, and you can't change that after you submit. When the process stops, you can accept the result, have the agent keep working on it or rework it from scratch, or decide you don't want it. Once a decision is given, it can't be changed within that run.
+
+## Review gates [#review-gate]
+
+When a task agent ends its work, that doesn't mean the result is usable. If a flawed result goes straight to downstream tasks, all the work built on it has to be redone. So a result is reviewed before it goes downstream, and it's let through only with a sign-off. That sign-off can come from you, or it can be given automatically under rules set in advance. The point in the process where this review happens is a **review gate**.
+
+CodeDAG has two gates. The **task-level gate** comes after each task finishes and before the downstream tasks that depend on it start. It decides whether the task's result can go downstream. The **workflow-level gate** comes at the very end of the workflow. Results that each look fine on their own don't necessarily work together, so once every task has a decision and the results have been merged, one more decision is made on the results as a whole before the workflow counts as finished.
+
+When a task finishes, its status becomes [`done`](/docs/concepts/how-it-works#status-definition) and it's reviewed at the task-level gate. Once it passes, the task enters the [`reviewed`](/docs/concepts/how-it-works#phases) phase, and only then do the downstream tasks that depend on it start. After all the tasks are `reviewed`, CodeDAG merges their results into the integration branch (in the default isolated-branches mode), and the workflow is then reviewed at the workflow-level gate. Once it passes, the workflow enters `reviewed` and leaves the queue, and the next workflow in the queue starts running. You review at the two gates with `cdg task review{:sh}` and `cdg dag review{:sh}`, respectively.
+
+Each gate can be open or closed. When a gate is open, results pass automatically. When it's closed, the process stops and waits for your decision.
+
+export const reviewGatesChart = `%%{init: {"flowchart": {"rankSpacing": 34}}}%%
+flowchart TD
+  t1["Task finishes: done"] --> g1{{"Task-level gate"}}
+  g1 -->|Open, auto-accepted| r1["Task enters reviewed"]
+  g1 -->|Closed| w1["Stops and waits for your review"]
+  w1 -->|You give a final decision| r1
+  r1 --> d1["Downstream tasks that<br/>depend on it start"]
+  r1 -.->|All tasks have<br/>entered reviewed| m1["Results are merged into<br/>the integration branch"]
+  m1 --> g2{{"Workflow-level gate"}}
+  g2 -->|Open, auto-accepted| r2["Workflow enters reviewed<br/>and leaves the queue"]
+  g2 -->|Closed| w2["Stops and waits for your review"]
+  w2 -->|You give a final decision| r2`;
+
+<Tabs items={['Diagram', 'Code']}>
+  <Tab value="Diagram">
+    <Mermaid chart={reviewGatesChart} />
+  </Tab>
+  <Tab value="Code">
+    <DynamicCodeBlock lang="mermaid" code={reviewGatesChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+## Auto-accept [#auto-accept]
+
+If every result had to wait for a person to review it, an unattended run would turn back into an attended one, and most results don't need to be looked over one by one anyway. So both of CodeDAG's gates are open by default, and a result passes automatically as soon as it's finished. This is called **auto-accept**. You close the gate only at the nodes that are worth reviewing yourself, and the process stops there and waits for you.
+
+You set whether a gate is open or closed in the workflow file. A task's `autoAccepted` controls that one task, the workflow's `taskAutoAccepted` is the default for all of its tasks, and `dagAutoAccepted` controls the workflow-level gate. When the value is `none`, the corresponding gate is closed. For all the values, see [Auto-accept values](/docs/reference/workflow-file#auto-accept-values).
+
+### Which nodes are worth closing the gate on [#when-to-close]
+
+Close gates sparingly and choose them carefully, because every closed gate has a cost. While a task is stopped at its gate, the downstream tasks that depend on it are waiting too. In isolated-branches mode, it also keeps occupying its [workspace](/docs/concepts/workspaces-and-branches#workspaces) the whole time, so fewer tasks can run concurrently. And when the workflow-level gate is closed, the workflows behind it in the queue don't start until you give a decision. These are the kinds of nodes where closing the gate is usually worth it:
+
+- **A node that all the later tasks build on.** An implementation plan or an interface contract, for example. If it's wrong, all the downstream work is wasted, and stopping right after it costs the least.
+- **A new workflow on its first run.** While you're still not sure whether the prompts are clear enough, you can set `taskAutoAccepted` to `none`, look over the tasks one by one, and switch back to auto-accept once you've confirmed there are no problems.
+- **A workflow with other workflows queued behind it.** When `baseRef` isn't set, the next workflow starts from this workflow's results by default (see [base](/docs/concepts/workspaces-and-branches#branches)). Closing the workflow-level gate lets you confirm those results before the next workflow starts.
+
+Conversely, when you're running just one workflow, leaving the workflow-level gate at its default is usually enough. CodeDAG doesn't touch your main branch, and whether the results end up there is your decision anyway.
+
+### Tasks that leave no changes aren't auto-accepted [#zero-output]
+
+In isolated-branches mode, a task that finishes without leaving any changes isn't auto-accepted, even when its gate is open. It stops and waits for your review instead. In this mode, everything a task produces shows up as changes on its branch. A task that ends without changing anything often didn't really get its work done. It may have been interrupted partway through, or it may not have written its conclusions into a file. Letting it through automatically at that point would start the downstream tasks with missing input. If a task really doesn't need to change any files, just look it over and accept it manually.
+
+In shared-workspace mode, this check only warns you and doesn't stop the task. See [How does review differ in shared-workspace mode?](/docs/guides/review-tasks#shared-workspace).
+
+## Review actions [#review-actions]
+
+When the process is stopped at a gate, the review actions you can take fall into two groups. A **final action** gives a decision, and the node ends there. A **continuation action** gives no decision. It has the task keep making changes and then come back to the gate.
+
+There are three final actions. `accept` lets the result through. `cancel` means you don't want the result. `defer` means you're setting this step aside for now to deal with later. All three move the task into `reviewed`. When you cancel or defer in isolated-branches mode, the task's own changes aren't passed downstream, and you choose during the review whether the downstream tasks keep running, stop and wait for you, or end along with it. Auto-accept amounts to CodeDAG running `accept` for you according to the rules. The review result is recorded as `auto-accepted`, to set it apart from the `accepted` you give yourself.
+
+There are three continuation actions as well, and they differ in who makes the changes and where the changes start from. With `revise` (revise it yourself), you edit the result in the task's workspace and then give a final decision. `request-changes` passes your feedback to the original session and has it keep working on the existing result. `rework` saves the current result to a snapshot or discards it, then starts a fresh session from the clean baseline the task had before it began and does the task over from the beginning. For how this works, see [When a result isn't good enough](/docs/concepts/workspaces-and-branches#fallback). With the last two, once the agent has finished its changes, the task becomes `done` again and is reviewed under the same rules.
+
+The workflow-level gate has only the three final actions. By that point every task already has a decision, and the workflow-level review decides only on the results as a whole. In isolated-branches mode, accepting leaves the merged results on the integration branch, while canceling or deferring returns the integration branch to this workflow's base. So if you want the option of having an agent keep making changes when you find a problem, close a task-level gate, such as the one on the workflow's last task, instead of closing only the workflow-level gate. For how to use each action and what options it has, see [Review Tasks and Workflows](/docs/guides/review-tasks).
+
+## Verification tasks [#verification-task]
+
+A person can carefully review only so many results, so it's natural to want a machine to check them first and hand over only the ones that pass. CodeDAG has no built-in test gate. It doesn't run your tests itself, and auto-accept doesn't look at test results. But a task agent can run tests. Write "Run all the tests and fix any failures until they all pass" as a task and put it after the tasks you want checked, and the check becomes a fixed step in the workflow. It's carried out on every run, and any problems it finds are fixed on the spot.
+
+A task like this is called a **verification task**. Task 4 of the [diamond workflow](/docs/concepts/how-it-works#workflow) in How CodeDAG Works is one. The checks aren't limited to tests, either. A build, type checking, linting, or having another agent review the earlier changes (see [One agent does the work, the other checks and fixes it](/docs/guides/mixing-agents#review-and-fix)) can all be written as tasks in the same way.
+
+A verification task is still an agent task. CodeDAG considers it finished on the same basis as any other task: that the agent has ended its work, not that the tests have passed. When the agent can't fix the failures and finally gives up, the task becomes `done` all the same, and if its gate is open it will most likely be auto-accepted. So the prompt for a verification task should spell out the completion criteria and require the agent to write the outcome into a file: which checks it ran, what it fixed, and what still doesn't pass. This record is what a person looks at in the end. In isolated-branches mode it has one more use. If a verification task's checks all pass and it changes nothing, it would stop and wait for your review because it left no changes. Writing the record keeps that from happening.
+
+Add a closed gate after the verification task, and you have a machine checking first and a person taking the last look. You can close the verification task's own gate, so that if there are still problems after you read the record, you can have it keep fixing them. Or you can close the workflow-level gate and make the final decision on the results as a whole.
+
+## Review decisions can't be changed [#no-undo]
+
+Once a final decision is given, it can't be changed within that run, and the same goes for decisions given by auto-accept, because downstream tasks immediately start working on top of the accepted result.
+
+Auto-accept settings can't be modified after a workflow is submitted either. So for any task you need to review yourself, set its `autoAccepted` to `none` before you submit.
+
+Only the review decision can't be changed. The code itself can still be fixed. If you find a problem afterward, deal with the task's changes in Git and then redo the work in a new workflow. For how, see [You find a problem after a task already has a review decision](/docs/troubleshooting/troubleshooting#after-conclusion).

@@ -1,0 +1,21 @@
+{
+  "title": "使用指南",
+  "icon": "Compass",
+  "pages": [
+    "---编写工作流---",
+    "writing-workflows",
+    "designing-tasks-and-prompts",
+    "agents-and-permission-modes",
+    "parallel-workspaces",
+    "mixing-agents",
+    "---运行与观察---",
+    "run-and-monitor",
+    "intervene-and-control",
+    "---审核与收口---",
+    "review-tasks",
+    "finish-and-merge",
+    "---扩展与团队---",
+    "guide-plugin",
+    "team-sharing"
+  ]
+}

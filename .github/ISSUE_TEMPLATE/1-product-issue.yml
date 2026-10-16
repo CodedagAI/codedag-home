@@ -1,0 +1,98 @@
+name: Product issue
+description: Report a problem with CodeDAG, such as an error or unexpected behavior.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues are public. If the problem can't be discussed in public, email hi@codedag.com instead. To report a security vulnerability, see [SECURITY.md](https://github.com/CodedagAI/codedag-home/blob/main/SECURITY.md).
+
+        [Troubleshooting](https://codedag.com/docs/troubleshooting/troubleshooting) covers common problems and may already have the answer.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the [existing issues](https://github.com/CodedagAI/codedag-home/issues?q=is%3Aissue) and didn't find this problem.
+          required: true
+        - label: This report doesn't contain API keys, tokens, passwords or private code.
+          required: true
+  - type: input
+    id: codedag-version
+    attributes:
+      label: CodeDAG version
+      description: The output of `cdg --version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent
+      description: The agent that runs the affected tasks.
+      options:
+        - Claude Code
+        - Codex
+        - Both
+    validations:
+      required: true
+  - type: input
+    id: agent-version
+    attributes:
+      label: Agent version
+      description: The output of `claude --version` or `codex --version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: execution-mode
+    attributes:
+      label: Execution mode
+      description: The `executionMode` of the affected workflow.
+      options:
+        - isolated-branches (default)
+        - shared-workspace
+        - Not related to a workflow
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The commands you ran, and the parts of the workflow file that relate to the problem.
+      placeholder: |
+        1. Wrote a workflow `feature` where task 3 has `dependencies: [1, 2]`.
+        2. Ran `cdg dag submit feature`.
+        3. Watched it with `cdg dag status feature --watch`.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: What happened.
+      placeholder: Task 3 started while task 2 was still running.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: What you expected to happen.
+      placeholder: Task 3 starts only after tasks 1 and 2 have both been accepted.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: |
+        For example, the output of `cdg dag status <workflow>`, of `cdg task status <task-id> -w <workflow>` (the `Reason:` and `Diagnostic:` lines matter most), or the end of `cdg task logs <task-id> -w <workflow> -n 100`. Logs can include your code, paths or secrets. Remove anything that shouldn't be shared.
+      render: shell

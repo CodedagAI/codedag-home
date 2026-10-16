@@ -1,0 +1,418 @@
+---
+title: 2 つ目のワークフロー：コードを変更させる
+description: プライマリリポジトリと worktree 1 つを使って 2 つの TODO を並列に片付け、タスクブランチと統合ブランチを確認してから、結果をメインブランチにマージします。
+icon: GitFork
+---
+
+## このチュートリアルで行うこと
+
+このワークフローには 3 つのタスクがあります。タスク 1 は、プロジェクトの中から最も早く片付けられる TODO を 2 つ選び、それぞれの目標、対象ファイル、完了条件を `docs/plans/two-small-changes.md` に書きます。タスク 2 とタスク 3 はどちらもタスク 1 に依存し、TODO を 1 つずつ担当します。まず最小限のテストを書き、そのテストが通るまで実装します。この 2 つのタスクは、互いに分離された 2 本のブランチで同時に実行されます。3 つのタスクがすべて完了すると、CodeDAG は結果を統合ブランチ `cdg/two-small-changes/integration` にマージします。
+
+export const twoSmallChangesChart = `flowchart LR
+  t1["タスク 1<br/>TODOを2つ選ぶ<br/>実装計画を書く"] --> t2["タスク 2<br/>1つ目を実装"]
+  t1 --> t3["タスク 3<br/>2つ目を実装"]
+  t2 --> m1(["統合ブランチ<br/>cdg/two-small-changes/integration"])
+  t3 --> m1`;
+
+<Tabs items={['図', 'コード']}>
+  <Tab value="図">
+    <Mermaid chart={twoSmallChangesChart} />
+  </Tab>
+  <Tab value="コード">
+    <DynamicCodeBlock lang="mermaid" code={twoSmallChangesChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+ここでいう TODO とは、プロジェクトに記録されてはいるものの、まだ手を付けていない小さな作業のことです。たとえば、コード中の TODO や FIXME コメント、ドキュメント内の TODO リスト、issue トラッカーの項目などです。あらかじめ選んでおく必要はありません。タスク 1 が探し出し、ユーザーの役割と担当範囲に合わせて絞り込みます。適切なものがどうしても見つからない場合は、代わりに小さな変更を 2 つ提案します。
+
+クイックスタートとは違い、このワークフローは CodeDAG のデフォルトである分離ブランチモードを使います。各タスクは専用のワークスペースとタスクブランチでコードを変更し、コミットとマージは CodeDAG が行います。
+
+<Callout type="info">
+このワークフローの実行中、CodeDAG はリポジトリのブランチを切り替えます。プライマリリポジトリと worktree は、それぞれそこで実行中のタスクのブランチに切り替わります。すべて完了した時点で、プライマリリポジトリは元の `main` ではなく、統合ブランチ `cdg/two-small-changes/integration` をチェックアウトした状態になります。`main` 自体にコミットが増えることはなく、結果をマージするかどうかは自分で決められます。実行中はプライマリリポジトリがタスクの作業場所になるため、そこでファイルを編集したりブランチを切り替えたりすると、実行中のタスクの妨げになります。プライマリリポジトリでの作業は、ワークフローが終了してからにしてください。
+</Callout>
+
+## 準備
+
+- [クイックスタート](/ja/docs/get-started/quickstart)を最後まで実行していること。このチュートリアルでは、クイックスタートで使ったリポジトリを引き続き使います。プロジェクトはすでに初期化されています。別のリポジトリを使ってもかまいませんが、その場合は先に、そのリポジトリでクイックスタートの「準備」とステップ 1 を済ませてください。
+- プライマリリポジトリでメインブランチをチェックアウトしていること。以下では、メインブランチの名前を `main` とします。`master` など別の名前の場合は、以降のコマンドの `main` をその名前に読み替えてください。ワークフローは、実行開始時にプライマリリポジトリでチェックアウトされているコミットをベースにします。
+- プライマリリポジトリのワークスペースがクリーンであること。分離ブランチモードでは、クリーンなワークスペースでしかブランチを切り替えません。`git status` に未コミットの変更や未追跡のファイルが残っていると、タスクは `on-hold` で止まり、対処を待ちます。クイックスタートで作られた `docs/codedag-reports/` もこれに含まれるので、先にコミットするか、`git stash -u{:sh}` で退避しておきます。
+- Claude Code を使う場合は、フルアクセスの警告に同意済みであること。このチュートリアルのタスクは `bypassPermissions` で実行されますが、クイックスタートで使ったのは `auto` なので、この警告をまだ見ていないかもしれません。ターミナルで `claude --permission-mode bypassPermissions{:sh}` を一度実行し、「Yes, I accept」を選んで終了してください。詳しくは [Claude Code のフルアクセスの警告にあらかじめ同意する](/ja/docs/guides/agents-and-permission-modes#accept-bypass-warning)を参照してください。
+
+## 1. worktree を用意する
+
+開発に使っていて、プロジェクトを動かしたことのある worktree がこのリポジトリにすでにある場合は、そのままステップ 2 に進んでください。
+
+まだない場合は、ここで 1 つ作ります。2 つのタスクを同時に実行するには、タスクごとにワークスペースが 1 つ必要です。プライマリリポジトリが 1 つ分になるので、git worktree をもう 1 つ追加すれば足ります。理由は[ワークスペース](/ja/docs/concepts/workspaces-and-branches#workspaces)を参照してください。
+
+プライマリリポジトリのルートで次のコマンドを実行します。`my-app` は、自分のプロジェクトのディレクトリ名に置き換えてください。
+
+```bash title="Terminal"
+git worktree add ../my-app-wt-1 -b wt-1
+```
+
+このコマンドは、プライマリリポジトリの隣に `my-app-wt-1` ディレクトリを作り、新しいブランチ `wt-1` をチェックアウトします。このブランチは単なるプレースホルダーで、タスクの開始時に、CodeDAG がこのディレクトリをタスクブランチに切り替えます。
+
+新しいディレクトリにあるのは、バージョン管理されているファイルだけです。`node_modules` や Python の仮想環境のように、テストを実行する前に依存関係のインストールが必要なプロジェクトでは、新しいディレクトリでもいつもどおりインストールしてください。`.env` のようにコミットしていないローカルの設定ファイルも、コピーしておく必要があります。タスク 2 とタスク 3 はそれぞれのワークスペースでテストを実行するため、これらが欠けていると、worktree で実行されるほうのタスクはテストを動かせません。
+
+## 2. worktree を CodeDAG に登録する
+
+[クイックスタート](/ja/docs/get-started/quickstart#init-project)の `Select your repository setup method` で 1 または 2 を選んでいた場合は、このステップも省略できます。
+
+4 を選んでいた場合は、プライマリリポジトリのルートに戻り、もう一度初期化を実行します。
+
+```bash title="Terminal"
+cdg init
+```
+
+いくつかの質問が順に表示されます。最初の質問への答えが、クイックスタートのときとは異なります。
+
+1. `Select your repository setup method`：`1. I have set up git worktrees for this project` を選びます。CodeDAG がこのリポジトリの worktree を自動的に見つけるので、パスを入力する必要はありません。続いて、レプリカとして登録する worktree にチェックを付ける画面になります。先ほど作った `my-app-wt-1` にはデフォルトでチェックが付いているので、Enter で確定します。Claude Code や Codex が自身のセッション用に作った worktree には、デフォルトではチェックが付いていません。
+2. `File ".codedag/.gitignore" already exists. How would you like to handle this file?`：`3. Keep All` を選びます。`.codedag/` にある設定ファイルとテンプレートファイルはクイックスタートのときに生成されたもので、Keep All を選ぶと、すべてそのまま残ります。ローカル設定のファイルも残るため、今回はデフォルトのエージェントを尋ねられません。
+3. `Update maxConcurrency to 2?`：このプロジェクトのワークスペースは 2 つになりましたが、残した設定では同時実行数の上限が 1 のままです。そのため、2 に変更するかどうかを尋ねられます。デフォルトは Yes なので、そのまま Enter を押します。
+
+クイックスタートのときに CodeDAG Guide プラグインをインストールしなかった場合は、インストールするかどうかをもう一度尋ねられます。必要に応じて答えてください。完了すると、出力の冒頭は次のようになります。
+
+```bash title="Terminal"
+✔ Project initialized successfully!
+
+  Project Repository: /Users/you/my-app
+  Project Git workflow stays unchanged.
+  Associated Replica Repositories:
+    - /Users/you/my-app-wt-1
+```
+
+`Associated Replica Repositories` の下に worktree のパスが表示されていれば、このプロジェクトのワークスペースとして登録されています。
+
+同時実行数の上限についての質問に Yes と答えると、プロジェクト設定の上限がワークスペースの数に揃います。それでも、次のステップのワークフローファイルには `maxConcurrency: 2` を明記します。こうしておけば、プロジェクト設定の値にかかわらず、このワークフローでは 2 つのタスクを同時に実行できます。worktree の代わりに clone を使う方法、レプリカをさらに用意する方法、ローカル設定の同時実行数を直接変更する方法は、[並列実行とワークスペース](/ja/docs/guides/parallel-workspaces)を参照してください。
+
+## 3. ワークフローファイルを書く
+
+`.codedag/dags/two-small-changes.yaml` を新しく作り、使用するエージェントに合わせてどちらかのバージョンを選んで、そのまま貼り付けます。2 つのバージョンの違いは、各タスクの `agent` と `mode` だけです。
+
+<Tabs items={['Claude Code', 'Codex']}>
+  <Tab value="Claude Code">
+
+```yaml title=".codedag/dags/two-small-changes.yaml"
+maxConcurrency: 2
+
+tasks:
+  - id: 1
+    title: TODOを2つ選ぶ
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      目標：
+      このプロジェクトの中から、最も早く片付けられる TODO を 2 つ見つけ、それぞれについて簡潔な実装計画を書いてください。計画は、後続の 2 つのセッションに渡し、1 つずつ実装させます。
+
+      詳細：
+      - TODO は、私の役割と担当範囲に合わせて絞り込んでください。コード中の TODO や FIXME コメント、ドキュメント内の TODO リスト、スキップされているテストのほか、GitHub Issues、Linear、Jira など、アクセスできる issue トラッカーから選んでもかまいません。
+      - 適切な TODO が見つからない場合は、このプロジェクトの製品としての位置づけと現状、および私の職務を踏まえて、代わりに小さな変更を 2 つ提案してください。
+
+      完了条件：
+      計画は docs/plans/two-small-changes.md に書きます（ファイルがすでにある場合は、そのまま上書きします）。「1 つ目」と「2 つ目」の 2 つの節に分け、各節に次の内容を明記してください。
+      - 目標：何を実現するのか。1〜2 文で書きます。
+      - 対象ファイル：変更または追加するファイルのパス。テストファイルも含めます。
+      - 完了条件：何をもって完了とするか。先に書く最小限のテストと、そのテストを実行するコマンドも含めます。
+
+      制約：
+      - この計画以外のファイルは、新しく作ることも変更することもしないでください。
+
+  - id: 2
+    title: 1つ目を実装
+    dependencies: [1]
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      目標：
+      docs/plans/two-small-changes.md の「1 つ目」に書かれている TODO を実装してください。
+
+      コンテキストと必読資料：
+      - docs/plans/two-small-changes.md は、前のタスクが書いた計画です。「1 つ目」の節に、目標、対象ファイル、完了条件が書かれています。
+
+      完了条件：
+      - 「1 つ目」に書かれている完了条件を満たすこと。まず最小限のテストを書き、そのテストが通るまで実装します。
+
+      制約：
+      - 変更するのは、「1 つ目」に挙げられているファイルだけにしてください。計画ファイルは変更せず、「2 つ目」の内容も実装しないでください。
+
+      注意事項：
+      - 別のセッションが、別のブランチで「2 つ目」を同時に実装しています。その変更は、あなたからは見えません。両方の結果は、後で CodeDAG がマージします。
+
+  - id: 3
+    title: 2つ目を実装
+    dependencies: [1]
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      目標：
+      docs/plans/two-small-changes.md の「2 つ目」に書かれている TODO を実装してください。
+
+      コンテキストと必読資料：
+      - docs/plans/two-small-changes.md は、前のタスクが書いた計画です。「2 つ目」の節に、目標、対象ファイル、完了条件が書かれています。
+
+      完了条件：
+      - 「2 つ目」に書かれている完了条件を満たすこと。まず最小限のテストを書き、そのテストが通るまで実装します。
+
+      制約：
+      - 変更するのは、「2 つ目」に挙げられているファイルだけにしてください。計画ファイルは変更せず、「1 つ目」の内容も実装しないでください。
+
+      注意事項：
+      - 別のセッションが、別のブランチで「1 つ目」を同時に実装しています。その変更は、あなたからは見えません。両方の結果は、後で CodeDAG がマージします。
+```
+
+  </Tab>
+  <Tab value="Codex">
+
+```yaml title=".codedag/dags/two-small-changes.yaml"
+maxConcurrency: 2
+
+tasks:
+  - id: 1
+    title: TODOを2つ選ぶ
+    agent: codex
+    mode: yolo
+    prompt: |
+      目標：
+      このプロジェクトの中から、最も早く片付けられる TODO を 2 つ見つけ、それぞれについて簡潔な実装計画を書いてください。計画は、後続の 2 つのセッションに渡し、1 つずつ実装させます。
+
+      詳細：
+      - TODO は、私の役割と担当範囲に合わせて絞り込んでください。コード中の TODO や FIXME コメント、ドキュメント内の TODO リスト、スキップされているテストのほか、GitHub Issues、Linear、Jira など、アクセスできる issue トラッカーから選んでもかまいません。
+      - 適切な TODO が見つからない場合は、このプロジェクトの製品としての位置づけと現状、および私の職務を踏まえて、代わりに小さな変更を 2 つ提案してください。
+
+      完了条件：
+      計画は docs/plans/two-small-changes.md に書きます（ファイルがすでにある場合は、そのまま上書きします）。「1 つ目」と「2 つ目」の 2 つの節に分け、各節に次の内容を明記してください。
+      - 目標：何を実現するのか。1〜2 文で書きます。
+      - 対象ファイル：変更または追加するファイルのパス。テストファイルも含めます。
+      - 完了条件：何をもって完了とするか。先に書く最小限のテストと、そのテストを実行するコマンドも含めます。
+
+      制約：
+      - この計画以外のファイルは、新しく作ることも変更することもしないでください。
+
+  - id: 2
+    title: 1つ目を実装
+    dependencies: [1]
+    agent: codex
+    mode: yolo
+    prompt: |
+      目標：
+      docs/plans/two-small-changes.md の「1 つ目」に書かれている TODO を実装してください。
+
+      コンテキストと必読資料：
+      - docs/plans/two-small-changes.md は、前のタスクが書いた計画です。「1 つ目」の節に、目標、対象ファイル、完了条件が書かれています。
+
+      完了条件：
+      - 「1 つ目」に書かれている完了条件を満たすこと。まず最小限のテストを書き、そのテストが通るまで実装します。
+
+      制約：
+      - 変更するのは、「1 つ目」に挙げられているファイルだけにしてください。計画ファイルは変更せず、「2 つ目」の内容も実装しないでください。
+
+      注意事項：
+      - 別のセッションが、別のブランチで「2 つ目」を同時に実装しています。その変更は、あなたからは見えません。両方の結果は、後で CodeDAG がマージします。
+
+  - id: 3
+    title: 2つ目を実装
+    dependencies: [1]
+    agent: codex
+    mode: yolo
+    prompt: |
+      目標：
+      docs/plans/two-small-changes.md の「2 つ目」に書かれている TODO を実装してください。
+
+      コンテキストと必読資料：
+      - docs/plans/two-small-changes.md は、前のタスクが書いた計画です。「2 つ目」の節に、目標、対象ファイル、完了条件が書かれています。
+
+      完了条件：
+      - 「2 つ目」に書かれている完了条件を満たすこと。まず最小限のテストを書き、そのテストが通るまで実装します。
+
+      制約：
+      - 変更するのは、「2 つ目」に挙げられているファイルだけにしてください。計画ファイルは変更せず、「1 つ目」の内容も実装しないでください。
+
+      注意事項：
+      - 別のセッションが、別のブランチで「1 つ目」を同時に実装しています。その変更は、あなたからは見えません。両方の結果は、後で CodeDAG がマージします。
+```
+
+  </Tab>
+</Tabs>
+
+このファイルには `executionMode` を書いていないので、デフォルトの分離ブランチモードが使われます。次の点に注目してください。
+
+- **`maxConcurrency: 2`** は、最大 2 つのタスクの同時実行を許可します。実際に同時に実行できるタスクの数は、利用できるワークスペースの数にも制限されます。ここではプライマリリポジトリと worktree 1 つで、ちょうど 2 つです。詳しくは [`maxConcurrency`](/ja/docs/reference/workflow-file#max-concurrency) を参照してください。
+- **タスク 2 とタスク 3 には、どちらも `dependencies: [1]` を書いている。** どちらもタスク 1 が完了して承認されるまで開始されませんが、互いには依存していません。そのため、タスク 1 が承認されるとすぐに、2 つが同時に開始されます。
+- **タスク 2 とタスク 3 は、`docs/plans/two-small-changes.md` を直接読む。** このファイルは、タスク 1 が自分のブランチで書いたものです。タスク 1 が承認されると、CodeDAG はまずその結果をタスク 2 とタスク 3 のタスクブランチにマージし、それから 2 つのタスクを開始します。そのため、どちらのタスクも最初から、それぞれのワークスペースでこのファイルを読めます。依存関係が情報を受け渡す経路にもなる理由は、[依存関係](/ja/docs/concepts/tasks-and-sessions#dependencies)を参照してください。
+- **並列に実行する 2 つのタスクは、変更範囲が重なってもかまわない。** タスク 2 とタスク 3 はそれぞれのタスクブランチで変更するため、実行中に影響し合うことはありません。両方の結果をマージするときに同じ箇所のコードがぶつかった場合、CodeDAG はまずコンフリクトの解決をエージェントに任せます。詳しくは[合流ノードでのマージとコンフリクト](/ja/docs/concepts/workspaces-and-branches#merge-and-conflicts)を参照してください。このため、タスク 1 は TODO を選ぶときに、同じ箇所を変更することになる 2 つを避ける必要がありません。タスク 2 とタスク 3 の制約も、それぞれの作業を自分の担当分に限定しているだけです。
+
+<Callout type="warn">
+クイックスタートで使った `auto` とは違い、ここで使う `bypassPermissions`（Claude Code）と `yolo`（Codex）は、どちらもフルアクセスです。タスクエージェントは、ファイルの読み書きやコマンドの実行の前に同意を求めなくなります。これによってワークフローを無人実行で最後まで走らせられますが、その代わりに、エージェントの操作は権限チェックを通らなくなります。この設定は、信頼できるタスクと、自分で管理できる環境でだけ使ってください。アクセスレベルごとのトレードオフは、[無人実行か有人実行かを決める](/ja/docs/guides/agents-and-permission-modes#unattended-or-attended)を参照してください。
+</Callout>
+
+## 4. 検証して投入する
+
+まず、ワークフローファイルを検証します。
+
+```bash title="Terminal"
+cdg dag validate two-small-changes
+```
+
+```bash title="Terminal"
+✔ Validation passed: .codedag/dags/two-small-changes.yaml
+```
+
+検証に通ったら投入し、このターミナルでそのままログを追います。
+
+```bash title="Terminal"
+cdg dag submit two-small-changes --attach
+```
+
+```bash title="Terminal"
+✔ Submitted successfully: .codedag/dags/two-small-changes.yaml
+
+Queue position:
+  #1  .codedag/dags/two-small-changes.yaml (now running in background)
+
+📊 Following logs... (Ctrl+C to detach logs, Ctrl+\ to kill current workflow)
+```
+
+まずタスク 1 がプライマリリポジトリで実行されます。タスク 1 が終わって自動承認されると、ログにタスク 2 とタスク 3 の開始行が続けて表示されます。
+
+```bash title="Terminal"
+[Task   1] [2026-09-30 10:39:32] END: TODOを2つ選ぶ
+[Task   2] [2026-09-30 10:39:36] START: 1つ目を実装
+[Task   3] [2026-09-30 10:39:36] START: 2つ目を実装
+```
+
+これ以降は、2 つのタスクのログが入り混じって流れます。クイックスタートのときと同じく、Ctrl+C を押しても、ターミナルがログを追うのをやめるだけで、ワークフローはバックグラウンドで実行を続けます。
+
+## 5. 並列に動く 2 つのタスクを監視する
+
+別のターミナルを開いてプライマリリポジトリに移動し、このワークフローのステータスボードを表示します。
+
+```bash title="Terminal"
+cdg dag status two-small-changes --watch
+```
+
+タスク 2 とタスク 3 の実行中、ステータスボードは次のようになります。
+
+```bash title="Terminal"
+[TZ: -04:00] 2026-09-30 10:39:39
+
+Workflow: .codedag/dags/two-small-changes.yaml
+  Phase: 📤 submitted
+  Queue Position: 1
+  Status: 🟢 in-progress
+  Substatus: working
+
+Submitted Tasks (2):
+  🟢 [in-progress] [working]  Task 2: 1つ目を実装
+  🟢 [in-progress] [working]  Task 3: 2つ目を実装
+
+Reviewed Tasks (1):
+  🤖☑️ [auto-accepted]  Task 1: TODOを2つ選ぶ
+
+Progress: 1/3 tasks completed (33%), 1 reviewed
+```
+
+タスク 1 はすでに自動承認され、`Reviewed Tasks` に移っています。タスク 2 とタスク 3 はどちらも `[in-progress] [working]` で、それぞれワークスペースを 1 つずつ使っています。それぞれがどこで実行されているかを確かめるには、各ワークスペースで現在チェックアウトされているブランチを見ます。
+
+```bash title="Terminal"
+git worktree list
+```
+
+```bash title="Terminal"
+/Users/you/my-app       9a2b3bc [cdg/two-small-changes/t2-1つ目を実装]
+/Users/you/my-app-wt-1  9a2b3bc [cdg/two-small-changes/t3-2つ目を実装]
+```
+
+プライマリリポジトリはタスク 2 のブランチに、worktree はタスク 3 のブランチに切り替わっています。タスクブランチの名前は、`cdg/<ワークフロー名>/t<タスク ID>-<タイトル>` の形式です。2 行のコミットは同じで、どちらも CodeDAG がタスク 1 を承認したときに作成したコミットです。つまり、2 つのタスクはどちらも、タスク 1 の結果から作業を始めています。
+
+## 6. 結果を確認してメインブランチにマージする
+
+2 つのタスクがどちらも完了すると、CodeDAG は両方を自動承認し、2 本のタスクブランチを統合ブランチにマージします。続いて、ワークフロー全体も自動承認されます。ログを追っていたターミナルの表示もそこで終わり、最後の行は次のようになります。
+
+```bash title="Terminal"
+✔ Workflow auto-accepted: .codedag/dags/two-small-changes.yaml
+```
+
+2 つのタスクが同じ箇所のコードを変更していた場合は、統合ブランチへのマージでコンフリクトが発生します。CodeDAG は、まずエージェントに解決を任せます。3 回試みても解決しなかった場合は、上の行は表示されず、ワークフローは `on-hold` で止まって対処を待ちます。対処方法は、[マージコンフリクト](/ja/docs/troubleshooting/troubleshooting#hold-merge-conflict)を参照してください。
+
+ワークフローが終了すると、プライマリリポジトリは統合ブランチをチェックアウトした状態になっており、`git branch --show-current{:sh}` を実行すると `cdg/two-small-changes/integration` と表示されます。まず、統合ブランチにあって `main` にはないコミットを確認します。
+
+```bash title="Terminal"
+git log --oneline main..HEAD
+```
+
+```bash title="Terminal"
+ba8ab12 Merge task 3 into cdg/two-small-changes/integration
+b99fcd0 1つ目を実装
+d6077f1 2つ目を実装
+9a2b3bc TODOを2つ選ぶ
+```
+
+CodeDAG は、タスクを承認するときに、そのタスクが残した変更をタスクブランチにコミットします。コミットメッセージは、タスクのタイトルそのものです。一番上のマージコミットは、CodeDAG がタスク 3 のブランチを統合ブランチにマージしたときのものです。次に、どのファイルが変更されたかを確認します。
+
+```bash title="Terminal"
+git diff main...HEAD --stat
+```
+
+マージする前に、変更をファイルごとに一通り読み、統合ブランチでプロジェクトのテストを実行してください。CodeDAG は、タスクエージェントが作業を終えたことをもって、タスクが完了したと判断します。自動承認もテストの結果は見ません。変更が正しいかどうかは、自分で確認する必要があります。タスク 1 が書いた `docs/plans/two-small-changes.md` も、この変更に含まれています。メインブランチに入れたくない場合は、先に削除してコミットしておきます。
+
+確認が済んだら、結果をメインブランチにマージできます。チームで開発している場合は、通常プルリクエストを経由します。統合ブランチは `main` から作られており、今回の変更がすべて入っています。ここから自分用のブランチを新しく作ってリモートにプッシュし、いつもどおりプルリクエストを作成してください。ブランチ名はチームの規約に合わせて付けます。ここでは `feat/two-small-changes` とします。
+
+```bash title="Terminal"
+git checkout -b feat/two-small-changes cdg/two-small-changes/integration
+git push -u origin feat/two-small-changes
+git checkout main
+```
+
+プッシュは自分で行います。CodeDAG がリモートリポジトリにプッシュしたり、リモートリポジトリからプルしたりすることは一切ありません。最後のコマンドはプライマリリポジトリを `main` に戻すもので、次のワークフローがどこから始まるかも、これで決まります。ワークフローは、実行開始時にプライマリリポジトリでチェックアウトされているコミットをベースにします。プライマリリポジトリが統合ブランチやこの新しいブランチのままだと、次のワークフローは今回の結果の続きから作業することになります。詳しくは[タスクブランチ、統合ブランチ、ベース](/ja/docs/concepts/workspaces-and-branches#branches)を参照してください。
+
+個人プロジェクトなどでコードレビューが不要な場合は、ローカルで直接マージすることもできます。`git checkout main{:sh}` でメインブランチに戻り、続けて `git merge cdg/two-small-changes/integration{:sh}` を実行します。この間に `main` に新しいコミットがなければ、fast-forward マージになります。ほかのマージ方法は、[メインブランチにマージする](/ja/docs/guides/finish-and-merge#merge)を参照してください。
+
+## リポジトリで何が起きたのか
+
+今回の実行で、リポジトリには 3 本のタスクブランチと 1 本の統合ブランチが残りました。`main` は、自分の手でマージするまで一切変更されません。各タスクは専用のワークスペースとタスクブランチで作業し、下流のタスクには、開始前に承認済みの上流の結果がマージされます。すべて完了すると結果は統合ブランチにマージされ、メインブランチに入れてよいかどうかは、最後に自分で確認します。これが、デフォルトの分離ブランチモードの一連の流れです。このような設計にしている理由は、[ワークスペースとブランチ](/ja/docs/concepts/workspaces-and-branches)を参照してください。
+
+| ブランチ | 内容 |
+|---|---|
+| `cdg/two-small-changes/t1-todoを2つ選ぶ` | タスク 1 の結果。つまり計画ファイル |
+| `cdg/two-small-changes/t2-1つ目を実装` | タスク 1 の結果に、1 つ目の実装を加えたもの |
+| `cdg/two-small-changes/t3-2つ目を実装` | タスク 1 の結果に、2 つ目の実装を加えたもの |
+| `cdg/two-small-changes/integration` | 3 つのタスクの結果をマージしたもの。つまり、最終的に `main` にマージする内容 |
+| `wt-1` | ステップ 1 で worktree を作ったときに一緒に作られたプレースホルダーブランチ |
+
+メインブランチにマージした後は、これらの `cdg/two-small-changes/` ブランチをすべて削除できます。worktree のディレクトリは、そこで実行されたタスクのブランチをチェックアウトしたままです。そのブランチを削除する前に、worktree を別のブランチに切り替えておく必要があります。worktree 自体は残しておいてかまいません。今後のワークフローでも、並列実行に引き続き使われます。ブランチの削除と worktree の削除の方法は、[ブランチとワークスペースをクリーンアップする](/ja/docs/guides/finish-and-merge#cleanup)を参照してください。
+
+3 つのタスクの出力は、すべて `.codedag/local/logs/two-small-changes.log` に保存されています。後からいつでも `cdg dag logs two-small-changes{:sh}` で見返せます。
+
+## 途中で止めて確認する
+
+タスク 1 が選んだ TODO が適切かどうかを確認してから、タスク 2 とタスク 3 に着手させたい場合は、タスク 1 の自動承認をオフにします。具体的には、タスク 1 の下に `autoAccepted: none` という行を追加します。
+
+```yaml title=".codedag/dags/two-small-changes.yaml"
+  - id: 1
+    title: TODOを2つ選ぶ
+    autoAccepted: none   # 完了したら止まり、レビューを待つ
+    # agent、mode、prompt はそのまま
+```
+
+変更したファイルは、もう一度投入しないと反映されません。`two-small-changes` は今回すでにレビューが終わっているため、そのままでは再投入できません。まず `cdg dag review clear two-small-changes{:sh}` を実行して投入できる状態に戻し、それからステップ 4 と同じように投入します。これは新しい実行になるので、同じく 3 クレジットを消費します。前回の `cdg/two-small-changes/` ブランチをまだ削除していない場合、今回のブランチ名には、名前が重ならないようにタイムスタンプが付きます。再実行について詳しくは、[もう一度実行する](/ja/docs/guides/finish-and-merge#run-again)を参照してください。
+
+再投入した後は、タスク 1 は完了しても自動承認されず、`done` で止まります。ステータスボードには `[done] [done]` と表示され、タスク 2 とタスク 3 は `[pending] [blocked]` のままです。このときプライマリリポジトリはタスク 1 のブランチをチェックアウトしているので、そこにある `docs/plans/two-small-changes.md` を開けば、タスク 1 が書いた計画を読めます。問題がないことを確認したら、タスク 1 を承認します。
+
+```bash title="Terminal"
+cdg task review accept 1 -w two-small-changes
+```
+
+承認すると、タスク 2 とタスク 3 がすぐに開始され、以降の流れはこれまでと同じです。投入時に `--attach` を付けていた場合は、ログを追っているターミナルにも `Task 1 is ready for review (done).` というメニューが表示され、そこで `accept` を選んでも同じ結果になります。計画に納得できない場合は、タスク 1 に修正を続けさせることも、自分で直接修正することもできます。方法は[判断に応じてアクションを選ぶ](/ja/docs/guides/review-tasks#choose-action)を参照してください。自動承認がデフォルトになっている理由と、どのノードで止める価値があるかは、[自動承認](/ja/docs/concepts/review-gates#auto-accept)を参照してください。
+
+## 次のステップ
+
+- [エージェントにオーケストレーションを任せる](/ja/docs/get-started/let-your-agent-orchestrate)：同じく 2 つの TODO を片付けますが、今度は CodeDAG Guide プラグインを入れた Claude Code または Codex が、ワークフローの作成、投入、追跡を行います。
+- [CodeDAG の仕組み](/ja/docs/concepts/how-it-works)：ワークフロー、キュー、状態、プロジェクトがどのように組み合わさっているか。
+- [ワークフローファイルを書く](/ja/docs/guides/writing-workflows)：自分のワークフローをゼロから書き、ほかにどんなフィールドで実行を制御できるかを確認します。

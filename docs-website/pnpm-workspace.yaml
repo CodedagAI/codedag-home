@@ -1,0 +1,11 @@
+# 依赖的安装脚本只放行确有需要的包。
+# bun：安装脚本把本机平台的 bun 二进制放到 node_modules/.bin/bun，不运行就无法执行构建脚本。
+onlyBuiltDependencies:
+  - bun
+
+# 以下包的安装脚本对本项目没有作用，明确不运行：
+# esbuild 与 sharp 从可选依赖取得预编译二进制；msw 的脚本只在配置了 workerDirectory 时复制文件。
+ignoredBuiltDependencies:
+  - esbuild
+  - msw
+  - sharp

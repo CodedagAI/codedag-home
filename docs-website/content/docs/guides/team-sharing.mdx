@@ -1,0 +1,121 @@
+---
+title: Share with Your Team
+description: Push the .codedag repository to a remote, share workflows and shared settings with your team, and onboard new members.
+icon: Users
+---
+
+Workflow files and project settings live in `.codedag/` at the root of the primary repository. That directory is the project's [sidecar repository](/docs/concepts/how-it-works#sidecar-repo), a Git repository separate from the project repository, and pushing the project repository doesn't take it along. So to let your team reuse the workflows you've written, you push `.codedag` to a remote repository of its own. Only workflow files and shared settings are shared. Each member's queue, workspaces, run state, and logs exist only on their own computer, and each member submits workflows with their own account and runs them separately.
+
+## What's shared and what isn't [#what-to-share]
+
+Everything in `.codedag/` except the `local/` directory can be committed and shared. `local/` holds only what belongs to this computer, and the `.codedag/.gitignore` that `cdg init{:sh}` generates already keeps it out of version control.
+
+| Path | Contents | Shared? |
+|---|---|---|
+| `dags/` | Workflow files | Yes |
+| `settings.jsonc` | Shared settings, which are the team's defaults | Yes |
+| `context/` | Background material that several workflows share, such as requirements and conventions. You create this directory yourself. For how to use it, see [Background shared by several tasks](/docs/guides/designing-tasks-and-prompts#shared-context) | Yes |
+| `.gitignore`, `templates/` | The ignore rules and blank workflow template that `cdg init{:sh}` generates | Committed along with the other files |
+| `local/` | Files that belong only to this computer, such as the local settings in `settings.local.jsonc` and the workflow logs in `logs/` | No |
+
+## Push `.codedag` to a remote [#push]
+
+`.codedag` is an ordinary Git repository, and you share it the way you'd share any repository: commit, add a remote, and push. CodeDAG never commits, pushes, or pulls in this repository, so when to sync is up to you.
+
+First, create an empty repository on the code hosting platform your team uses. You can name it `<project-name>-codedag`, for example `my-app-codedag`, so it's obvious which project it goes with. Then run the commands below from the project root. `.gitignore` already excludes `local/`, so `git add -A` adds only the files that can be shared:
+
+```bash title="Terminal"
+cd .codedag
+git add -A
+git commit -m "Share CodeDAG workflows and settings"
+git remote add origin git@github.com:your-org/my-app-codedag.git
+git branch -M main
+git push -u origin main
+```
+
+From then on, whoever changes a workflow or the shared settings commits and pushes in `.codedag`, and everyone else pulls. A newly pulled version affects only the workflows you submit with `cdg dag submit{:sh}` afterward. A run that's already waiting in the queue or running still uses the definition it had when it was submitted.
+
+## Onboard new members [#onboarding]
+
+A new member first clones the team's `.codedag` repository into the project root and then runs `cdg init{:sh}`. The cloned files are all already committed in the `.codedag` repository, so initialization keeps them as they are without asking about each one, and the repository's remote URL and commit history stay as they are too. The settings for this computer are generated separately, in `local/`.
+
+Before you start, install CodeDAG and sign in to your account by following [Installation and Sign-In](/docs/get-started/installation). Install the agents that the team's workflows specify as well. An agent you install after initialization works right away, with no need to reinitialize.
+
+### 1. Clone the project repository and `.codedag`
+
+```bash title="Terminal"
+git clone git@github.com:your-org/my-app.git
+cd my-app
+git clone git@github.com:your-org/my-app-codedag.git .codedag
+```
+
+### 2. Initialize the project
+
+From the project root, run:
+
+```bash title="Terminal"
+cdg init
+```
+
+It asks the following questions in order:
+
+1. **Replica setup (`Select your repository setup method`):** Choose according to how things are set up on your own computer. Replica registration applies only to this computer and isn't shared along with `.codedag`. If you haven't set up any replicas yet, choose `4. I don't need concurrent tasks, only sequential execution`. When you later want tasks to run in parallel, set up replicas by following [Run in Parallel with Workspaces](/docs/guides/parallel-workspaces) and run `cdg init{:sh}` again.
+2. **Default agent:** You're asked only if both Claude Code and Codex are installed, and your choice affects only this computer. If the team has set `defaultAgent` in the shared settings, the team's choice is listed first, marked `(team default)`. Choose it, and when the team later changes the shared settings, your default changes along with them.
+3. **CodeDAG Guide plugin:** For each agent that doesn't have the plugin yet, you're asked once whether to install it. For how the installation scopes differ, see [Choose an installation scope](/docs/guides/guide-plugin#scopes).
+
+### 3. Accept Claude Code's full-access warning
+
+If the team's workflows run Claude Code tasks with full access (`bypassPermissions`) and you haven't yet accepted this warning on this computer, you have to accept it once yourself. From the project root, run `claude --permission-mode bypassPermissions{:sh}`, choose `Yes, I accept`, and then exit. For details, see [Accept Claude Code's full-access warning in advance](/docs/guides/agents-and-permission-modes#accept-bypass-warning).
+
+### 4. Validate a team workflow
+
+Pick one of the team's workflows and validate it, replacing `review-changes` in the command with its name:
+
+```bash title="Terminal"
+cdg dag validate review-changes
+```
+
+Output that starts with `✔ Validation passed:` means this computer can run the workflow. If you see `is not installed on this machine`, an agent the workflow uses isn't installed on your computer yet. Install it and validate again.
+
+### If you've already initialized this repository [#already-initialized]
+
+If you've run `cdg init{:sh}` in this repository before, `.codedag` already exists, and the clone in step 1 fails. Move the existing `.codedag` out of the project repository first, for example with `mv .codedag ../my-app-codedag-old{:sh}`, then clone the team's repository and initialize again as in step 2.
+
+Reinitializing generates new local settings. For anything you had changed by hand before, look at the files in the old directory's `local/` and make the same changes again. Workflows you wrote yourself keep working once you copy them into the new `.codedag/dags/`.
+
+## What goes in shared settings [#shared-settings]
+
+Rules that the whole team should follow, such as the review policy, go in the shared settings, `.codedag/settings.jsonc`. Values where one member needs to differ from the team, such as the default agent and the concurrency on their own computer, go in the local settings, `.codedag/local/settings.local.jsonc`. When both files set the same field, the local settings take precedence.
+
+The review policy fields `taskAutoAccepted` and `dagAutoAccepted` have nothing to do with any one person's computer, so when you set them in the shared settings, they're the defaults for every member. `defaultAgent` and `maxConcurrency` in the shared settings are the team's defaults. A member who didn't choose a different default agent or set a different concurrency limit during initialization keeps using the team's values, and when the team changes them later, that member's values change too. Set `availableAgents` only when you want to restrict which agents the project can use. For example, a team might agree that every workflow's overall result has to be confirmed by a person before the workflow counts as finished (see [Review gates](/docs/concepts/review-gates#review-gate)):
+
+```jsonc title=".codedag/settings.jsonc"
+{
+  // After all tasks are reviewed, the workflow stops at the workflow-level review gate and waits for a person to give a decision
+  "dagAutoAccepted": "none"
+}
+```
+
+Shared settings are only the team's defaults, and nothing enforces them. A field of the same name in a member's local settings, the corresponding field in a workflow file, and the `--dag-auto-accepted` option at submission all override them. For the full order, see [Defaults and precedence](/docs/reference/workflow-file#precedence). For each field's values, see [Project Settings](/docs/reference/settings).
+
+## Make shared workflows run on every computer [#portable-workflows]
+
+The same workflow file runs separately on each member's computer, and anything in it that depends on one machine's setup can break on another. The two most common culprits are agents and paths.
+
+In a shared workflow, it's best to set `agent` explicitly on every task, and all the more so on tasks that set `mode`. For how, see [Choose an agent](/docs/guides/agents-and-permission-modes#choose-agent). A task without `agent` goes to the project's default agent. If the team has set `defaultAgent` in the shared settings, that's the default for every member. If it hasn't, the default agent is whatever each person chose during initialization, so a task that Claude Code runs on your computer may be run by Codex on a teammate's. The two agents also use different `mode` syntax. `mode: bypassPermissions`, for example, is Claude Code syntax, and a member whose default agent is Codex sees `Invalid codex mode 'bypassPermissions'` when validating the workflow.
+
+For material that every member's tasks need to read, the safest approach is to commit it to the project repository before the workflow starts. A task can then read it with a relative path, whichever workspace it runs in. An absolute path in a prompt is valid only on your own computer, and material in `.codedag/context/` is the most likely to run into this problem. `.codedag/` exists only in the primary repository, so a task that runs in a replica needs a path that points to the primary repository to read it, and such a path, whether relative or absolute, depends on the directory layout of the machine (see [Background shared by several tasks](/docs/guides/designing-tasks-and-prompts#shared-context)).
+
+## Each member runs workflows separately [#running-separately]
+
+Each person's queue, workspaces, and run state exist only on their own computer, so several people can run the same workflow at the same time without affecting one another. All that members share is the workflow files and the shared settings. A workflow you submit waits only in your own queue and runs only in the workspaces you've registered. It doesn't wait for your teammates' workflows. Its status, logs, and review results are also stored only on your computer, where your teammates can't see them.
+
+The results of a run stay local as well. CodeDAG names branches after the workflow, so when two people run the same workflow, each of their repositories ends up with `cdg/<workflow-name>/` branches of the same names. Locally, they don't interfere with each other. But if you push them as is to the team's project remote, they conflict with the same-named branches a teammate has pushed. Merge the results into a branch of your own before you push, and the names won't collide. For how to merge, see [Merge into the main branch](/docs/guides/finish-and-merge#merge).
+
+CodeDAG credits are counted per account. A workflow uses the credits of the account that submits it, so when each member submits with their own account, each uses their own credits.
+
+## Related
+
+- [How CodeDAG Works: Sidecar repository](/docs/concepts/how-it-works#sidecar-repo): Why `.codedag/` is a separate Git repository.
+- [Project Settings](/docs/reference/settings): Every field in the shared settings and local settings, with its values and override rules.
+- [Manage the CodeDAG Guide Plugin](/docs/guides/guide-plugin): Teach your team members' Claude Code and Codex how to use CodeDAG.

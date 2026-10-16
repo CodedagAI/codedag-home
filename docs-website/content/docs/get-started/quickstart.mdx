@@ -1,0 +1,381 @@
+---
+title: "Quickstart: Your First Workflow"
+description: Run your first workflow in your own Git repository. It only adds new files and never changes your existing code.
+icon: Rocket
+---
+
+## What you'll do
+
+You'll write a workflow with two tasks that run one after the other. Task 1 reads the past week of your conversation history with Claude Code or Codex and writes an HTML report. The report analyzes how you use agents for development today and which kinds of work are a good fit for CodeDAG, and it includes a ready-to-use workflow file for each scenario. Task 2 has a different agent review that report: the other agent if you have both installed, or a different model if you have only one. It leaves behind a set of review comments and a rewritten report. Both reports open in your browser automatically once they're written. All three files go in `docs/codedag-reports/run-<number>/`. The first run writes to `run-1`, and the next run creates `run-2`, so earlier results are never overwritten.
+
+export const firstRunChart = `flowchart LR
+  t1["Task 1<br/>Analyze the past week of agent conversations<br/>Write the report"] --> t2["Task 2<br/>Review with a different model<br/>Write review comments and a rewrite"]`;
+
+<Tabs items={['Diagram', 'Code']}>
+  <Tab value="Diagram">
+    <Mermaid chart={firstRunChart} />
+  </Tab>
+  <Tab value="Code">
+    <DynamicCodeBlock lang="mermaid" code={firstRunChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+This workflow doesn't touch your code because it uses shared-workspace mode (`shared-workspace`). Tasks run directly in your current working directory, and CodeDAG doesn't create branches, merge, or commit. The prompt decides which files a task agent writes, and the prompts in this example let it create only one new directory and the report files inside it. CodeDAG's default isolated-branches mode creates a branch for each task and commits its work. You'll try that in the [second workflow](/docs/get-started/second-workflow). For how the two execution modes differ, see [Execution modes](/docs/concepts/workspaces-and-branches#execution-modes).
+
+Running this workflow uses 2 CodeDAG credits, 1 per task. How long it takes depends mostly on how much conversation history there is to read and which model you use. The prompt for task 1 already limits it to a sample of about 20 sessions.
+
+<Callout type="info">
+If you'd rather not write YAML by hand, an agent can write it for you. Give the two tasks described in this section to Claude Code or Codex with the CodeDAG Guide plugin installed (step 1 asks whether to install it), and it writes the same workflow, submits it, and tracks progress for you. See [Let Your Agent Orchestrate](/docs/get-started/let-your-agent-orchestrate). Writing one yourself pays off later, though: you'll be able to read and edit the workflows an agent writes.
+</Callout>
+
+## Before you begin
+
+- **Install CodeDAG and an agent.** Complete [Installation and Sign-In](/docs/get-started/installation), and make sure at least one of Claude Code or Codex is working.
+- **Pick a Git repository that has commits.** Open your terminal at the root of any Git repository that has at least one commit. A workflow uses the current commit as its base when it starts, so it can't start in a new repository that has no commits yet.
+- **Let Claude Code read files outside the repository.** You need this only if you use Claude Code and have never let it read a file outside the repository in auto mode. The tasks in this tutorial read conversation history that is stored outside the repository, and Claude Code asks for permission the first time it does that. If the question first comes up while a task is running, the task stops and waits for you. To avoid that, run `claude --permission-mode auto{:sh}` in a terminal ahead of time, have it read a file outside the repository, choose "Yes, and keep allowing any reads outside the working directories" when it asks, and then exit. See [Allow Claude Code to read files outside the working directory in advance](/docs/guides/agents-and-permission-modes#allow-outside-reads).
+
+## 1. Initialize the project [#init-project]
+
+From the repository root, run:
+
+```bash title="Terminal"
+cdg init
+```
+
+If you aren't signed in yet, `cdg init` opens your browser so you can sign in first. It then asks a few questions in order:
+
+1. `Select your repository setup method`: Choose `4. I don't need concurrent tasks, only sequential execution`. The two tasks in this tutorial run one after the other, so the primary repository is all you need. Parallel execution needs replica workspaces, and you'll set those up in the second workflow. If this repository already has worktree or clone replicas, you can choose 1 or 2 instead, whichever applies.
+2. `Which agent would you like to set as the default for this project?`: This question appears only if both Claude Code and Codex are installed. Choose either one. The default agent only determines which agent runs tasks that don't set the `agent` field, and every task in this tutorial sets it.
+3. `Install the CodeDAG plugin for Claude Code?`, and the same question for Codex: You're asked once for each agent installed on this machine. Choose `User-level` each time, not `Skip`. The plugin teaches Claude Code and Codex how to operate `cdg` and write workflow files, and installing it at the user scope makes it available in all your projects. The tasks in this tutorial rely on it to write ready-to-use workflow files for you.
+
+When it finishes, you see output like this:
+
+```bash title="Terminal"
+✔ Project initialized successfully!
+
+  Project Repository: /Users/you/my-app
+  Project Git workflow stays unchanged.
+  Associated Replica Repositories:
+
+  CodeDAG Sidecar Repository: /Users/you/my-app/.codedag
+  The project repository and the `.codedag` sidecar repository are separate Git repositories, so manage them independently.
+  Use Git inside `.codedag` to manage team-shared workflows and shared settings.
+```
+
+Initialization creates a `.codedag/` directory at the repository root, and that directory is a separate Git repository. Inside it, `dags/` holds workflow files, and `settings.jsonc` and `local/settings.local.jsonc` are the project settings. Your project repository ignores this directory through `.git/info/exclude`, so it doesn't show up in `git status`, and none of your tracked files change. For why `.codedag/` is a repository of its own, see [Sidecar repository](/docs/concepts/how-it-works#sidecar-repo).
+
+Next, run `cdg plugin status{:sh}` to confirm that the plugin is installed. Under each agent you plan to use, both `Plugin installed` and `Enabled` should be `true`. If the plugin shows as not installed, run `cdg plugin install --scope user{:sh}` to install it. See [Manage the CodeDAG Guide Plugin](/docs/guides/guide-plugin).
+
+## 2. Write the workflow file
+
+In the `.codedag/dags/` directory, create a file named `first-run.yaml`. Pick the version below that matches the agents you have installed and paste it in as is. Workflow files must live in the primary repository's `.codedag/dags/` directory. The file name is the workflow's name, so the commands that follow refer to this workflow as `first-run`.
+
+<Tabs items={['Claude Code and Codex', 'Claude Code only', 'Codex only']}>
+  <Tab value="Claude Code and Codex">
+
+```yaml title=".codedag/dags/first-run.yaml"
+executionMode: shared-workspace
+
+tasks:
+  - id: 1
+    title: Analyze the past week of agent conversations
+    agent: claude
+    mode: auto
+    prompt: |
+      Goal:
+      Read my conversation history with Claude Code and Codex from the past 7 days, then write an HTML report and open it in the browser. The report should explain how I use agents for development today, which kinds of work are a good fit for CodeDAG workflows, and exactly how to go about it.
+
+      Requirements:
+      - Read only conversation history from the past 7 days. If you can't find any history for one of the agents, skip it. Skip this task's own session too. If there are many sessions, read a sample of about 20 in total, preferring sessions from the current repository.
+
+      Context and required reading:
+      - Before you start writing, use the codedag-guide skill from the CodeDAG Guide plugin to learn what CodeDAG is good for, as well as the fields and syntax of workflow files.
+
+      Completion criteria:
+      Under docs/codedag-reports/, create a directory named run-<number>, where the number is one more than the highest number among the existing run-* directories, or 1 if there are none. Write the report as an HTML file named workflow-review.html in that directory, with three parts:
+      1. Usage profile: Briefly describe the kinds of tasks I do most often, how long my sessions are and how many turns they take, and which steps keep recurring. Include only the profile details and statistics that support part 2, and focus on the conclusion they lead to: which parts of how I work today could be done with workflows instead.
+      2. Three to five scenarios that are a good fit for workflows: For each scenario, describe which of my current practices it replaces, how to split it into tasks, the dependencies between the tasks, and what it's expected to save. Attach a workflow file that can be copied and used as is.
+      3. Work that is still better done in an interactive session, and why.
+      For each conclusion, note which sessions it's based on (the date and project name are enough).
+      Write the workflow files as the codedag-guide skill describes, and give a suggested file name for each. Show the first scenario's workflow file expanded by default and the others collapsed by default, expandable with a click. Give each file a copy button.
+      The HTML report is a single file, with its styles and scripts inline and no external resources. When it's written, open it in the system's default browser so I can read it right away: use open on macOS and xdg-open on Linux.
+      If this machine has no graphical interface, or opening the report fails, also write a Markdown file with the same content, workflow-review.md, as a fallback.
+
+      Constraints:
+      - Create only the directory above and the report files inside it. Don't modify or delete any existing file in the repository.
+      - Don't quote sensitive information such as keys, tokens, or passwords in the report.
+
+  - id: 2
+    title: Review and rewrite the report
+    dependencies: [1]
+    agent: codex
+    mode: auto
+    prompt: |
+      Goal:
+      Review the latest report under docs/codedag-reports/, write up your review comments, and produce an improved, complete version.
+
+      Context and required reading:
+      - Each run's results are in docs/codedag-reports/run-<number>/. The directory with the highest number is the latest run, and the report is the workflow-review.html file inside it.
+      - Another agent wrote this report from my conversation history with Claude Code and Codex over the past 7 days. Each conclusion notes the sessions it's based on, so you can spot-check those sessions when you verify the key conclusions.
+      - The report attaches a workflow file to each scenario. Before you check whether they can be used as is, use the codedag-guide skill from the CodeDAG Guide plugin to learn the fields and syntax of workflow files.
+
+      Completion criteria:
+      - Write the review comments to workflow-review-comments.md in the same directory. List, one by one, the factual errors, conclusions without enough evidence, important scenarios that are missing, recommendations that are hard to act on, and workflow files that can't be used as is. Give a reason for each.
+      - Write the improved, complete report as an HTML file named workflow-review-v2.html in the same directory. Incorporate every review comment that holds up, and keep the three-part structure of the original report. Keep part 1 brief, with only what supports part 2. In part 2, attach to each scenario a workflow file that can be copied and used as is, with the first one expanded by default, the rest collapsed by default, and a copy button on each. The report is a single file, with its styles and scripts inline and no external resources. When it's written, open it in the system's default browser so I can read it right away: use open on macOS and xdg-open on Linux.
+      - If this machine has no graphical interface, or opening the report fails, also write a Markdown file with the same content, workflow-review-v2.md, as a fallback.
+
+      Constraints:
+      - Create only the files mentioned above. Don't modify the original report, and don't modify or delete any other file in the repository.
+      - Don't quote sensitive information such as keys, tokens, or passwords in the report.
+```
+
+  </Tab>
+  <Tab value="Claude Code only">
+
+```yaml title=".codedag/dags/first-run.yaml"
+executionMode: shared-workspace
+
+tasks:
+  - id: 1
+    title: Analyze the past week of agent conversations
+    agent: claude
+    mode: auto
+    model: sonnet
+    prompt: |
+      Goal:
+      Read my conversation history with Claude Code and Codex from the past 7 days, then write an HTML report and open it in the browser. The report should explain how I use agents for development today, which kinds of work are a good fit for CodeDAG workflows, and exactly how to go about it.
+
+      Requirements:
+      - Read only conversation history from the past 7 days. If you can't find any history for one of the agents, skip it. Skip this task's own session too. If there are many sessions, read a sample of about 20 in total, preferring sessions from the current repository.
+
+      Context and required reading:
+      - Before you start writing, use the codedag-guide skill from the CodeDAG Guide plugin to learn what CodeDAG is good for, as well as the fields and syntax of workflow files.
+
+      Completion criteria:
+      Under docs/codedag-reports/, create a directory named run-<number>, where the number is one more than the highest number among the existing run-* directories, or 1 if there are none. Write the report as an HTML file named workflow-review.html in that directory, with three parts:
+      1. Usage profile: Briefly describe the kinds of tasks I do most often, how long my sessions are and how many turns they take, and which steps keep recurring. Include only the profile details and statistics that support part 2, and focus on the conclusion they lead to: which parts of how I work today could be done with workflows instead.
+      2. Three to five scenarios that are a good fit for workflows: For each scenario, describe which of my current practices it replaces, how to split it into tasks, the dependencies between the tasks, and what it's expected to save. Attach a workflow file that can be copied and used as is.
+      3. Work that is still better done in an interactive session, and why.
+      For each conclusion, note which sessions it's based on (the date and project name are enough).
+      Write the workflow files as the codedag-guide skill describes, and give a suggested file name for each. Show the first scenario's workflow file expanded by default and the others collapsed by default, expandable with a click. Give each file a copy button.
+      The HTML report is a single file, with its styles and scripts inline and no external resources. When it's written, open it in the system's default browser so I can read it right away: use open on macOS and xdg-open on Linux.
+      If this machine has no graphical interface, or opening the report fails, also write a Markdown file with the same content, workflow-review.md, as a fallback.
+
+      Constraints:
+      - Create only the directory above and the report files inside it. Don't modify or delete any existing file in the repository.
+      - Don't quote sensitive information such as keys, tokens, or passwords in the report.
+
+  - id: 2
+    title: Review and rewrite the report
+    dependencies: [1]
+    agent: claude
+    mode: auto
+    model: opus
+    prompt: |
+      Goal:
+      Review the latest report under docs/codedag-reports/, write up your review comments, and produce an improved, complete version.
+
+      Context and required reading:
+      - Each run's results are in docs/codedag-reports/run-<number>/. The directory with the highest number is the latest run, and the report is the workflow-review.html file inside it.
+      - Another agent wrote this report from my conversation history with Claude Code and Codex over the past 7 days. Each conclusion notes the sessions it's based on, so you can spot-check those sessions when you verify the key conclusions.
+      - The report attaches a workflow file to each scenario. Before you check whether they can be used as is, use the codedag-guide skill from the CodeDAG Guide plugin to learn the fields and syntax of workflow files.
+
+      Completion criteria:
+      - Write the review comments to workflow-review-comments.md in the same directory. List, one by one, the factual errors, conclusions without enough evidence, important scenarios that are missing, recommendations that are hard to act on, and workflow files that can't be used as is. Give a reason for each.
+      - Write the improved, complete report as an HTML file named workflow-review-v2.html in the same directory. Incorporate every review comment that holds up, and keep the three-part structure of the original report. Keep part 1 brief, with only what supports part 2. In part 2, attach to each scenario a workflow file that can be copied and used as is, with the first one expanded by default, the rest collapsed by default, and a copy button on each. The report is a single file, with its styles and scripts inline and no external resources. When it's written, open it in the system's default browser so I can read it right away: use open on macOS and xdg-open on Linux.
+      - If this machine has no graphical interface, or opening the report fails, also write a Markdown file with the same content, workflow-review-v2.md, as a fallback.
+
+      Constraints:
+      - Create only the files mentioned above. Don't modify the original report, and don't modify or delete any other file in the repository.
+      - Don't quote sensitive information such as keys, tokens, or passwords in the report.
+```
+
+  </Tab>
+  <Tab value="Codex only">
+
+```yaml title=".codedag/dags/first-run.yaml"
+executionMode: shared-workspace
+
+tasks:
+  - id: 1
+    title: Analyze the past week of agent conversations
+    agent: codex
+    mode: auto
+    prompt: |
+      Goal:
+      Read my conversation history with Claude Code and Codex from the past 7 days, then write an HTML report and open it in the browser. The report should explain how I use agents for development today, which kinds of work are a good fit for CodeDAG workflows, and exactly how to go about it.
+
+      Requirements:
+      - Read only conversation history from the past 7 days. If you can't find any history for one of the agents, skip it. Skip this task's own session too. If there are many sessions, read a sample of about 20 in total, preferring sessions from the current repository.
+
+      Context and required reading:
+      - Before you start writing, use the codedag-guide skill from the CodeDAG Guide plugin to learn what CodeDAG is good for, as well as the fields and syntax of workflow files.
+
+      Completion criteria:
+      Under docs/codedag-reports/, create a directory named run-<number>, where the number is one more than the highest number among the existing run-* directories, or 1 if there are none. Write the report as an HTML file named workflow-review.html in that directory, with three parts:
+      1. Usage profile: Briefly describe the kinds of tasks I do most often, how long my sessions are and how many turns they take, and which steps keep recurring. Include only the profile details and statistics that support part 2, and focus on the conclusion they lead to: which parts of how I work today could be done with workflows instead.
+      2. Three to five scenarios that are a good fit for workflows: For each scenario, describe which of my current practices it replaces, how to split it into tasks, the dependencies between the tasks, and what it's expected to save. Attach a workflow file that can be copied and used as is.
+      3. Work that is still better done in an interactive session, and why.
+      For each conclusion, note which sessions it's based on (the date and project name are enough).
+      Write the workflow files as the codedag-guide skill describes, and give a suggested file name for each. Show the first scenario's workflow file expanded by default and the others collapsed by default, expandable with a click. Give each file a copy button.
+      The HTML report is a single file, with its styles and scripts inline and no external resources. When it's written, open it in the system's default browser so I can read it right away: use open on macOS and xdg-open on Linux.
+      If this machine has no graphical interface, or opening the report fails, also write a Markdown file with the same content, workflow-review.md, as a fallback.
+
+      Constraints:
+      - Create only the directory above and the report files inside it. Don't modify or delete any existing file in the repository.
+      - Don't quote sensitive information such as keys, tokens, or passwords in the report.
+
+  - id: 2
+    title: Review and rewrite the report
+    dependencies: [1]
+    agent: codex
+    mode: auto
+    model: gpt-6-sol
+    prompt: |
+      Goal:
+      Review the latest report under docs/codedag-reports/, write up your review comments, and produce an improved, complete version.
+
+      Context and required reading:
+      - Each run's results are in docs/codedag-reports/run-<number>/. The directory with the highest number is the latest run, and the report is the workflow-review.html file inside it.
+      - Another agent wrote this report from my conversation history with Claude Code and Codex over the past 7 days. Each conclusion notes the sessions it's based on, so you can spot-check those sessions when you verify the key conclusions.
+      - The report attaches a workflow file to each scenario. Before you check whether they can be used as is, use the codedag-guide skill from the CodeDAG Guide plugin to learn the fields and syntax of workflow files.
+
+      Completion criteria:
+      - Write the review comments to workflow-review-comments.md in the same directory. List, one by one, the factual errors, conclusions without enough evidence, important scenarios that are missing, recommendations that are hard to act on, and workflow files that can't be used as is. Give a reason for each.
+      - Write the improved, complete report as an HTML file named workflow-review-v2.html in the same directory. Incorporate every review comment that holds up, and keep the three-part structure of the original report. Keep part 1 brief, with only what supports part 2. In part 2, attach to each scenario a workflow file that can be copied and used as is, with the first one expanded by default, the rest collapsed by default, and a copy button on each. The report is a single file, with its styles and scripts inline and no external resources. When it's written, open it in the system's default browser so I can read it right away: use open on macOS and xdg-open on Linux.
+      - If this machine has no graphical interface, or opening the report fails, also write a Markdown file with the same content, workflow-review-v2.md, as a fallback.
+
+      Constraints:
+      - Create only the files mentioned above. Don't modify the original report, and don't modify or delete any other file in the repository.
+      - Don't quote sensitive information such as keys, tokens, or passwords in the report.
+```
+
+  </Tab>
+</Tabs>
+
+In the "Codex only" version, task 1 uses Codex's default model and task 2 specifies `gpt-6-sol`, only so that the two tasks use different models. Codex's model list changes often, so if that name isn't available on your account, replace it with another model from Codex's `/model` menu.
+
+This file uses only eight fields. `executionMode` applies to the whole workflow, and the rest are set on each task:
+
+| Field | What it does in this workflow |
+|---|---|
+| `executionMode` | Set to `shared-workspace`, so every task runs in the current working directory, with no branches and no commits. When omitted, the workflow uses the default isolated-branches mode. |
+| `id` | The task's number, a positive integer that is unique within the workflow. Commands and `dependencies` refer to the task by this number. |
+| `title` | A short title for human readers, shown on the status board. |
+| `prompt` | The first message the task agent's session receives, and the only instructions it gets from the workflow. |
+| `dependencies` | The tasks that must finish and be accepted before this one starts. Task 2 sets it to `[1]`. |
+| `agent` | Which agent runs the task: `claude` for Claude Code, `codex` for Codex. |
+| `mode` | The task agent's permission mode. Both agents use `auto` in this example: routine operations run right away, the agent's built-in automatic review checks risky ones, and a running task generally doesn't stop to wait for your approval. |
+| `model` | The model name, passed to the agent as is. When omitted, the agent uses its own configured default model. |
+
+The prompt for task 2 spells out the path to the report, and that line can't be left out. The two tasks are separate sessions that share nothing: task 2 can't see task 1's conversation and can only read the files task 1 left in the repository. For a full description of every field, see [Workflow File Reference](/docs/reference/workflow-file).
+
+<Callout type="info">
+With `auto`, the agent relies on its built-in automatic review instead of asking you to approve each operation. In Claude Code, this is Claude Code's own auto permission mode, where a safety classifier reviews operations in the background. In Codex, it's equivalent to Codex's "Approve for me" permissions: Codex runs in a sandbox that can write only to the workspace, and anything that needs to go outside the sandbox goes to automatic review first. Safe operations run right away, and risky ones are blocked. In a few cases, a task still stops and waits for your response. Step 4 shows what to do then. For a workflow to run all the way through with nobody watching, switch to full access. For the tradeoffs between access levels, see [Decide between unattended and attended runs](/docs/guides/agents-and-permission-modes#unattended-or-attended).
+</Callout>
+
+## 3. Validate and submit
+
+First, validate the workflow file:
+
+```bash title="Terminal"
+cdg dag validate first-run
+```
+
+If validation passes, you see:
+
+```bash title="Terminal"
+✔ Validation passed: .codedag/dags/first-run.yaml
+```
+
+If it reports errors, fix the file as the messages suggest and validate again. Once it passes, submit the workflow and have the current terminal follow the logs:
+
+```bash title="Terminal"
+cdg dag submit first-run --attach
+```
+
+```bash title="Terminal"
+✔ Submitted successfully: .codedag/dags/first-run.yaml
+
+Queue position:
+  #1  .codedag/dags/first-run.yaml (now running in background)
+
+📊 Following logs... (Ctrl+C to detach logs, Ctrl+\ to kill current workflow)
+```
+
+With `--attach`, this terminal goes on to stream the logs from both tasks, and each line starts with the task number and a timestamp. Pressing Ctrl+C only stops the terminal from following the logs. The workflow keeps running in the background, and closing the terminal doesn't affect it either.
+
+## 4. Watch it run
+
+To check progress, open another terminal and go to the same repository. Start with `cdg status{:sh}` for a view of the whole project. `first-run` appears under `Submitted Workflows` with the status `[in-progress] [working]`. The `untitled_dag.yaml` under `Planning Workflows` is the template that initialization generated.
+
+To see each task in the workflow, run:
+
+```bash title="Terminal"
+cdg dag status first-run --watch
+```
+
+While task 1 is running, the status board looks like this:
+
+```bash title="Terminal"
+[TZ: +08:00] 2026-10-08 10:02:15
+
+Workflow: .codedag/dags/first-run.yaml
+  Phase: 📤 submitted
+  Queue Position: 1
+  Status: 🟢 in-progress
+  Substatus: working
+
+Submitted Tasks (2):
+  🟢 [in-progress] [working]  Task 1: Analyze the past week of agent conversations
+  🔘 [pending]     [blocked]  Task 2: Review and rewrite the report
+
+Progress: 0/2 tasks completed (0%)
+```
+
+Each task gets one line, showing its status and then its substatus. `[in-progress] [working]` means the task agent is working. `[pending] [blocked]` means the task is waiting for upstream: task 2 doesn't start until task 1 finishes and is accepted. When task 1 finishes, its status first changes to `done`. It's then auto-accepted right away and moves to the `Reviewed Tasks` group lower on the board, where it shows as `[auto-accepted]`. Task 2 changes to `[in-progress] [working]` immediately after. `--watch` keeps refreshing until the workflow finishes. For what the other states on the board mean, see [State Meanings](/docs/reference/states).
+
+If you didn't pass `--attach` in step 3, or you've already pressed Ctrl+C to leave the logs, run `cdg dag logs first-run -f{:sh}` to follow them again.
+
+To see the task agent's own interface, run `cdg task view 1 -w first-run{:sh}` in a real terminal to enter its session. Press Ctrl+C to exit when you're done, and the task keeps running. For when it makes sense to step in this way, see [Choose how to observe and make changes](/docs/guides/intervene-and-control#choose-intervention). When a task stops to wait for your response, you use the same command to enter the session and answer. The board still shows `[in-progress] [working]` while the task waits. For how to tell the difference, see [Is it stuck?](/docs/guides/run-and-monitor#is-it-stuck).
+
+## 5. Read the results
+
+Once both tasks finish, the workflow is auto-accepted. If the terminal from step 3 is still following the logs, it stops at that point, and the last line is:
+
+```bash title="Terminal"
+✔ Workflow auto-accepted: .codedag/dags/first-run.yaml
+```
+
+Each report opened in your default browser as soon as it was written: first the original from task 1, then the rewrite from task 2. The files are all in `docs/codedag-reports/run-1/`. If you've run this tutorial before, look in the directory with the highest number:
+
+- `workflow-review.html`: the report task 1 wrote.
+- `workflow-review-comments.md`: task 2's review comments.
+- `workflow-review-v2.html`: the report as rewritten by task 2.
+
+If the browser didn't open, for example because this machine has no graphical interface, the task follows the fallback in its prompt and writes a `.md` file with the same name in the same directory. You can read it right in your terminal or editor.
+
+Start with the review comments, then read the rewrite. The comments point out where the first version lacked evidence or got something wrong, and with them in mind, it's easier to see the reason behind each change in v2.
+
+Each scenario in part 2 of the report comes with a workflow file. The first is already expanded, the others expand when you click them, and each can be copied with one click. To try one, save it as a YAML file under `.codedag/dags/`, validate it with `cdg dag validate{:sh}`, and submit it once it passes. An agent generated these files, so read through the prompts and permission modes before you submit one.
+
+The files the tasks wrote haven't been committed. In shared-workspace mode, a task's output stays in your working directory, and any uncommitted changes you already had are left as they were. Whether to commit the files is up to you. The reports may summarize conversations from your other projects, so read them through before you commit or share them.
+
+## What just happened
+
+- **Every task is a fresh session.** When the agent for task 2 starts, it knows nothing about what task 1 did, and the prompt is the first message it receives. So write each prompt so that a session with no background can do the work on its own. For the reasoning behind this design, see [Tasks and Sessions](/docs/concepts/tasks-and-sessions).
+- **Tasks pass information through files in the repository.** Task 1 writes its conclusions to `workflow-review.html`, the prompt for task 2 tells it to read that file by name, and `dependencies: [1]` guarantees the file is already written when it does. The file paths that the prompts agree on are the interface between tasks.
+- **Finished tasks are auto-accepted by default, and the workflow keeps going.** Task 1 was accepted as soon as it finished, task 2 started right after, and at the end the whole workflow was auto-accepted too. None of those steps needed you. To stop after a particular task and look at its result first, turn off auto-accept there. See [Auto-accept](/docs/concepts/review-gates#auto-accept).
+
+## Next steps
+
+- [Second Workflow: Let It Change Code](/docs/get-started/second-workflow): Complete two TODOs in parallel in the default isolated-branches mode, and see task branches, automatic merges, and the integration branch.
+- [Let Your Agent Orchestrate](/docs/get-started/let-your-agent-orchestrate): Hand your goal to Claude Code or Codex with the CodeDAG Guide plugin installed, and let it write the workflow, submit it, and track it.
+- [How CodeDAG Works](/docs/concepts/how-it-works): How workflows, the queue, states, and projects fit together.

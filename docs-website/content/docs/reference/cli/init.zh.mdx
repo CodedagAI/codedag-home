@@ -1,0 +1,237 @@
+---
+title: 初始化项目
+description: cdg init 的两种运行方式、各选项的取值，以及重新初始化时怎样保留已有配置。
+icon: CirclePlay
+---
+
+`cdg init{:sh}` 把一个 Git 仓库设为 CodeDAG [项目](/zh/docs/concepts/how-it-works#project)：在主仓库根目录建立 `.codedag/`，登记用于并行执行的副本工作区，并把默认 Agent 和并发上限写进本机设置。它可以重复运行，增减副本之后要再运行一次来更新登记，你写的工作流不会被改动。第一次初始化的完整过程见快速开始的[初始化项目](/zh/docs/get-started/quickstart#init-project)，副本的准备与登记步骤见[并行执行与工作区](/zh/docs/guides/parallel-workspaces)。
+
+## 语法与前提 [#syntax]
+
+`cdg init{:sh}` 有交互式和非交互式两种运行方式，区别只在于是否给出了 `--primary-workdir`。
+
+```bash title="Terminal"
+# 交互式：从当前目录找到主仓库，逐项询问
+cdg init [选项]
+# 非交互式：主仓库和副本都由参数指定
+cdg init --primary-workdir <主仓库路径> [选项]
+```
+
+交互式初始化会依次询问副本方式、默认 Agent（本机两家都装了才问）和是否安装 CodeDAG Guide 插件。非交互式初始化不问这些，默认 Agent 与插件按选项和下文的规则处理，适合在脚本里运行，或者交给 Agent 替你运行；项目已经初始化过时，它保留 `.codedag/` 里的全部已有文件，同样不出现询问，见[重新初始化与保留已有配置](#reinitialize)。在没有交互终端的环境里，交互式初始化会停在第一个问题上直接结束，不做任何改动，这时改用非交互式。
+
+运行之前需要准备好：
+
+- 主仓库是一个 Git 仓库。要让任务并行执行，副本也要事先用 Git 创建好，CodeDAG 不会替你创建。一个项目的副本要么全是 git worktree，要么全是 clone，不能混用。
+- 本机装有 Claude Code 或 Codex 至少一个，在当前终端里能直接找到 `claude` 或 `codex` 命令。装有 Claude Code 时，初始化还会检查它的版本，见[Claude Code 的版本检查](#claude-version)。
+- 已经登录 CodeDAG 账号。还没登录时，`cdg init{:sh}` 会先引导你登录，见[登录](/zh/docs/account/login-and-account#sign-in)。
+
+### 在哪个目录运行 [#where-to-run]
+
+在主仓库的根目录运行 `cdg init{:sh}`。非交互式初始化的主仓库就是 `--primary-workdir` 指定的目录，在哪里运行都一样。无论用哪种方式，`.codedag/` 都只建在主仓库的根目录，副本里不会出现第二份。
+
+交互式初始化在别的目录运行时，按当前目录所在的 Git 仓库寻找主仓库：
+
+- 在主仓库的子目录或 `.codedag/` 目录里运行，找到的是外层的项目仓库，与在根目录运行相同。
+- 在已经登记的副本里运行，worktree 与 clone 副本一样：命令先提示这个目录是哪个项目的副本（`is registered as a replica of the CodeDAG project at`），再以那个项目的主仓库为起点初始化，设置的仍是原来的项目，副本里不会多出一份 `.codedag/`。
+- 在还没登记的 clone 里运行，结果不同：clone 本身是一个独立的 Git 仓库，CodeDAG 把它当作主仓库，另外建立一个项目。
+
+一个目录不能同时属于两个项目，所以已经登记为某个项目副本的目录不能再当作另一个项目的主仓库。`--primary-workdir` 或交互式 clone 方式中输入的主仓库路径指向这样的目录时，初始化在任何写入之前就以 `Cannot use <路径> as the primary workspace` 失败，退出码为 1，两个项目的登记都保持原样。真要把这个副本变成独立的项目，先回到它所属项目的主仓库运行一次 `cdg init{:sh}`、在副本列表里去掉它，再到它自己的目录里初始化。
+
+### Claude Code 的版本检查 [#claude-version]
+
+本机装有 Claude Code 时，初始化在确定副本方式之后运行一次 `claude --version{:sh}`。版本低于 CodeDAG 支持的最低版本 2.1.196 时输出警告：
+
+```bash title="Terminal"
+Warning: Claude Code 2.1.100 is older than 2.1.196, the minimum version CodeDAG supports. Until you upgrade it (for example, with `claude update`), tasks that run on Claude Code are put on hold with agent-version-unsupported.
+```
+
+`claude --version{:sh}` 运行失败或输出里没有版本号时，警告改为说明无法确定版本，括号里给出原因。
+
+两种警告都不中止初始化，也不影响默认 Agent 的选择：项目照常建立，只是在升级 Claude Code 之前，交给它执行的任务都会停在 `on-hold`，原因为 `agent-version-unsupported`。按警告里的办法升级，例如运行 `claude update{:sh}`，之后提交的工作流就不会再遇到这个搁置；已经停住的任务怎样处理，见[版本相关](/zh/docs/troubleshooting/troubleshooting#versions)。
+
+## 选项 [#options]
+
+| 选项 | 取值 | 省略时 | 说明 |
+|---|---|---|---|
+| `--primary-workdir <path>` | 主仓库根目录的路径 | 以交互式运行 | 给出后以非交互式运行。路径必须是仓库的根目录，指向子目录时初始化失败。 |
+| `--replica-workdirs <paths...>` | 一个或多个副本目录，用空格分隔 | 不登记副本 | 只在同时给出 `--primary-workdir` 时生效。只给它而没有 `--primary-workdir` 时，命令先给出一条说明它被忽略的警告，再照常进入交互式初始化，副本由你的勾选决定。每个目录都必须已经存在。 |
+| `--max-concurrency <number>` | 正整数 | 共享设置里的 `maxConcurrency`，没有则 1 加上副本数 | 写入本机设置的 `maxConcurrency`，工作流文件没写并发上限时使用它。两种方式都可以使用。 |
+| `--default-agent <agent>` | `claude`（Claude Code）或 `codex`（Codex） | 按[默认 Agent 的确定规则](#default-agent) | 必须是本机已安装的 Agent。两种方式都可以使用，给出它之后不再询问默认 Agent。 |
+| `--no-install-guide-plugins` | 无 | 非交互式初始化以 User 范围为本机已安装的每个 Agent 安装插件 | 非交互式初始化时不安装插件；对交互式初始化没有作用。 |
+
+`--primary-workdir`、`--replica-workdirs` 以及交互式初始化中输入的路径，都可以写绝对路径，也可以写相对路径；相对路径按运行命令时的当前目录解析，登记时一律换算成绝对路径。
+
+`--max-concurrency` 只接受正整数，写 0、负数或小数时初始化失败。想让项目默认不设并发上限，初始化之后在本机设置里把 `maxConcurrency` 改成 0，见 [`maxConcurrency`](/zh/docs/reference/settings#max-concurrency)。
+
+初始化只把与团队设置不同的取值写进本机设置 `.codedag/local/settings.local.jsonc`：默认 Agent `defaultAgent` 和并发上限 `maxConcurrency` 与共享设置 `.codedag/settings.jsonc` 里的值相同时不写入，于是团队之后改了共享设置，这台电脑也随之改变。重新初始化时这两个字段怎样更新，见[重新初始化与保留已有配置](#reinitialize)。
+
+初始化之后才装上的 Agent 直接就能在工作流里使用：初始化不写入项目可用的 Agent 列表 `availableAgents`，这个字段只用来有意限制项目能用哪些 Agent，没写它时全部受支持的 Agent 都可以用，见 [`availableAgents`](/zh/docs/reference/settings#available-agents)。
+
+### 默认 Agent 怎样确定 [#default-agent]
+
+没有写 `agent` 字段的任务交给默认 Agent 执行。初始化按下表确定它；本机两家都没有安装时，初始化失败。
+
+| 情况 | 默认 Agent |
+|---|---|
+| 给出了 `--default-agent` | 指定的 Agent；它没有安装时，初始化失败 |
+| 本机只装了其中一家 | 这一家 |
+| 两家都装了，交互式初始化 | 询问你选哪一家 |
+| 两家都装了，非交互式初始化，共享设置里的 `defaultAgent` 在本机已安装 | 团队的默认 Agent |
+| 以上都不是 | Codex |
+
+交互式初始化的询问里，团队的默认 Agent 排在第一项，另一项注明只覆盖这台电脑：
+
+```bash title="Terminal"
+Both Claude Code and Codex are installed.
+The team default agent in .codedag/settings.jsonc is Claude Code.
+Which agent would you like to use as your default for this project?
+1. Claude Code (team default)
+2. Codex (override for this machine only)
+```
+
+选了与团队相同的那一项，本机设置里就不写入 `defaultAgent`，以后团队改了共享设置，你这里也跟着改。共享设置里没有 `defaultAgent` 时，询问里没有说明团队默认值的那一行，两个选项也没有标注。
+
+团队写的默认 Agent 在你这台电脑上没有安装时，初始化按上表另选一个写进本机设置，并说明团队的默认值在这里用不上：
+
+```bash title="Terminal"
+Team default agent 'codex' in .codedag/settings.jsonc is not installed on this machine. Your default agent 'claude' is saved in .codedag/local/settings.local.jsonc.
+```
+
+在脚本里初始化时，写明 `--default-agent` 能让每台电脑得到同一个默认 Agent；不写的话，结果随各台电脑装了哪家 Agent 而不同。
+
+### CodeDAG Guide 插件 [#guide-plugin]
+
+初始化的最后一步处理 CodeDAG Guide 插件，它让 Claude Code 和 Codex 学会使用 `cdg`。交互式初始化为本机已安装的每个 Agent 分别询问：安装到 User、Project 或 Local 范围，或者选 Skip 暂不安装。非交互式初始化不询问，直接以 User 范围为每个已安装的 Agent 安装；想用其他范围时，加上 `--no-install-guide-plugins` 跳过这一步，之后在项目目录里用 `cdg plugin install{:sh}` 按需要的范围安装。
+
+已经装有插件的 Agent 不会再被询问安装范围：之前在任何一个仓库里以 User 范围装过，或者这个项目上次初始化时已经装过，都算已装有。补装、更新或更换范围的命令见[插件](/zh/docs/reference/cli/plugin)，三种范围的区别见[选择安装范围](/zh/docs/guides/guide-plugin#scopes)。
+
+## 登记与更新工作区 [#register-workspaces]
+
+每运行一次 `cdg init{:sh}`，CodeDAG 都用这一次确定的副本列表整体替换原来的登记，它不会自己发现新增、移走或删除的副本。所以增减或移动副本之后要重新运行一次，而且这一次的列表要包含所有仍要使用的副本，不只是新增的那一个。登记里还留着已经不存在的目录时，工作流会跳过它继续在其余工作区运行，并在校验时提示你重新初始化，见[登记到 CodeDAG](/zh/docs/guides/parallel-workspaces#register)。
+
+交互式初始化中，登记哪些副本由第一个问题 `Select your repository setup method` 的回答决定：
+
+| 回答 | 登记的副本 |
+|---|---|
+| `1. I have set up git worktrees for this project` | 你在接下来的勾选询问里选中的 worktree，见[勾选要登记的 worktree](#select-worktrees) |
+| `2. I have cloned this repository into multiple directories` | 你输入的 clone 目录。先确认主仓库的路径，默认值由当前目录推断，可以改写；再输入各个 clone 的路径，用空格分隔，直接回车表示不登记副本 |
+| `3. I haven't configured any replicas yet, and I need help` | 先不决定。显示 worktree 与 clone 的简要说明，再重新显示这个询问，可以直接接着选 1、2 或 4。副本也可以在另一个终端里现做，做好了回来选 1 或 2 |
+| `4. I don't need concurrent tasks, only sequential execution` | 不登记副本，只使用主仓库 |
+
+### 勾选要登记的 worktree [#select-worktrees]
+
+选了 worktree 方式之后，命令按 `git worktree list{:sh}` 的顺序列出主仓库之外的每个 worktree，每行是勾选状态、序号、路径和括号里的分支名（detached HEAD 时括号里是 `detached HEAD`）：
+
+```bash title="Terminal"
+? Select the worktrees to register as replicas:
+  CodeDAG runs concurrent tasks in the selected worktrees.
+  Worktrees created by Claude Code or Codex for their own sessions are not selected by default.
+◉ 1. /work/project-wt-1 (feature-a)
+◯ 2. /work/project/.claude/worktrees/fix-bug (worktree-fix-bug, created by Claude Code)
+◯ 3. /home/me/.codex/worktrees/ab12/project (codex/task, created by Codex)
+
+↑↓ navigate • Space toggle • a toggle all • 1-9 jump • ⏎ confirm • Esc cancel
+```
+
+Claude Code 和 Codex 为自身会话创建的 worktree 默认不勾选，括号里注明是谁创建的；其余 worktree 默认勾选。按键见询问的最后一行，其中 Esc 取消的是整次初始化，不写入任何文件。一项都不勾选时，项目不登记副本，只使用主仓库；没有可列出的 worktree 时不出现这个询问，结果相同。
+
+目录已经不存在的 worktree 不进入列表，命令在询问之前把它们列出来，并提示清掉这些残留记录：
+
+```bash title="Terminal"
+Skipped worktrees whose directories no longer exist (run `git worktree prune` to remove them):
+  - /work/project-wt-3
+```
+
+新建本机设置时的并发上限按勾选结果算，值是 1 加上勾选的副本数。
+
+### 非交互式登记 [#register-non-interactive]
+
+非交互式初始化用 `--replica-workdirs` 列出副本，worktree 与 clone 的写法相同。下面的命令登记一个主仓库和两个 worktree 副本，第一次初始化时并发上限为 3：
+
+```bash title="Terminal"
+cdg init --primary-workdir /Users/you/my-app --replica-workdirs /Users/you/my-app-wt-1 /Users/you/my-app-wt-2
+```
+
+之后不再使用 `my-app-wt-2` 时，只列出 `my-app-wt-1` 再运行一次；移动了某个副本，就在列表里写它的新路径；完全不写 `--replica-workdirs` 时，项目只剩主仓库一个工作区。这些都是在已初始化的项目上重新运行，已有文件怎样处理、并发上限是否跟着副本数变化，见[重新初始化与保留已有配置](#reinitialize)。
+
+## 重新初始化与保留已有配置 [#reinitialize]
+
+项目已经初始化过时，`.codedag/` 里与初始化模板同名的文件怎样处理，取决于运行方式：
+
+- **非交互式初始化：** 全部已有文件原样保留，不出现任何询问，退出码表示初始化是否完成。
+- **交互式初始化：** 已经提交到 `.codedag` 仓库的文件自动保留，其余已有文件逐个询问。`.codedag` 还没有任何提交时，所有已有文件都要询问。
+
+涉及的文件是 `.gitignore`、`settings.jsonc`、`local/settings.local.jsonc`、`dags/untitled_dag.yaml`，以及 `templates/` 下的两个空白模板。你自己写的工作流和 `.codedag/` 里的其他文件不在其中，不会被改动；`.codedag` 仓库本身也不会重新初始化，提交历史和远程地址都保持原样。
+
+自动保留的文件在冲突询问之前列出，括号里是保留的原因：
+
+```bash title="Terminal"
+Existing files kept (committed in the .codedag repository and shared with your team):
+  - .codedag/.gitignore
+  - .codedag/settings.jsonc
+To replace a file with the CodeDAG default, delete it and rerun `cdg init`.
+```
+
+团队共享的设置和工作流因此不会被重新初始化覆盖，新成员在克隆来的 `.codedag` 上初始化时也不用逐个应答。
+
+### 逐个询问时的六个选择 [#file-conflicts]
+
+交互式初始化对还需要询问的文件，在 `File conflicts detected.` 列表之后逐个询问，每个询问都有六个选择：
+
+| 选择 | 效果 |
+|---|---|
+| `1. Keep` | 保留这个文件，接着询问下一个 |
+| `2. Overwrite` | 用初始化模板替换这个文件，替换前要再确认一次；接着询问下一个 |
+| `3. Keep All` | 保留这个文件和其余所有文件，不再询问 |
+| `4. Overwrite All` | 替换这个文件和其余所有文件，确认前会列出将被替换的文件 |
+| `5. Apply & Exit` | 之前的文件按已经做出的选择处理，这个文件和其余文件都保留，不再询问 |
+| `6. Abort` | 取消这次初始化，不做任何改动，工作区的登记也保持原样；按 Esc 效果相同 |
+
+除了 Abort，其余选择都会完成初始化，并按这一次的结果更新工作区登记。
+
+本机设置 `local/settings.local.jsonc` 不进 `.codedag` 仓库的版本管理，所以它总在询问之列。两个设置文件保留与替换的差别最大：
+
+| 文件 | 保留时 | 替换时 |
+|---|---|---|
+| `local/settings.local.jsonc`（本机设置） | 默认 Agent 与并发上限保持原值，初始化不再询问默认 Agent；这一次给出的 `--default-agent`、`--max-concurrency` 仍会原位写入，见[保留本机设置时](#kept-local-settings) | 按这一次初始化重新生成：默认 Agent 按[确定规则](#default-agent)，并发上限取 `--max-concurrency`、共享设置里的值或 1 加上现在的副本数；你手动加进这个文件的其他设置会丢失 |
+| `settings.jsonc`（共享设置） | 保持原样 | 变为空对象 `{}`，原有的共享设置全部丢失 |
+
+其余几个文件替换后都回到初始化模板的内容，你改写过的 `dags/untitled_dag.yaml` 也会被还原。`.gitignore` 选择保留时，CodeDAG 仍会确保其中有忽略 `local/` 的一行。
+
+### 保留本机设置时 [#kept-local-settings]
+
+本机设置被保留时，初始化不重写这个文件，但仍会按这一次给出的参数原位更新其中的字段，注释、其他设置和排版都保持不变。`--default-agent` 与 `--max-concurrency` 各输出一行确认：
+
+```bash title="Terminal"
+✓ Updated maxConcurrency to 3 in .codedag/local/settings.local.jsonc.
+```
+
+没有给 `--max-concurrency` 时，初始化检查生效的并发上限是否低于现在的工作区数，也就是主仓库加副本的总数。新增副本又保留了本机设置时正是这种情况，交互式初始化会问你要不要把它改上去，默认 Yes：
+
+```bash title="Terminal"
+maxConcurrency in .codedag/local/settings.local.jsonc is 1, but this project now has 3 workspaces (1 primary + 2 replicas).
+Update maxConcurrency to 3?
+```
+
+选 No 或按 Esc 时不修改，命令给出手动改写和用 `--max-concurrency` 重跑这两种办法。非交互式初始化不询问，把同样的内容作为警告输出，退出码仍是 0。只有共享设置写了 `maxConcurrency`、本机没有覆盖它时不做这个检查，因为那是团队有意定下的默认值。
+
+保留的团队或本机设置无法解析、取值不合法时，两种方式都在写入文件、更新工作区登记之前以退出码 1 失败。`--default-agent` 被项目的 `availableAgents` 排除时，非交互式初始化同样以退出码 1 失败；交互式初始化只输出一条写不进去的警告，跳过这一次的显式参数，初始化照常完成。
+
+## 修改默认 Agent 或并发数 [#change-defaults]
+
+项目初始化之后，想换默认 Agent 或调整并发上限，直接修改本机设置 `.codedag/local/settings.local.jsonc` 中的 `defaultAgent` 或 `maxConcurrency` 即可，不需要重新初始化。也可以重新运行一次 `cdg init{:sh}` 并带上 `--default-agent` 或 `--max-concurrency`：这两个参数在本机设置被新建、被替换和被保留时都会写入，见[保留本机设置时](#kept-local-settings)。
+
+```jsonc title=".codedag/local/settings.local.jsonc"
+{
+  "defaultAgent": "claude", // 没写 agent 的任务改由 Claude Code 执行
+  "maxConcurrency": 3 // 最多同时执行 3 个任务
+}
+```
+
+修改只影响之后提交的工作流，已经提交的工作流不受影响。两个字段的取值与默认值见 [`defaultAgent`](/zh/docs/reference/settings#default-agent) 与 [`maxConcurrency`](/zh/docs/reference/settings#max-concurrency)。只想改变某一个工作流时，在它的工作流文件里写 [`maxConcurrency`](/zh/docs/reference/workflow-file#max-concurrency)，或者给任务写 [`agent`](/zh/docs/reference/workflow-file#tasks-agent)。
+
+## 相关
+
+- [并行执行与工作区](/zh/docs/guides/parallel-workspaces)：准备副本、登记到 CodeDAG，以及同时执行几个任务由什么决定。
+- [项目设置](/zh/docs/reference/settings)：`cdg init{:sh}` 写入的本机设置，以及共享设置与本机设置的覆盖规则。
+- [插件](/zh/docs/reference/cli/plugin)：初始化之后安装、更新 CodeDAG Guide 插件或更换安装范围。

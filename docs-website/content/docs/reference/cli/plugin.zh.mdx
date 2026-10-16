@@ -1,0 +1,178 @@
+---
+title: 插件
+description: cdg plugin 各子命令的选项与作用范围，以及更换插件安装范围的做法。
+icon: Puzzle
+---
+
+`cdg plugin{:sh}` 下的 `install`、`status`、`update`、`uninstall` 四个子命令用来安装、查看、更新和卸载 CodeDAG Guide 插件。插件能做什么、日常怎样管理，见[管理 CodeDAG Guide 插件](/zh/docs/guides/guide-plugin)。
+
+## 命令与目标 Agent [#targets]
+
+四个子命令用同一组选项指定处理哪个 Agent 的插件，不写时同时处理 Claude Code 和 Codex。
+
+| 命令 | 语法 | 作用 |
+|---|---|---|
+| 安装 | `cdg plugin install [目标] [-s <范围>]{:sh}` | 为目标 Agent 安装插件 |
+| 查看状态 | `cdg plugin status [目标]{:sh}` | 报告插件在当前位置的安装、启用与版本状态，并给出下一步建议；不修改任何文件 |
+| 更新 | `cdg plugin update [目标] [--reset-local-changes]{:sh}` | 把已安装的插件更新到最新版本，安装损坏时就地修复 |
+| 卸载 | `cdg plugin uninstall [目标]{:sh}` | 卸载在当前位置能看到的插件安装 |
+
+`[目标]` 的写法：
+
+| 目标选项 | 处理哪个 Agent 的插件 |
+|---|---|
+| `--claude` | Claude Code |
+| `--codex` | Codex |
+| `-a`、`--all` | Claude Code 和 Codex |
+| 省略 | 同 `--all` |
+
+`--all` 不能与 `--claude` 或 `--codex` 同时使用，这样写时命令报错，不做任何操作。
+
+目标 Agent 没有装在本机时，各命令的处理不同。写 `--all` 或省略目标时，`install` 与 `update` 跳过本机没装的 Agent，只处理装了的那个，两个都没装才报错；用 `--claude` 或 `--codex` 明确指定了本机没装的 Agent 时，这两个命令直接报错。`status` 总是列出指定的每个 Agent，没装的那个会提示先安装它。`uninstall` 不要求 Agent 仍在本机：即使 Agent 已经卸载，只要还留有插件配置，命令照样清理，只跳过需要由 Agent 自己完成的那部分卸载步骤。
+
+这几个命令都不需要登录，也不要求当前目录是用 `cdg init{:sh}` 初始化过的项目。安装和更新只对之后新开的 Agent 会话生效，已经开着的会话要先退出，再用 `claude --resume{:sh}` 或 `codex resume{:sh}` 恢复，才能用上新的插件。
+
+## cdg plugin install [#install]
+
+`cdg plugin install{:sh}` 为目标 Agent 安装插件，安装范围由 `-s` / `--scope` 决定，默认是 `user`。
+
+```bash title="Terminal"
+# 为本机装有的所有 Agent 安装，User 范围
+cdg plugin install
+# 只为 Codex 安装，只在当前 checkout 中生效
+cdg plugin install --codex -s local
+```
+
+三种范围的区别在于配置写在哪里、是否随仓库共享：
+
+| 范围 | 配置写在哪里 | 进入版本管理 | 有多个 worktree 或 clone 时 |
+|---|---|---|---|
+| `user`（默认） | 你的用户目录下 Claude Code 或 Codex 的配置，不写入任何仓库 | 否 | 这台电脑上的所有仓库与副本共用这一份安装 |
+| `project` | 当前 checkout 中的项目配置文件 | 是，提交到项目仓库，而不是 `.codedag` | 只写进当前 checkout；其他 worktree 或 clone 检出包含这次提交的版本后，才会带上这份配置 |
+| `local` | 当前 checkout 中只留在本机的配置文件，CodeDAG 另写一段忽略规则让 Git 忽略它们 | 否 | 只属于当前 checkout，其他 worktree 或 clone 要各自安装 |
+
+`project` 与 `local` 装在运行命令时所在的那个 checkout 里。命令会从当前目录向上找到仓库的根目录，所以在仓库的任意子目录中运行都可以；不在 Git 仓库中运行时，命令报错。`user` 范围在任何目录都能安装。
+
+Project 范围写进仓库的文件受版本管理，在默认的隔离分支模式下要提交之后工作区才算干净；Local 范围写进仓库的文件由下面的忽略规则挡住，不会影响工作区。装完之后怎样处理这些文件，以及 Project 范围怎样在其他成员的电脑上生效，见[选择安装范围](/zh/docs/guides/guide-plugin#scopes)。
+
+已经装过插件时，`install` 不会重装，也不会改变范围。只要在当前位置能看到这个 Agent 的插件，不论它装在哪个范围，命令都只提示已经安装，然后跳过；例如装过 User 范围之后，在任何仓库里再运行 `cdg plugin install --scope project{:sh}` 都不会生效。要换范围，见[更换安装范围](#change-scope)。命令发现上一次安装留下了没有清理干净的配置时同样会跳过，这时先运行 `cdg plugin uninstall{:sh}`，再重新安装。
+
+### Local 范围写入的忽略规则 [#local-exclude]
+
+Local 范围安装成功时，CodeDAG 会在仓库的 `info/exclude` 里写一段受管 block，让 Git 忽略这些只留在本机的配置文件。你不需要自己配忽略规则，CodeDAG 也不会改动受版本管理的 `.gitignore`。每个插件各有一段 block，重复安装或修复安装时整段替换，block 之外的规则保持原样：
+
+```bash title=".git/info/exclude"
+# BEGIN CODEDAG CLAUDE GUIDE (managed)
+.claude/settings.local.json
+# END CODEDAG CLAUDE GUIDE (managed)
+
+# BEGIN CODEDAG CODEX GUIDE (managed)
+.agents/plugins/marketplace.json
+plugins/codedag/
+# END CODEDAG CODEX GUIDE (managed)
+```
+
+block 写在 Git 实际读取的那一份 `info/exclude` 里：普通仓库是 `<仓库根>/.git/info/exclude`，linked worktree 用的是仓库共用 Git 目录下的 `info/exclude`，同一仓库的所有工作目录共用这一份。两家插件的 Local 范围因此都可以在 linked worktree 里安装。
+
+忽略规则对已经被 Git 跟踪的文件不起作用，所以这些文件已经提交进仓库时，Local 范围安装以退出码 1 失败，既不改动文件也不写 block，报错前缀为 `Failed to install CodeDAG plugin for <Agent>:`：
+
+- **Claude Code：** `.claude/settings.local.json` 已被跟踪时，原因是 `Claude Code local installation is unavailable because .claude/settings.local.json is already tracked by Git. Use user or project scope instead.`
+- **Codex：** `.agents/plugins/marketplace.json` 或 `plugins/codedag` 已被跟踪时，原因是 `Codex local installation is unavailable because .agents/plugins/marketplace.json or plugins/codedag is already tracked by Git. Use project scope instead.`
+
+## cdg plugin status [#status]
+
+`cdg plugin status{:sh}` 只读取、不做任何修改，报告的是在当前位置能看到的安装。它为每个目标 Agent 输出一组字段：
+
+| 字段 | 含义 |
+|---|---|
+| `Agent installed` | 这台电脑上是否找到了这个 Agent。为 `false` 时，`Action` 会提示先安装 Agent |
+| `Plugin installed` | 在当前位置是否检测到插件的安装 |
+| `Scope` | 安装范围：`user`、`project` 或 `local`；没有安装时为 `-` |
+| `Enabled` | 插件在 Agent 里是否处于启用状态；无法确定时为 `unknown` |
+| `Installed version`、`Sync` 等 | 已安装的插件版本，以及它是否需要更新、技能文件是否在本机被改过、安装是否损坏 |
+| `Path` | 插件所在的位置，排查问题时参考 |
+| `Action` | 下一步该做什么；需要操作时给出完整的命令 |
+
+运行的位置决定它检查哪些安装。在 Git 仓库中运行时，它检查这个 checkout 中 Project 与 Local 范围的安装，以及 User 范围的安装；在 Git 仓库之外运行时，只检查 User 范围的安装。所以要确认某个仓库里的 Agent 会话能否用上插件，就在那个仓库里运行。
+
+插件在 Agent 里被停用时，`Action` 追加重新启用的办法。它和同步建议可以同时出现，同步建议在前：
+
+```bash title="Terminal"
+  Enabled: false
+  Sync: version record out of date
+  Action: Run `cdg plugin update --codex`. Plugin is disabled. Open `/plugins` in a Codex session to re-enable it
+```
+
+重新启用只能在 Agent 自己那边完成：Claude Code 运行 `claude plugin enable codedag@codedag{:sh}`，Codex 在会话里打开 `/plugins`。`cdg plugin update{:sh}` 和修复安装都保留你的停用选择，不会替你打开。
+
+### 版本兼容 [#compatibility]
+
+插件与 CLI 各自升级，版本号不必相同；两者是否匹配，以插件声明的两个 CLI 版本为准：它支持的最低版本，以及它已经验证过的最新版本。`cdg plugin status{:sh}` 把本机 CLI 的版本与已安装插件声明的这两个版本相比：
+
+| 本机 CLI 的版本 | 结论 | 需要做什么 |
+|---|---|---|
+| 低于插件支持的最低版本 | 插件描述的部分用法，本机的 CLI 可能还不支持 | 按提示[升级 CLI](/zh/docs/get-started/installation) |
+| 在最低版本与已验证版本之间 | 兼容 | 无 |
+| 高于插件已验证的版本 | 仍然兼容，结果中只作为信息显示 | 不必处理；想让 Agent 知道新版 CLI 增加的用法时，更新插件 |
+
+CLI 高于已验证版本不算不兼容，是因为新版 CLI 会保留已发布插件用到的命令、参数和含义。反过来，最新版的插件覆盖 CodeDAG 服务仍然支持的所有 CLI 版本，所以只要你的 CLI 仍受服务支持，更新到最新的插件就不会与它不兼容。
+
+## cdg plugin update [#update]
+
+`cdg plugin update{:sh}` 在插件原来的范围内把它更新到最新版本，默认保留你对插件技能文件的修改。更新同时保留你在 Agent 里对插件的启用或停用选择；安装损坏时，同一条命令会就地修复。目标 Agent 还没有装插件时，命令只提示安装命令，不会替你安装。这个命令没有 `--scope` 选项，换范围见[更换安装范围](#change-scope)。
+
+| 选项 | 作用 | 省略时 |
+|---|---|---|
+| `--reset-local-changes` | 插件的技能文件被改过时，不再询问，直接换成最新的官方内容 | 保留修改。在终端中运行时，命令先询问保留还是换成官方内容，默认保留；由脚本或 Agent 等非交互方式运行时，直接保留修改，插件这次不更新 |
+
+```bash title="Terminal"
+# 更新本机两个 Agent 的插件
+cdg plugin update
+# 只更新 Codex 的插件，放弃对技能文件的修改
+cdg plugin update --codex --reset-local-changes
+```
+
+更新需要替换插件内容时，命令会先把原来的插件副本备份一份，并在完成提示的 `Previous copy backed up in directory:` 一行给出备份所在的目录。备份都放在 CodeDAG 的全局目录里，不在仓库内，所以 Project 范围的插件更新之后 `git status` 仍然是干净的。Codex 插件的备份按安装范围分开存放：
+
+| 安装范围 | 备份目录 |
+|---|---|
+| User | `<CODEDAG_GLOBAL_HOME>/codex-plugins/codedag.bak/` |
+| Project、Local | `<CODEDAG_GLOBAL_HOME>/codex-plugins/repo-backups/<checkout-key>/` |
+
+`<checkout-key>` 由 checkout 根目录的路径生成，所以同一仓库的不同工作目录各有自己的备份目录。每个目录只保留最近的一份备份，下一次替换时会被覆盖，其中还想要的修改要及时移走。想长期保留的编排要求适合写进 CLAUDE.md 或 AGENTS.md，原因见[更新插件](/zh/docs/guides/guide-plugin#update)。
+
+## cdg plugin uninstall [#uninstall]
+
+`cdg plugin uninstall{:sh}` 没有 `--scope` 选项，卸载哪些安装由运行命令的位置决定；在 Git 仓库中运行时，User 范围的安装也会一并删除。
+
+| 在哪里运行 | 卸载哪些安装 |
+|---|---|
+| Git 仓库中的任意目录，包括 worktree 与 clone 副本 | 这个 checkout 中 Project 与 Local 范围的安装，以及 User 范围的安装 |
+| 任何 Git 仓库之外 | 只有 User 范围的安装 |
+
+命令不能只卸载其中一个范围。在仓库里卸载之后，这台电脑上其他仓库的会话也用不上插件了；只想删除 User 范围的安装时，到 Git 仓库之外的目录运行。其他仓库或副本中的 Project 与 Local 配置不会被删除，要到对应的 checkout 里分别卸载。
+
+从 Project 范围卸载会改动当前 checkout 中受版本管理的配置文件，这次改动同样需要提交。卸载 Local 范围的安装时，`info/exclude` 里那段[受管 block](#local-exclude) 一并移除；同一仓库的其他工作目录还在用这段 block 时保留它，免得那边的文件变成未跟踪文件。加 `--claude` 或 `--codex` 时只卸载这一个 Agent 的插件，另一个 Agent 的插件与它的 block 都不受影响。
+
+## 更换安装范围 [#change-scope]
+
+已安装的插件不能直接改范围，要先卸载，再用新的 `--scope` 安装，最后开一个新的 Agent 会话。
+
+两条命令都要在正确的位置运行。卸载要在能看到旧安装的地方进行：旧范围是 Project 或 Local 时，就是装有它的那个 checkout。新范围是 Project 或 Local 时，安装也要在目标 checkout 里运行。只换一个 Agent 时，两条命令都加上 `--claude` 或 `--codex`，另一个 Agent 的插件保持原样。
+
+下面把 Claude Code 的插件从 User 范围换到仓库 `~/code/my-app` 的 Project 范围：
+
+```bash title="Terminal"
+cd ~/code/my-app
+cdg plugin uninstall --claude
+cdg plugin install --claude --scope project
+```
+
+因为卸载是在仓库中运行的，原来 User 范围的安装已经删除，这台电脑上的其他仓库不再有这个插件，需要时在那里另行安装。新写入的配置文件要提交到项目仓库，团队成员才能共享。
+
+反过来，从 Project 范围换回 User 范围时，同样先在这个仓库里卸载，再用 `--scope user` 安装；这次卸载删除了仓库中的项目配置，这个改动同样要提交到项目仓库。
+
+## 相关
+
+- [管理 CodeDAG Guide 插件](/zh/docs/guides/guide-plugin)：安装范围怎么选、怎样确认插件已经生效，以及定制编排习惯时怎样不改动插件的技能文件。
+- [让 Agent 帮你编排](/zh/docs/get-started/let-your-agent-orchestrate)：装好插件之后，把目标交给 Agent，由它写工作流并提交。

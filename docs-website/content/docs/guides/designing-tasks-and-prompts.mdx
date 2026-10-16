@@ -1,0 +1,260 @@
+---
+title: Design Tasks and Prompts
+description: How to split tasks, arrange dependencies, write prompts that a fresh session can complete on its own, and pass each task's conclusions downstream.
+icon: PenLine
+---
+
+How well a workflow runs depends largely on how you split the tasks and write the prompts. Each task runs in a fresh agent session that knows only its prompt and the files it reads from the repository on its own (see [Tasks and Sessions](/docs/concepts/tasks-and-sessions) for why). Most of what you have to deal with when you split tasks, arrange dependencies, and write prompts follows from that.
+
+## Split tasks: one goal per task [#split-tasks]
+
+A task should have one goal that you can state in a sentence and verify when it's done, and the work should fit comfortably in one session. When you split, you're balancing two risks: a task that's too large fills up the session's context, and tasks that are too small lose information between them.
+
+Take adding role-based access control to a project's API as an example. If you write it as a single task, the agent has to read the routing, middleware, and data model code, decide on an approach, write the tests, write the implementation, and run the tests, all in one session. On a small project, that may be fine. On a larger one, just reading the code takes up most of the context, and by the time the agent reaches the implementation, the constraints it settled on earlier may no longer be in context. A more reliable split is three tasks, with the tests written before the implementation:
+
+1. **Plan access control:** Read the code for routing, middleware, and the data model. Decide which roles exist, what permission each endpoint requires, which layer the check goes in, what to return when permission is denied, which files to change, and how to test it. Write all of this to `docs/plans/access-control.md`.
+2. **Write tests from the plan:** Write tests for the permission checks as the plan describes, run them, and confirm that they fail because access control isn't implemented yet.
+3. **Implement access control and pass the tests:** Following the plan, implement the data model for roles, the permission checks, and the wiring into each endpoint. Run all the tests and fix failures until they all pass.
+
+With this split, the planning task can read as much code as it needs, because however much it reads uses only its own context. The test and implementation tasks each start from a finished plan, with nothing in context but what they actually need. And because the tests are written first, the implementation task's completion criteria come ready-made: make those tests pass. The plan file is also a natural checkpoint. To read the plan before any code is written, set `autoAccepted: none` on the planning task so that it stops when it finishes and waits for your review (see [Auto-accept](/docs/concepts/review-gates#auto-accept)).
+
+To check whether the granularity is right, look for signs in both directions:
+
+- **Signs that a task is too large:** In one of your usual interactive sessions, the same work would often run until the context is automatically compacted. Or you can't state the goal without joining several things with "and." A task like this drifts further off course the longer it runs, so split it again by phase or by module.
+- **Signs that tasks are too small:** Several steps are tightly coupled, one step's output is only a half-finished input for the next, and the work usually takes a few rounds of back and forth. Suppose you split fixing an error into two tasks, "investigate the cause and write an analysis report" and "fix it according to the analysis report." The first investigation isn't always right. If running the tests after the fix shows that something is still off, the agent has to investigate and fix again, and that kind of iteration isn't possible once the steps are separate tasks. The reasoning behind the investigation also has to be written into a report before it can be passed along, and some of it is easily lost on the way. The downstream task then has to reread the code the upstream task already read, which costs extra agent usage, and the extra task uses 1 more CodeDAG credit (see [Estimate a workflow](/docs/account/cost-control#estimate)). Steps like these work better as a single task.
+
+Try to keep the tasks roughly equal in size. A task that's clearly larger than the others is usually the one most worth splitting further. Among parallel paths, it's also the one that keeps its downstream tasks waiting the longest.
+
+## Arrange dependencies: only where order matters [#dependencies]
+
+Declare a dependency only where a real ordering exists. If a task uses another task's output, it depends on that task. If it doesn't, don't chain them together. When the results of several paths need to be synthesized or verified together, add a join task that depends on all of them.
+
+Dependencies determine what a downstream task can see. In the default isolated-branches mode, a task can't see the changes of a task it doesn't declare a dependency on, even if that task finished long ago (see [What a dependency is in CodeDAG](/docs/concepts/tasks-and-sessions#dependency-definition)). On the other hand, chaining unrelated tasks together doesn't make the results any better. It only makes the later tasks wait in line for nothing.
+
+There are three common dependency shapes.
+
+**Linear:** Each step uses the result of the one before it, like the planning, test, and implementation tasks from the split above.
+
+export const linearChart = `flowchart LR
+  t1["Task 1<br/>Plan access control"] --> t2["Task 2<br/>Write tests from the plan"]
+  t2 --> t3["Task 3<br/>Implement access control<br/>and pass the tests"]`;
+
+<Tabs items={['Diagram', 'Code']}>
+  <Tab value="Diagram">
+    <Mermaid chart={linearChart} />
+  </Tab>
+  <Tab value="Code">
+    <DynamicCodeBlock lang="mermaid" code={linearChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+**Fan-out and fan-in:** Several unrelated pieces of work run at the same time, and one final task combines the results. For example, the same change is reviewed once each for security, performance, and readability, and the findings are then consolidated into a single list of issues.
+
+export const fanChart = `flowchart LR
+  t1["Task 1<br/>Security review"] --> t4["Task 4<br/>Consolidate the issue list"]
+  t2["Task 2<br/>Performance review"] --> t4
+  t3["Task 3<br/>Readability review"] --> t4`;
+
+<Tabs items={['Diagram', 'Code']}>
+  <Tab value="Diagram">
+    <Mermaid chart={fanChart} />
+  </Tab>
+  <Tab value="Code">
+    <DynamicCodeBlock lang="mermaid" code={fanChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+**Diamond:** Several parallel tasks all build on the same output, and their results come back together for verification at the end. The access control example can be arranged this way too. Once the plan is written, one task writes tests from the plan while another writes the implementation from it, and a final task runs the tests and fixes failures until they all pass.
+
+export const diamondShapeChart = `flowchart LR
+  t1["Task 1<br/>Plan access control"] --> t2["Task 2<br/>Write tests from the plan"]
+  t1 --> t3["Task 3<br/>Implement from the plan"]
+  t2 --> t4["Task 4<br/>Run the tests and fix failures"]
+  t3 --> t4`;
+
+<Tabs items={['Diagram', 'Code']}>
+  <Tab value="Diagram">
+    <Mermaid chart={diamondShapeChart} />
+  </Tab>
+  <Tab value="Code">
+    <DynamicCodeBlock lang="mermaid" code={diamondShapeChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+You don't need a separate task to merge branches. When a task depends on several upstream tasks, CodeDAG first merges the upstream results into the task's branch automatically. If the merge hits a conflict, CodeDAG hands it to an agent first, again automatically (see [Merges and conflicts at join nodes](/docs/concepts/workspaces-and-branches#merge-and-conflicts)). Only then does the task start its own work. When no task brings the paths together, their results are still merged into the integration branch when the workflow finishes. So add a join task only for real work, meaning work that needs the results of several paths at once, such as synthesizing them, comparing them, or running tests.
+
+Tasks that sit side by side in the diagram don't necessarily run at the same time. In isolated-branches mode, the number of tasks running concurrently never exceeds the number of available workspaces. With only the primary repository, they run one after another. The result is the same, just slower. To set up more workspaces, see [Run in Parallel with Workspaces](/docs/guides/parallel-workspaces). For what happens when parallel paths change the same file, see [What if two parallel tasks change the same file?](#same-file).
+
+## Write prompts: let a fresh session finish on its own [#write-prompts]
+
+A task's prompt is no different from what you'd normally write when you hand an agent a long piece of work to finish on its own. Write it the way you usually do, in whatever language you usually use. CodeDAG has no requirements for the prompt's format. Pay extra attention to the few ways a task session differs from your usual interactive sessions:
+
+- **It starts from scratch.** The task agent knows only its prompt and the files it reads from the repository on its own. It can't see your discussions with other people, and it can't see the other tasks in the workflow. Unless the prompt says so, it doesn't know why the work is being done, where the upstream task wrote its results, or whether another task is working on a different part at the same time.
+- **When it stops working, the task counts as done.** CodeDAG takes the agent finishing its work as the sign that the task is complete, and it doesn't check whether the result is up to standard. So it's worth being specific about what counts as done, ideally as a result that can be verified, such as "run all of the project's tests and get them all to pass" rather than "optimize it a bit."
+- **There may be nobody to answer its questions.** In an unattended run, if it stops to wait for someone, the task is stuck there. For surprises you can foresee, such as not finding what it's looking for, give it a way out up front: spell out a fallback, or simply tell it to handle the situation however it judges appropriate. Requirements that contradict one another in some situation also make it stop. See [Keep constraints satisfiable in every situation](#constraints).
+- **The files it reads aren't necessarily the ones in front of you.** In the default isolated-branches mode, a task can read only what's on its own task branch, and by default it can't read changes that aren't on that branch. See [Put required reading where the task can read it](#required-reading).
+
+### A structure to start from [#prompt-structure]
+
+If you're new to writing prompts for this kind of task, the four sections below make a good starting point:
+
+```text title="Prompt"
+Goal:
+What to achieve, in a sentence or two. For an unattended task, you can write it as "Working unattended, implement ...".
+
+Context and required reading:
+- Why this goal matters and how the result will be used.
+- Material that you consider required reading but the agent might not read on its own, with its exact location, such as the files an upstream task produced.
+
+Completion criteria:
+- What to deliver: which changes, or a file at which path with which contents.
+- How to confirm it's done: which commands to run and what the results should be.
+
+Constraints:
+- What may be changed, and what must not be touched.
+```
+
+The "Working unattended, implement ..." wording in the goal fits when you're sure the task runs unattended and has no manual review. It tells the agent that there's nobody to ask.
+
+"Context and required reading" supplies what the agent can't get from the goal alone. Leave out anything it would read anyway to reach the goal. If the goal is to fix a timeout in the login endpoint, for instance, there's no need to add "read the login code first."
+
+Adapt this structure to the task: drop any section you have nothing to put in, and start a new section for anything that doesn't fit in the four. For example:
+
+- **When the goal is complex:** Add a section after the goal to expand on what doesn't fit in a sentence or two, and name it for what it contains:
+  - **Details:** Extra information that helps the agent understand the goal. The prompt for task 1 in the [second workflow](/docs/get-started/second-workflow) uses it to explain what counts as a TODO and what to substitute when no suitable TODOs turn up.
+  - **Requirements:** Things that must or should be satisfied beyond the goal itself. The prompt for task 1 in the [quickstart](/docs/get-started/quickstart) uses it to restrict which conversation history to read and to cap how much.
+- **When you have requirements for the output format:** Simple ones, such as which sections a file should have, can go in the completion criteria. More complex ones can get their own "Output format" section.
+- **When the work has to follow a specific process:** Add a process section after the constraints and list the steps in order. For a bug fix, for example: reproduce the problem, write a failing test that exposes it, fix it, and then run all the tests. Label the section "Recommended process" if it's only a suggestion and "Required process" if it must be followed.
+- **When there are points that are easy to miss:** Collect them in a "Notes" section. These are things the earlier sections don't cover, that the agent might not pay attention to, and that you expect would clearly hurt the result if missed. For example, the files in a certain directory are generated automatically, so direct edits to them get overwritten.
+
+Here's the prompt for task 2 in the second workflow tutorial. Upstream, task 1 has already written a plan for two TODOs to a file. Task 2 implements the first item while task 3 implements the second in another workspace:
+
+```text title="Prompt"
+Goal:
+Implement the TODO described under "First item" in docs/plans/two-small-changes.md.
+
+Context and required reading:
+- docs/plans/two-small-changes.md is the plan written by the previous task. Its "First item" section states the goal, the affected files, and the completion criteria.
+
+Completion criteria:
+- Meet the completion criteria stated under "First item": write the minimal tests first, then implement until they pass.
+
+Constraints:
+- Modify only the files listed under "First item". Don't modify the plan file, and don't implement anything from "Second item".
+
+Notes:
+- Another session is implementing "Second item" on a different branch at the same time, and you can't see its changes. CodeDAG merges the two results afterward.
+```
+
+The goal doesn't restate the TODO. It points to a section of the plan file instead: the upstream task decides what exactly to do, and the prompt doesn't have to be rewritten to match. The note covers something the agent couldn't discover on its own, which is that another session is implementing the other item at the same time.
+
+### Keep constraints satisfiable in every situation [#constraints]
+
+After you write a prompt, it's worth one more check: can every requirement in it be met together with the constraints, whatever the situation? A task agent that runs into contradictory requirements often stops to ask someone what to do. In an unattended run, nobody answers, and the task is stuck there. For how to handle that, see [The agent is waiting for your approval or answer](/docs/troubleshooting/troubleshooting#approval-waiting).
+
+Reruns are the easiest case to overlook. Say the completion criteria call for "write the plan to `docs/plans/two-small-changes.md`" and the constraints say "don't modify any existing file." The first run is fine. On a rerun, the file already exists, and the two requirements conflict. Add "overwrite the file if it already exists" to the completion criteria and change the constraint to "don't create or modify any file other than this plan," and both cases have a way out. To keep the results of every run instead of letting old files be overwritten, see [Write to an agreed-upon file](#agreed-file).
+
+### Put required reading where the task can read it [#required-reading]
+
+Make sure the task can actually read the material its prompt names. In the default isolated-branches mode, a task reads what's on its own task branch: the workflow's base commit plus the accepted results of its upstream tasks (see [What a task agent can see](/docs/concepts/tasks-and-sessions#agent-view)). By default, it can't read changes that aren't on that branch. That goes for edits you keep making after the workflow starts, and for changes from other tasks it doesn't depend on. So required reading either has to be committed before the workflow starts or has to be produced by an upstream task. If you've just written a requirements document, commit it to the current branch with `git commit` first, and then submit the workflow.
+
+## Pass conclusions downstream [#pass-results]
+
+Have the upstream task write its conclusions to an agreed-upon file, and name that file in the downstream prompt as something to read. Files in the repository are the only thing tasks have in common, and a dependency guarantees only that the upstream task's files are in place when the downstream task starts (see [Dependencies](/docs/concepts/tasks-and-sessions#dependencies)). It's up to the downstream prompt to say which file to read and which part of it. Tasks that don't change code, such as analysis, research, and review, are no exception: if a conclusion stays only in the conversation, the downstream task has no way to learn it.
+
+### Write to an agreed-upon file [#agreed-file]
+
+State the file path and the structure of its contents in the upstream prompt's completion criteria, and put the same path in the downstream prompt's required reading. That path is the interface between the two tasks. In the access control example, the planning task's completion criteria say "Write the plan to `docs/plans/access-control.md`, in three sections: 'Roles and permissions', 'Where to make changes', and 'What to test'." The implementation task's required reading says "`docs/plans/access-control.md` is the plan written by the previous task. Implement it according to its 'Roles and permissions' and 'Where to make changes' sections." Once the sections are agreed on, the downstream prompt can refer to them by name and doesn't have to repeat their contents.
+
+<Callout type="idea">
+When a downstream task relies on files written by an upstream task, list those files at the very top of its prompt and say "Read the following files in full before you take any action," so that it has the upstream conclusions before it starts. For long files, you can add "Read them in batches and make sure you read to the end."
+</Callout>
+
+Like code changes, these files reach the integration branch as part of the task's result. If you don't want them in the main branch, delete them before you [merge into the main branch](/docs/guides/finish-and-merge#merge).
+
+When you run the same workflow repeatedly, a file written to a fixed path is overwritten by the next run. In shared-workspace mode, CodeDAG doesn't create commits, so you can get the overwritten content back only if you committed it yourself. To keep the results of every run, replace the fixed path with a rule. In the [quickstart](/docs/get-started/quickstart), for example, the upstream task creates a new numbered directory on each run, and the downstream task reads the one with the highest number.
+
+### Put background shared by several tasks in `.codedag/context/` [#shared-context]
+
+Material that no task produces but several tasks need to read, such as requirements and conventions, can be committed to the project repository or placed in `.codedag/context/`. `.codedag/` is a Git repository separate from the project repository, so files you put there don't have to be committed to the project, don't make the primary repository's workspace dirty, and don't appear in task changes or on the integration branch. They can also be shared with your team along with the `.codedag` repository (see [Share with Your Team](/docs/guides/team-sharing)). You have to create the `context/` directory yourself. CodeDAG doesn't hand its contents to tasks automatically, so you still have to name the files in the prompt.
+
+`.codedag/` exists only in the primary repository. A task that runs in a replica has no `.codedag/` in its workspace, so if the project has registered replicas, the paths in your prompts must lead from a replica to the primary repository. When the replicas and the primary repository sit in the same parent directory, write the primary repository's path relative to a replica, such as `../my-app/.codedag/context/access-control-spec.md`. That path also works from inside the primary repository, so the task can read the file whichever workspace it's assigned to. When the replicas sit at different locations relative to the primary repository, write an absolute path instead, such as `/Users/you/my-app/.codedag/context/access-control-spec.md`. Both forms depend on the directory layout of your machine, and the absolute path also depends on where the repository lives. If you plan to share the workflow with your team, see [Make shared workflows run on every computer](/docs/guides/team-sharing#portable-workflows).
+
+<Callout type="warn">
+For a task that runs in a replica, files in the primary repository are outside its working directory. With Claude Code at anything less than full access, reading them may need approval first, and an unattended task stops there. There are three ways to keep the task from stopping at that point:
+
+- Give the task full access. See [Decide between unattended and attended runs](/docs/guides/agents-and-permission-modes#unattended-or-attended).
+- If the task runs in `auto` mode, allow the read manually once before you submit. See [Allow Claude Code to read files outside the working directory in advance](/docs/guides/agents-and-permission-modes#allow-outside-reads).
+- Commit the material to the project repository instead, so the task can read it in its own workspace.
+</Callout>
+
+### Let downstream tasks look at upstream changes directly
+
+When the upstream output is the code itself, the downstream task can use Git to see what changed, and nobody has to write a separate description. In isolated-branches mode, accepted upstream results are merged into the downstream task's branch as commits, so the downstream prompt only needs to say what to compare against. A review task might say "Run `git diff main...HEAD` and review all the changes made since this workflow started." If only one file matters, append `-- <file-path>` to the command. If the workflow didn't start from `main`, replace `main` in the command with the branch that the base is on. In shared-workspace mode, CodeDAG doesn't create commits, so `git diff` shows the uncommitted changes of all tasks mixed together, with no way to tell which part came from which task.
+
+## Reuse your existing skills and rules [#reuse-rules]
+
+A task session is an ordinary Claude Code or Codex session started in one of your repository's workspaces. CLAUDE.md, AGENTS.md, the rules you've configured for the agent, and the skills you've installed all apply as usual, so there's no need to copy them into the prompt. To use a particular skill in a task, name it in the prompt, for example "Use the such-and-such skill for this review."
+
+Claude Code hooks fire in task sessions too. For example, if you use a Stop hook to make Claude Code finish running the tests before it stops, it does the same in a task, and CodeDAG waits until it has actually stopped before it considers the task done.
+
+## Common questions
+
+### What happens if a prompt contains `cdg` commands? [#cdg-in-prompt]
+
+The task agent runs them, and they act on the real queue. A task session can run `cdg` just as your terminal can, and with the CodeDAG Guide plugin installed, it also knows how to use it. A workflow that it submits from inside a task joins the same project's queue, starts only after the current workflow finishes, and uses credits by task count when it starts, like any other. Commands such as review, pause, and kill act on the workflow that's running and may stop the task itself along with it.
+
+Moving the workflow forward doesn't need the task agent in the first place. Dependencies decide when the next task starts, review gates decide whether a result is let through, and the orchestrator handles submission, review, and intervention from outside the workflow (see [Who does what](/docs/concepts/how-it-works#roles)). Keep the prompt to the task's own work. To stop for confirmation after a task, set `autoAccepted: none` on it instead of writing "wait for my confirmation when you're done" in the prompt.
+
+### Should I copy my requests to the orchestrating agent into task prompts? [#orchestrator-instructions]
+
+No, don't relay them verbatim. Most of what you ask of the orchestrating agent is about how the workflow is put together, and it should turn into the way tasks are split and the fields they set, not into text in some task's prompt. "Have another model review the implementation when it's done" should become a review task that depends on the implementation task and is run by the other agent. "Wait for me to look at each step before continuing" should become `taskAutoAccepted: none` on the workflow. If you copy these sentences into a task's prompt, the task agent can neither add tasks nor change review settings. All it can do is guess at the literal meaning, or even go and run `cdg` itself (see [What happens if a prompt contains `cdg` commands?](#cdg-in-prompt)).
+
+Only what the task agent actually needs to do, read, or follow belongs in the prompt. CodeDAG Guide requires the orchestrating agent to make this distinction too. When you look over a workflow it wrote, it's worth checking whether any relayed requests like these have slipped into the prompts.
+
+### What if an upstream task left its conclusions only in the conversation? [#result-only-in-chat]
+
+While the upstream task hasn't been accepted yet, have its original session write the conclusions to a file. If the upstream task is stopped at its review gate, for example because you set `autoAccepted: none` on it or because it's a task in isolated-branches mode that left no changes at all, use `request-changes` to hand the request to the original session:
+
+```bash title="Terminal"
+cdg task review request-changes 1 -w access-control -m "Write your conclusions to docs/plans/access-control.md, in three sections: Roles and permissions, Where to make changes, and What to test"
+```
+
+The original session still has its earlier conversation. Once it has written the file, the task returns to the review gate, and the downstream task starts only after you check the result and accept it. See [Have it keep working on the existing result: request-changes](/docs/guides/review-tasks#request-changes).
+
+If the upstream task has already been accepted, the downstream task started without those conclusions, and nothing can undo that in this run (see [Review decisions can't be changed](/docs/concepts/review-gates#no-undo)). This happens more easily in shared-workspace mode, where a task is auto-accepted even if it wrote nothing. In that case, you can read the upstream task's replies in the conversation with `cdg task logs <task-id> -w <workflow>{:sh}`, put the conclusions you need into a file, and then continue the affected work in a new workflow. See [An accepted result has a problem](/docs/troubleshooting/troubleshooting#accepted-result).
+
+### What if two parallel tasks change the same file? [#same-file]
+
+Most of the time, you don't need to do anything special: the two tasks change different parts of the same file, and the changes come together. Only a few cases cause trouble, and which ones depends on the execution mode.
+
+- **Isolated-branches mode:** Each task makes its changes on its own branch, so they don't affect each other while they run. Their results are merged either before a join task starts or when they go into the integration branch. Changes in different places merge automatically, and only changes to the same place conflict. When a conflict occurs, CodeDAG automatically hands it to an agent to resolve first, and stops at `on-hold` to wait for you only if it's still unresolved after three rounds. See [Merges and conflicts at join nodes](/docs/concepts/workspaces-and-branches#merge-and-conflicts) and [Merge conflicts in Troubleshooting](/docs/troubleshooting/troubleshooting#hold-merge-conflict).
+- **Shared-workspace mode:** Both tasks edit the same file in the same directory directly. An agent usually changes only a small section of a file at a time, so when the two tasks edit different sections, their changes simply add up. If they happen to edit the same section, the later edit fails because the text it meant to replace has already changed, and that agent rereads the file and makes its edit again. The case where tasks really do interfere is a different one: one task is halfway through a code change when another starts compiling or running tests. The unfinished code affects the second task's results, and CodeDAG neither detects this nor warns you.
+
+If you expect two tasks to make heavy changes to the same place, you can steer around it when you split the work. State in each task's constraints which files it may change. If both really do have to change the same place, make one task depend on the other so that they run in sequence. If you need one combined result, have each task write its own file and let a join task merge the contents. For several tasks that change code and run tests at the same time, the default isolated-branches mode is the better fit. See [Execution modes](/docs/concepts/workspaces-and-branches#execution-modes).
+
+## Related
+
+- [Tasks and Sessions](/docs/concepts/tasks-and-sessions): Why every task is a fresh session, and how dependencies bring upstream results to downstream tasks.
+- [Write a Workflow File](/docs/guides/writing-workflows): Turn the tasks and prompts you've worked out into a workflow file, and validate it before you submit.

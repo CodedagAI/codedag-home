@@ -1,0 +1,441 @@
+---
+title: 故障排除
+description: 按你看到的现象找到原因和处理步骤，让停下的任务与工作流继续执行。
+icon: Wrench
+---
+
+工作流停住不动或任务迟迟没有进展时，大多数情况下处理完原因，工作流就能从停下的地方接着执行，不需要重新提交。状态词本身的含义见[状态含义](/zh/docs/reference/states)。
+
+## 先找到你的症状
+
+| 你看到的现象 | 去哪一节 |
+|---|---|
+| 任务一直是 `working`，日志很久没有新内容 | [任务长时间没有新输出](#no-output) |
+| 任务或工作流显示 `on-hold` | [任务或工作流停在 on-hold](#on-hold) |
+| 任务停在 `done`，依赖它的任务一直不开始 | [任务停在 done 不继续](#stuck-in-done) |
+| 排在后面的工作流一直不开始 | [队列里后面的工作流不开始](#queue-waiting) |
+| 任务刚启动就停住，日志末尾是 Agent 的启动界面 | [任务刚启动就停住](#agent-start-failed) |
+| 日志末尾停在 Agent 的确认界面或提问上 | [Agent 在等你审批或回答](#approval-waiting) |
+| 任务显示已完成，却没有留下该有的改动 | [任务“完成”了但什么也没做](#empty-result) |
+| 日志里出现用量或速率限制，或原因是 `agent-api-error` | [Agent 用量限额或速率限制](#agent-usage-limits) |
+| 电脑重启或进程崩溃之后，任务还显示 `working` | [机器重启或进程崩溃之后](#after-restart) |
+| `cdg dag submit{:sh}` 报错，工作流没有进入队列 | [提交被拒绝](#submit-rejected) |
+| 登记了副本，任务仍然一个接一个地执行 | [并发只有 1](#concurrency-one) |
+| 主仓库的当前分支变了 | [主仓库分支被切走](#branch-switched) |
+| `cdg task view{:sh}` 进不去，或按键没有反应 | [task view 连不上或没反应](#task-view-problems) |
+| `cdg init{:sh}` 失败，或提示设置文件有误 | [初始化与配置](#init-and-settings) |
+| 登录失败，或总是要求重新登录 | [登录失败或反复要求登录](#sign-in-problems) |
+| 提示 CLI、Claude Code 或插件的版本不合适 | [版本相关](#versions) |
+| 任务已经被接受、取消或推迟，才发现结果不对或结论给错了 | [任务已经有了审核结论，才发现问题](#after-conclusion) |
+| 同一个问题反复出现，想换一个工作流重新来 | [工作流做到一半，很难继续](#start-over) |
+| 想向我们求助 | [收集信息以便求助](#get-help) |
+
+## 任务长时间没有新输出 [#no-output]
+
+任务一直显示 `working`、日志却很久没有新内容时，先弄清它是还在工作、在等你，还是已经停下。
+
+1. 运行 `cdg task status <任务 ID> -w <工作流>{:sh}` 看任务的子状态。显示 `on-hold` 时，按[任务或工作流停在 on-hold](#on-hold) 处理；显示 `working (stale owner)` 时，执行它的进程已经不在了，按[机器重启或进程崩溃之后](#after-restart)处理。
+2. 运行 `cdg task logs <任务 ID> -w <工作流> -n 50{:sh}` 看日志的最后几十行。末尾停在 Agent 的确认界面或提问上，说明它在等你，见[Agent 在等你审批或回答](#approval-waiting)；出现用量或速率限制的提示，见[Agent 用量限额或速率限制](#agent-usage-limits)；一直停在 Agent 的启动界面上、看不到你的 prompt，见[任务刚启动就停住](#agent-start-failed)。
+3. 日志里看不出异常，多半是 Agent 还在工作。任务为什么会长时间没有新输出、多久没动静才值得介入，见[怎样判断它是不是卡住了](/zh/docs/guides/run-and-monitor#is-it-stuck)。
+4. 还拿不准时，用 `cdg task view <任务 ID> -w <工作流>{:sh}` 进入任务会话看现场，需要时直接在会话里给 Agent 发消息纠正方向，进入和退出的做法见[进入会话、修改与退出](/zh/docs/guides/intervene-and-control#task-view)。
+
+确认任务真的卡住了，例如一条命令挂起不再返回，可以先用 `cdg task kill <任务 ID> -w <工作流>{:sh}` 中断它。中断只打断 Agent 当前的输出，会话会保留下来；之后用 `cdg task recover <任务 ID> -w <工作流>{:sh}` 在同一个会话里接着做。
+
+## 任务或工作流停在 on-hold [#on-hold]
+
+`on-hold` 表示 CodeDAG 遇到了它不能自行处理的情况，停下来等你处理。处理的顺序总是一样的：先读原因，再按原因处理，最后恢复。
+
+任务的原因要单独查看一个任务才能看到：`cdg task status <任务 ID> -w <工作流>{:sh}` 只写一个任务 ID 时，输出里有 `Reason:` 行，有些原因还会附带一行 `Diagnostic:`，说明更具体的情况和建议的做法；其后的 `Docs:` 行给出本页对应小节的链接。一次写多个任务 ID 时，输出只是一张列表，不显示原因。
+
+```bash title="Terminal"
+cdg task status 2 -w feature
+```
+
+```bash title="Terminal"
+[TZ: -04:00] 2026-09-30 10:19:28
+
+Task 2 in .codedag/dags/feature.yaml
+Title: 实现登录接口
+Phase: 📤 submitted
+Status: 🔘 pending
+Substatus: on-hold
+Reason: workspace-dirty
+Diagnostic: Task workspace has uncommitted changes: ?? notes.txt
+Docs: https://codedag.com/docs/troubleshooting/troubleshooting#hold-workspace
+Workspace: /Users/you/my-app
+Branch: cdg/feature/t2-实现登录接口
+```
+
+工作流本身也会被搁置，这时原因显示在 `cdg dag status <工作流>{:sh}` 输出开头的 `Reason:` 行，例如 `Reason: DAG startup failed (dag-startup-failed)`，有些原因同样附带 `Diagnostic:`，最后也是一行 `Docs:`。哪些任务被搁置，看同一个输出里各任务那一行的 `[pending] [on-hold]`。
+
+处理完原因之后，任务用 `cdg task recover <任务 ID> -w <工作流>{:sh}` 恢复，工作流用 `cdg dag recover <工作流>{:sh}` 恢复；后者同时恢复这个工作流里所有能恢复的任务。原因没有真正消除时，任务或工作流会再次停在 `on-hold`。用 `cdg task view{:sh}` 进入会话并不会解除搁置，在会话里处理完之后仍要执行 `recover`。
+
+### 工作区有未提交的改动或未完成的 Git 操作 [#hold-workspace]
+
+原因是 `workspace-dirty` 或 `git-operation-in-progress` 时，分配给这个任务的工作区不干净，CodeDAG 无法在上面检出任务分支。这只发生在默认的隔离分支模式下，未跟踪的新文件也算作改动。最常见的情况是你在主仓库里留着还没提交的工作，而主仓库是第一个被使用的工作区；提交时，CodeDAG 也会对这种情况给出提示。
+
+在对应的工作区里提交、暂存（例如 `git stash -u`）或丢弃这些改动；如果有一次 merge、rebase 或 cherry-pick 还没结束，把它完成或用 `--abort` 中止。之后执行 `cdg task recover{:sh}` 或 `cdg dag recover{:sh}`。不确定是哪个工作区时，`cdg task status <任务 ID> -w <工作流>{:sh}` 的 `Workspace:` 行给出它的路径。想在工作流运行期间继续在主仓库里开发，可以把主仓库排除在执行之外，做法见[想在工作流运行时同时手动开发](/zh/docs/guides/parallel-workspaces#keep-main-repo)。
+
+不打算为这个任务清理工作区时，也可以不恢复、直接结束它：`cdg task review cancel <任务 ID> -w <工作流>{:sh}` 或 `defer` 会给它定案，工作流级用 `cdg dag review cancel <工作流>{:sh}` 或 `defer`。这样的任务从没运行过，审核不处置它的代码，工作区里的修改、当前分支都保持原样。已经被 `cdg task kill{:sh}` 停下的搁置任务同样如此：既可以直接结束，也可以处理完现场再 `recover`，它会重新准备并从头启动。
+
+只有一种情况必须先清理：不干净的工作区同时是集成工作区（通常是单工作区项目的主仓库）。这时 `cdg dag review cancel{:sh}` 会报 `Integration workspace must be clean before DAG publish.` 并保持原状；`cdg task review cancel{:sh}` 虽然能结束任务，工作流随后也会停在 `integration-workspace-dirty`。
+
+原因是 `integration-workspace-dirty` 或 `integration-git-operation-in-progress` 时，情况相同，只是发生在所有任务审核完成、CodeDAG 要把结果合并到集成分支的时候，被检查的是集成分支所在的工作区，通常就是主仓库。清理之后执行 `cdg dag recover <工作流>{:sh}`。
+
+### 分支问题 [#hold-branch]
+
+这一组原因表示 CodeDAG 没能把工作区切到它需要的分支上。前两种原因出现时，任务还停在准备工作区的阶段，和[工作区有未提交的改动](#hold-workspace)时一样：既可以处理完再恢复，也可以用 `cdg task review cancel{:sh}` 或 `defer` 直接结束它。
+
+- `branch-name-conflict`：任务在工作流文件里用 [`branchName`](/zh/docs/reference/workflow-file#tasks-branch-name) 指定了分支名，而同名的分支已经存在。这最常见于重新执行一个写了 `branchName` 的工作流：上一次执行留下的分支还在，CodeDAG 不会拿它来做新一次执行。`cdg task status <任务 ID> -w <工作流>{:sh}` 的 `Diagnostic:` 行写明分支名被谁占着，以及对应的处理办法：
+
+  - **工作区里的同名本地分支：** 诊断给出工作区的路径，由你自己把那个分支删掉，或者用 `git branch -m` 改名保留。
+  - **CodeDAG 同步仓库占用的分支名：** 用 clone 做副本时，上一次执行留下的分支还在同步仓库里，只处理各个 clone 里的本地分支不够。在项目里运行 `cdg branch release <分支名>{:sh}` 释放它：命令会删掉同步仓库里的这个分支，再清掉各个工作区里残留的远程跟踪引用。
+
+  两边都占着时，诊断会把两条一起列出，都处理完再执行 `cdg task recover{:sh}`。`cdg branch release{:sh}` 拒绝释放仍在使用的分支名和快照分支：分支名是队列中某个工作流的集成分支或任务分支时，要等那个工作流审核结束，其余情形见 [cdg branch release](/zh/docs/reference/cli/control#branch-release)。提交时的校验也会对同名分支给出警告，按警告处理之后再提交，任务就不会停在这里。
+
+- `branch-checkout-failed`：检出任务分支失败，例如这个分支正在另一个工作区里被检出，Git 不允许同时在两处检出同一个分支。让那个工作区切到别的分支，再执行 `cdg task recover{:sh}`。
+- `integration-branch-checkout-failed`：集成分支 `cdg/<工作流名>/integration` 正在另一个工作区里被检出。同样让那个工作区切走，再执行 `cdg dag recover <工作流>{:sh}`。
+- `integration-branch-drifted`：集成分支被移动到了 CodeDAG 无法接续的位置，或者被删掉了，例如工作流还在执行时有人在集成分支上提交了别的改动或重置了它。把集成分支恢复到原来的位置（撤销额外的提交，必要时用 `git reflog` 找回原来的提交），再执行 `cdg dag recover <工作流>{:sh}`；恢复不了时，按[工作流做到一半，很难继续](#start-over)结束这次执行。
+
+### 工作流无法开始执行 [#dag-startup]
+
+工作流的 `Reason:` 行显示 `DAG startup failed (dag-startup-failed)` 时，它轮到执行，却没能准备好开始执行需要的起点、工作区或集成分支。`cdg dag status <工作流>{:sh}` 在 `Reason:` 的下一行用 `Diagnostic:` 写明这一次失败的原因，按它的内容找到对应的一行：
+
+| `Diagnostic:` | 原因 | 处理 |
+|---|---|---|
+| `Failed to resolve baseRef '<baseRef 的值>' to a unique commit.` | [`baseRef`](/zh/docs/reference/workflow-file#base-ref) 解析不到提交，或者对应多个提交。`baseRef` 在工作流开始执行时才解析，CodeDAG 也不会替你拉取远程分支，所以写了本机还不存在的分支名、只在远程存在的分支，或者同名的分支和标签同时存在，都会停在这里。 | 让这个名字能解析到唯一的提交，例如创建或拉取对应的分支。 |
+| `Failed to resolve DAG base commit from HEAD.` | 工作流没有写 `baseRef`，要以起点所在工作区（通常是主仓库）的 `HEAD` 为起点，而那里还没有任何提交，例如刚创建、还没有提交过的仓库。 | 工作流必须从一个已有的提交开始：先在这个仓库里完成第一次提交。 |
+| `No available workspace after applying excludeWorkspaces.` | [`excludeWorkspaces`](/zh/docs/reference/workflow-file#exclude-workspaces) 排除了全部登记的工作区。校验会拦下这种情形，所以它出现在这里，说明提交之后登记的工作区变少了。 | 用 `cdg init{:sh}` 登记至少一个没有被排除的工作区。 |
+| 以 `No workspace is available for this workflow:` 开头 | 没有被排除的工作区，目录都已经不存在，括号里列出了这些目录。校验同样会拦下这种情形，所以这些目录是提交之后才不见的。 | 重新运行 `cdg init{:sh}` 更新登记的工作区。 |
+| `Merge in progress.`、`Rebase in progress.` 或 `Cherry-pick in progress.` | 集成工作区（通常是主仓库）里有一次 merge、rebase 或 cherry-pick 还没结束。 | 在那个工作区里把它完成，或用 `--abort` 中止。 |
+
+`Diagnostic:` 是其他内容时，例如 Git 命令的报错原文，按它的提示处理。处理之后执行 `cdg dag recover <工作流>{:sh}`，工作流会重新尝试开始。
+
+已经提交的执行始终按提交时的工作流定义进行，修改工作流文件对它不起作用。所以 `baseRef` 本身写错，或者 `excludeWorkspaces` 排除过多时，只能结束这次执行，改好文件后重新提交：
+
+```bash title="Terminal"
+cdg dag review cancel <工作流>
+cdg dag review clear <工作流>
+cdg dag submit <工作流>
+```
+
+这时工作流已经扣过 CodeDAG 额度，重新提交是一次新的执行，会按任务数再次消耗额度。规则见[清除审核记录与重新提交](/zh/docs/reference/cli/review#clear-and-resubmit)。
+
+### 合并冲突 [#hold-merge-conflict]
+
+原因是 `merge-conflict`（任务）或 `integration-merge-conflict`（工作流）时，CodeDAG 自动合并各任务的结果时出现了冲突，另开的 Agent 会话处理了三轮仍没有解决，需要你在对应的工作区里完成这次合并。自动合并发生在两个位置：汇聚任务开始之前，上游任务的结果合并进它的任务分支；全部任务审核完成之后，各任务的结果合并进集成分支。机制见[汇聚节点的合并与冲突](/zh/docs/concepts/workspaces-and-branches#merge-and-conflicts)。
+
+停下的时候，CodeDAG 已经退出了这次合并：工作区里留着 Agent 改到一半的文件，冲突的文件没有暂存，Git 也不再处于合并状态。这时直接 `git add` 再提交，得到的只是一次普通提交，而不是合并，CodeDAG 恢复时仍会认为上游的结果没有合并进来。可靠的做法是丢掉这些半成品，自己重新做一次合并。
+
+任务停在 `merge-conflict` 时：
+
+1. 用 `cdg task logs <任务 ID> -w <工作流>{:sh}` 查看日志末尾：`Incoming source task:` 是正在合并进来的上游任务，`Conflict summary:` 下面列出了冲突的文件。
+2. 用 `cdg task status <任务 ID> -w <工作流>{:sh}` 查到现场：`Workspace:` 行是这个任务的工作区，`Branch:` 行是它的任务分支；对上游任务执行同一条命令，就能拿到要合并进来的那个分支名。
+3. 在那个工作区里丢掉半成品，重新合并上游任务的分支，解决冲突后提交：
+
+   ```bash title="Terminal"
+   git reset --hard
+   git merge cdg/<工作流名>/t<上游任务 ID>-<标题>
+   # 解决冲突后
+   git add -A
+   git commit
+   ```
+
+   自动合并发生在任务开始工作之前，`git reset --hard` 丢掉的只是这次合并留下的半成品。如果 `git merge` 提示未跟踪的文件会被覆盖，说明上一次合并还留下了新建的文件，先用 `git clean -fd` 清掉它们。用 clone 副本时，上游任务的分支只存在于执行它的那个副本里，`codedag-mirror` 远程里也没有它。如果它不在当前工作区，先从执行它的副本取回，例如 `git fetch ../my-app-clone-1 cdg/<工作流名>/t<上游任务 ID>-<标题>{:sh}`，再用 `git merge FETCH_HEAD{:sh}` 代替上面的 `git merge`。
+4. 确认 `git status` 干净之后，执行 `cdg task recover <任务 ID> -w <工作流>{:sh}`。CodeDAG 会发现这个上游的结果已经在任务分支里，接着合并其余的上游（遇到冲突仍先交给 Agent），然后开始任务本身。如果合并还没提交、仍处于合并状态，任务会继续停在 `on-hold`。
+
+工作流停在 `integration-merge-conflict` 时，做法相同，只是地点换成集成分支所在的工作区，分支换成集成分支；`cdg dag status <工作流>{:sh}` 的 `Integration Workspace:` 与 `Integration Branch:` 两行给出它们。在那里执行 `git reset --hard`，然后把通过审核（`accepted` 或 `auto-accepted`）的任务分支逐个合并进来，直到冲突解决；各任务的审核结果可以在 `cdg dag status <工作流>{:sh}` 里看到。最后执行 `cdg dag recover <工作流>{:sh}`，还没合并的其余结果由 CodeDAG 接着合并。
+
+<Callout type="warn">`git reset --hard` 会丢掉这个工作区里所有未提交的改动。执行之前先确认这个工作区里没有你自己放进去、还想保留的改动；拿不准时，先用 `git stash -u` 存起来。</Callout>
+
+### Agent 会话问题 [#hold-agent-session]
+
+这一组原因说明任务 Agent 的会话出了状况，或者要交给会话的内容没能送达，CodeDAG 无法确定任务能否安全地继续。多数情况下，先按 `Diagnostic:` 行的说明处理，再执行 `cdg task recover{:sh}`，任务会在原来的会话中接着做。
+
+| 原因 | 含义 | 处理 |
+|---|---|---|
+| `agent-session-ended` | 任务执行期间，它的会话或 CodeDAG 的后台进程意外结束，例如电脑重启。 | 执行 `cdg task recover{:sh}`，CodeDAG 重新打开原来的会话并让它接着做，见[机器重启或进程崩溃之后](#after-restart)。 |
+| `agent-session-input-unavailable` | 会话没能进入可以接收输入的状态，常见的是停在某个要求应答的界面上。 | 用 `cdg task view{:sh}` 进入会话，处理掉这个界面，退出后执行 `cdg task recover{:sh}`。恢复不了时，用 `cdg task kill{:sh}` 停下它。 |
+| `agent-api-error` | 会话因为 API 错误中断，最常见的是用量或速率限制。 | 见[Agent 用量限额或速率限制](#agent-usage-limits)。 |
+| `agent-lifecycle-state-unavailable` | CodeDAG 无法确认会话进行到了哪一步、是否已经完成。 | Codex 任务一启动就停在这里，多半是它还停在登录这类要人应答的启动界面上，见[任务刚启动就停住](#agent-start-failed)。其他情况先执行 `cdg task recover{:sh}` 重试；仍然不行时，用 `cdg task kill{:sh}` 停下任务，检查它的改动，再像审核普通任务一样给出结论。Claude Code 版本高于 CodeDAG 已验证的范围时也可能出现，见[版本相关](#versions)。 |
+| `agent-subagent-incomplete` | Codex 任务派出的子 Agent 没有全部结束。 | 用 `cdg task view{:sh}` 查看后执行 `cdg task recover{:sh}`。`Diagnostic:` 中的子 Agent 标为 `state=unconfirmed` 时，核实没有意外改动和残留进程后，使用 [`--acknowledge-unconfirmed`](/zh/docs/reference/cli/control#acknowledge-unconfirmed)。 |
+| `agent-worker-liveness-unknown` | CodeDAG 无法确认原来的执行进程是否已经结束。 | 先用 `cdg task view{:sh}` 进入原会话，确认它是不是还在工作。命令报 `Cannot reach the existing session of task …` 时，说明原会话已经连不上，再按 [`--force-owner-release`](/zh/docs/reference/cli/control#force-owner-release) 处理。 |
+| `agent-version-unsupported` | Claude Code 的版本低于 CodeDAG 支持的最低版本。 | 升级 Claude Code 后执行 `cdg task recover{:sh}`，见[版本相关](#versions)。 |
+| `agent-bypass-permissions-unaccepted` | Claude Code 任务要以完全授权模式运行，而这台电脑上还没有接受过这个模式的警告。 | 接受警告后执行 `cdg task recover{:sh}`，做法见[提前接受 Claude Code 的完全授权警告](/zh/docs/guides/agents-and-permission-modes#accept-bypass-warning)。 |
+| `continuation-dispatch-failed` | 用 `request-changes` 或 `rework` 提出的要求没能交给任务 Agent。 | 执行 `cdg task recover{:sh}`，CodeDAG 会重新投递同一个要求。 |
+
+遇到表里没有的其他 `agent-` 或 `codex-` 开头的原因，做法相同：先读 `Diagnostic:`，用 `cdg task view{:sh}` 查看会话现场，再执行 `cdg task recover{:sh}`。恢复不了时，停下任务，按[工作流做到一半，很难继续](#start-over)收尾。
+
+### 下游被搁置 [#downstream-hold]
+
+原因是 `downstream-hold` 时，你在审核时选择了取消或推迟，并用 `--downstream hold` 把下游搁置了下来，等你决定它们还要不要执行。任务和工作流都可能带着这个原因，`--downstream` 的几个取值见[审核参考的 `--downstream` 一节](/zh/docs/reference/cli/review#downstream)。
+
+被搁置的是任务时，你审核的是它的上游任务。还想执行时，用 `cdg task recover{:sh}` 放开它们，它们会基于上游最新的审核结果重新排队，条件满足后开始；不再需要时，用 `cdg task review cancel{:sh}` 或 `defer` 结束它们。
+
+被搁置的是工作流时，你审核的是队列中排在前面的一个工作流，排在它后面、还没开始的工作流都停在 `[pending] [on-hold]`：`cdg status{:sh}` 在它们的行尾标出 `(downstream-hold)`，`cdg dag status <工作流>{:sh}` 的 `Reason:` 行显示 `Held by an earlier workflow's review with --downstream hold (downstream-hold)`。还想执行时，用 `cdg dag recover <工作流>{:sh}` 放开，并且要写明工作流：命令只放开写出的工作流，其余的仍然搁置；不写工作流时，它只作用于队首的那一个。放开的工作流回到队列中等待，轮到它时开始执行。不再需要时，用 `cdg dag review cancel <工作流>{:sh}` 或 `defer` 结束它。
+
+### 账号与额度闸门 [#startup-gate]
+
+工作流的 `Reason:` 行显示 `Startup gate blocked before execution (startup-gate-blocked)` 时，它轮到执行时没能完成账号与额度的检查，还没有开始执行。紧接着的 `Startup gate failure:` 行给出具体原因，`Action:` 行给出建议的操作：
+
+| `Startup gate failure:` | 原因 | 处理 |
+|---|---|---|
+| `insufficient_credits` | 当前周期的 CodeDAG 额度已经用完。 | 按[额度不足或无订阅时](/zh/docs/account/credits-and-subscription#insufficient-credits)恢复可用额度。 |
+| `no_subscription` | 账号没有有效的订阅。 | 同上。 |
+| `login_required` | 这台电脑上的 CLI 没有登录。 | 用 `cdg auth login{:sh}` 登录提交这个工作流的账号。 |
+| `account_mismatch` | 当前登录的不是提交这个工作流的账号。 | 切回原来的账号，见[登出、多台电脑与切换账号](/zh/docs/account/login-and-account#sign-out)。 |
+| `billing_service_unavailable` | 暂时连不上 CodeDAG 服务。 | 等服务恢复，见[服务不可用时](/zh/docs/account/login-and-account#service-unavailable)。 |
+| `grant_persist_failed` | 额度已经扣除，但这次执行的授权没能保存到这台电脑上。 | 不需要先处理别的，直接恢复；反复出现时，`Details:` 行写有保存失败的具体原因。 |
+
+处理之后执行 `cdg dag recover <工作流>{:sh}`，工作流会重新尝试开始，不会重复扣除额度。在阻断解除之前，`cdg task recover{:sh}` 和两个 `unpause` 命令都会拒绝执行，报 `Workflow is blocked by the startup gate. Run 'cdg dag recover' to resolve it before resuming.`；看到这条报错时，先用 `cdg dag status <工作流>{:sh}` 查出失败码，按上表处理后再恢复工作流。
+
+失败码是 `idempotency_replay_expired` 或 `invalid_usage_grant` 时，这次执行的扣费授权已经无法恢复，`cdg dag recover{:sh}` 也会拒绝执行。按 `Action:` 行给出的三条命令结束这次执行并重新提交；重新提交是一次新的执行，开始执行时按任务数扣除额度。
+
+### 同步仓库不可用 [#mirror-unavailable]
+
+原因是 `mirror-unavailable` 时，CodeDAG 读写同步仓库失败。使用 clone 副本时，CodeDAG 通过本机上的一个同步仓库在各个工作区之间传递分支，主仓库和各个 clone 里名为 `codedag-mirror` 的远程就指向它。
+
+检查磁盘空间是否充足、CodeDAG 的全局目录（默认是 `~/.codedag`）是否可写，以及工作区里的 `codedag-mirror` 远程是否被改指到了别的地址。工作流在开始执行时停在这里的，`cdg dag status <工作流>{:sh}` 的 `Diagnostic:` 行给出这一次的报错原文，多为 Git 的报错，可以据此判断该查哪一项。远程指向别处时，在那个工作区里用 `git remote remove codedag-mirror{:sh}` 删掉它，CodeDAG 会按正确的地址重新添加。处理之后，按原因出现的位置执行 `cdg task recover{:sh}` 或 `cdg dag recover{:sh}`。
+
+## 任务停在 done 不继续 [#stuck-in-done]
+
+任务停在 `done`，说明它已经执行完，正在等你审核；在你给出结论之前，依赖它的下游任务不会开始。这时 `cdg dag status <工作流>{:sh}` 里这个任务显示为 `[done] [done]`，工作流可能显示为 `[pending] [blocked]`，看上去像是在等待，其实不会自己继续执行，见[工作流的状态与子状态](/zh/docs/reference/states#shared-substatus)。
+
+任务停在这里有两种原因：
+
+- 它的审核策略是 `none`，要求人工审核。这可能来自任务的 `autoAccepted`、工作流的 `taskAutoAccepted`、项目设置，或者提交时的 `--task-auto-accepted none`。
+- 它在隔离分支模式下执行，却没有留下任何改动。CodeDAG 不会自动接受这样的任务，`cdg dag status{:sh}` 在这一行末尾标注 `— zero output, awaiting manual review`。
+
+两种情况的处理相同：检查结果，然后审核。`cdg task status <任务 ID> -w <工作流>{:sh}` 给出检查需要的三项——`Workspace:` 是任务的工作区，`Branch:` 是它的任务分支，`Base Commit:` 是它开始之前的提交，所以 `git -C <Workspace> diff <Base Commit>{:sh}` 就是这个任务改动的全部范围。结果符合预期，例如一个本来就只做检查、不改文件的任务，用 `cdg task review accept <任务 ID> -w <工作流>{:sh}` 接受，下游随即开始；它本该留下改动却没有，用 `request-changes` 让它接着做，或用 `rework` 让它重做，做法见[按你的判断选择动作](/zh/docs/guides/review-tasks#choose-action)。自动接受的规则和零输出任务为什么不自动接受，见[自动接受](/zh/docs/concepts/review-gates#auto-accept)。
+
+等待期间的代价不止是下游在等：隔离分支模式下，停在 `done` 的任务还占着自己的工作区，其他任务可能因此等不到空闲的工作区。
+
+如果某个任务按设计就不修改文件，又要在隔离分支模式下执行，可以在 prompt 里让它把结论写进一个约定的文件，这样它就不会因为零输出而停下。
+
+整个工作流停在 `[done] [done]`、所有任务都已审核过时，是工作流级的审核策略为 `none`（`dagAutoAccepted: none`），用 `cdg dag review accept <工作流>{:sh}` 等命令给出结论即可。
+
+## 队列里后面的工作流不开始 [#queue-waiting]
+
+同一个项目的工作流按提交顺序排队，一次只执行排在最前面的一个；它审核结束、离开队列之后，下一个才开始。所以后面的工作流不开始，原因总在队首的工作流身上，先用 `cdg status{:sh}` 看队首是哪一个、处在什么状态：
+
+- `[in-progress]`：它还在执行，等它完成即可。
+- `[done] [done]`，或 `[pending] [blocked]` 却没有任务在执行：它在等你审核，见[任务停在 done 不继续](#stuck-in-done)。
+- `[stopped] [paused]` 或 `[stopped] [killed]`：它被暂停或中断了，不会自己继续。用 `cdg dag recover <工作流>{:sh}` 让它继续，或者不再需要时用审核命令结束它。
+- `[pending] [on-hold]`：它被搁置了，见[任务或工作流停在 on-hold](#on-hold)。
+
+排在后面的工作流也可能自己带着停止标记。你对一个还在排队的工作流执行过 `pause` 或 `kill`，它轮到时不会启动，而是停在队首；审核前一个工作流时用了 `--downstream hold`，排在后面的工作流会显示为 `[pending] [on-hold]`，行尾标着 `(downstream-hold)`，见[下游被搁置](#downstream-hold)。这两种情况都用 `cdg dag recover <工作流>{:sh}` 放开。
+
+不想等队首的工作流时，可以用 `cdg dag review cancel <工作流>{:sh}` 或 `defer` 直接结束它，仍有任务在执行时加上 `-k`。结束之后，它的结果不会留在集成分支上，下一个工作流随即开始。
+
+## 任务刚启动就停住 [#agent-start-failed]
+
+Agent 在开放普通输入之前可能显示一个要人应答的界面，任务启动时没有人在终端前，它就停在那里。目录信任的询问由 CodeDAG 代你选择信任，不会让任务停下，见[CodeDAG 代你应答的询问](/zh/docs/guides/agents-and-permission-modes#auto-answered)。
+
+有两种界面要你本人决定，CodeDAG 只识别它们，不替你按键：
+
+- **Claude Code 的完全授权警告。** 以 `bypassPermissions`（CodeDAG 里的别名 `yolo`）运行的任务，在这台电脑上还没接受过这个模式的警告时，任务停在 `[pending] [on-hold]`，原因为 `agent-bypass-permissions-unaccepted`，`Diagnostic:` 行给出在终端接受警告的做法。接受警告与恢复任务的步骤见[提前接受 Claude Code 的完全授权警告](/zh/docs/guides/agents-and-permission-modes#accept-bypass-warning)。
+- **Codex 的登录等其他启动界面。** 还没登录时，Codex 停在登录引导上，任务停在 `[pending] [on-hold]`，原因为 `agent-lifecycle-state-unavailable`，`Diagnostic:` 行附上当前屏幕，便于你认出它停在什么界面。用 `cdg task view <任务 ID> -w <工作流>{:sh}` 进入会话，在里面完成登录，退出后执行 `cdg task recover{:sh}`；也可以先用 `cdg task kill{:sh}` 停下任务，在终端里单独运行 `codex{:sh}` 处理好，再 `cdg task recover{:sh}` 让任务重新启动。
+
+Agent 也可能停在 CodeDAG 不认识的界面上，这时任务不会给出搁置原因。任务停在启动阶段、日志里看不到你的 prompt 时，在那个工作区里手动启动一次这个 Agent，处理掉它显示的确认界面，再执行 `cdg task recover{:sh}`。
+
+停在启动界面上的任务被 `kill` 中断之后，处理完现场直接 `recover` 就行，不必结束这次执行重新提交。它还没有建立可恢复的会话，`recover` 会把它放回等待、重新准备并启动一个新会话，输出里写明 `No recoverable Agent session was established; the task will be prepared and started again.`。
+
+## Agent 在等你审批或回答 [#approval-waiting]
+
+任务显示 `working`，日志末尾却停在 Agent 的确认界面上，例如 Claude Code 询问是否创建某个文件，下面列着 `1. Yes`、`3. No` 等选项和 `Esc to cancel` 的提示，说明任务 Agent 在等人批准一个操作；Agent 向你提出问题、等你回答时，看起来也是这样。无人应答时，它会一直等下去。
+
+在真实的终端里用 `cdg task view <任务 ID> -w <工作流>{:sh}` 进入会话，在 Agent 原生的界面里作出选择或回答问题，然后按 Ctrl+C 退出会话，任务会接着执行。在 Agent 的命令工具这类没有交互终端的环境里，这一步要借助 tmux，编排 Agent 就是这样应答的，见[编排 Agent 会做什么](/zh/docs/get-started/let-your-agent-orchestrate#what-it-does)。
+
+这一次执行里，任务的权限模式已经定下，之后遇到的审批仍要一次次应答。想让以后的工作流无人值守地跑完，在工作流文件里给每个任务显式写上完全授权的 `mode`，例如 Claude Code 的 `bypassPermissions` 或 Codex 的 `yolo`，取舍见[决定无人值守还是有人值守](/zh/docs/guides/agents-and-permission-modes#unattended-or-attended)。即使是完全授权，Claude Code 仍会对少数操作坚持询问，例如你在权限规则里明确设为需要询问的工具、Agent 主动向你提出的问题，以及删除根目录或主目录这类关键路径，详见 Claude Code 官方文档的 [Permission modes](https://code.claude.com/docs/en/permission-modes)。
+
+## 任务“完成”了但什么也没做 [#empty-result]
+
+任务显示为已完成甚至已被自动接受，该有的改动却没有出现：隔离分支模式下它的任务分支上没有新的提交，或者约定要写出的文件不存在、内容为空。先用 `cdg task logs <任务 ID> -w <工作流>{:sh}` 读 Agent 最后的回复，它通常会说明自己为什么没做。
+
+常见的原因有三种：
+
+- **运行环境拦住了它。** Codex 的 `workspace-write` 沙箱默认禁止联网，需要安装依赖或访问网络的任务会失败，Agent 报告无法完成后结束。需要联网时，在 `mode` 里写上 `sandbox=workspace-write,network_access=true`，写法见[Codex 的权限模式语法](/zh/docs/reference/workflow-file#mode-codex)。
+- **权限不够。** 权限模式或沙箱不允许它运行需要的命令、写入需要的位置，它同样会报告后结束。
+- **prompt 让它认为无事可做。** 例如它没有找到 prompt 里描述的对象。把目标、位置和完成标准写得更具体，见[写 prompt：让一个全新的会话独立完成](/zh/docs/guides/designing-tasks-and-prompts#write-prompts)。
+
+隔离分支模式下没有留下任何改动的任务会停在 `done` 等你审核，而不是被自动接受，见[任务停在 done 不继续](#stuck-in-done)。所以“完成了却什么也没做”多出现在共享工作区模式下：那里的零输出任务照常被自动接受，只在状态行末尾标注 `— zero output`，并往任务日志里写一条警告；同时运行的其他任务改动了共享工作区时，连这个标注也可能没有。
+
+任务已经被接受之后，结论不能撤回。修正工作流文件里的 `mode` 或 prompt 之后，把没做完的工作放进新的工作流，做法见[已经接受的结果有问题](#accepted-result)；或者清除审核记录、重新提交整个工作流，见[清除审核记录与重新提交](/zh/docs/reference/cli/review#clear-and-resubmit)。
+
+## Agent 用量限额或速率限制 [#agent-usage-limits]
+
+长时间运行时，任务 Agent 可能撞上 Claude Code 或 Codex 自身的用量限制，例如 5 小时窗口。这时任务停在 `[pending] [on-hold]`，原因为 `agent-api-error`：Claude Code 的任务日志里会出现 `Claude API stopped the current turn due to rate limiting.`，后面附带重置时间的信息；Codex 的任务在 `Diagnostic:` 行说明它的这一轮以错误结束。
+
+限制不会只影响一个任务：接下来开始的、使用同一个 Agent 的任务也会很快撞上它。所以先止损，等限额重置后再收口。
+
+1. **止损。** 工作流里的任务都用同一个 Agent，或者后面的任务避不开它时，用 `cdg dag kill <工作流>{:sh}` 停下整个工作流：执行中的任务被中断、会话保留，还没开始的任务变为 `paused`，不再有新任务启动。混用两家 Agent、另一家没有受限时，只停下受限 Agent 的任务，`cdg task kill <任务 ID...> -w <工作流>{:sh}` 可以一次写多个任务，其中还没开始的任务会变为 `paused`，其余任务照常推进。
+2. **检查受限前后结束的任务。** 等待重置的这段时间里，看一眼在限制发生前后结束的任务，确认它们的结果完整。某个任务的结果不完整却已经被接受时，它的结果已经交给了下游，处理办法见[已经接受的结果有问题](#accepted-result)。
+3. **恢复。** 限额重置后（Claude Code 日志里的重置信息说明了大致的时间），执行 `cdg dag recover <工作流>{:sh}`，或者用 `cdg task recover{:sh}` 只恢复停下的那些任务。被中断和被搁置的任务会在原来的会话中接着做，被暂停的任务重新等待调度。这一步不会再消耗 CodeDAG 额度。
+
+同时执行的任务越多，Agent 的用量消耗得越快，越容易撞上限额。怎样按限额安排并发，见[并发与限额](/zh/docs/account/cost-control#concurrency)。
+
+## 机器重启或进程崩溃之后 [#after-restart]
+
+CodeDAG 在你的电脑上以后台进程执行工作流，关掉终端不会影响它；但电脑重启或进程崩溃时，这些后台进程和任务 Agent 的会话都会结束，工作流不会自己继续。
+
+排查从 `cdg status{:sh}` 或 `cdg dag status <工作流>{:sh}` 开始。被打断的任务显示为 `[in-progress] [working (stale owner)]`，输出里另有一行 `Diagnostic:`，写明哪几个任务的执行进程已经不在了，并给出恢复命令；`cdg task status <任务 ID> -w <工作流>{:sh}` 单独查看一个任务时也是这样。有的任务也可能显示为 `on-hold`，原因是 `agent-session-ended`。
+
+按提示恢复整个工作流：
+
+```bash title="Terminal"
+cdg dag recover <工作流>
+```
+
+被打断的任务会重新打开原来的会话接着做，还没开始的任务重新等待调度，排在后面的工作流也会随之依次执行。如果这时连不上 CodeDAG 服务，工作流可能停在 `on-hold`，处理方法见[服务不可用时](/zh/docs/account/login-and-account#service-unavailable)。某个任务的会话无法恢复时，停下它，按[工作流做到一半，很难继续](#start-over)收尾。
+
+队列和各任务的状态保存在 CodeDAG 的全局目录（默认是 `~/.codedag`）里。手动修改那里的文件，可能让队列无法再恢复；遇到状态不对的情况，用 `recover`、`kill` 和审核命令来处理。
+
+## 提交被拒绝 [#submit-rejected]
+
+`cdg dag submit{:sh}` 失败时，工作流不会进入队列，也不会消耗额度。按输出里的提示找到对应的一行：
+
+| 输出中的提示 | 原因 | 处理 |
+|---|---|---|
+| `✗ Validation failed`，下面列出若干 `[类型] 说明` | 工作流文件有错误。 | 按说明逐条修改。输出的读法见[编写工作流文件的校验一节](/zh/docs/guides/writing-workflows#validate)，字段写法见[工作流文件参考](/zh/docs/reference/workflow-file)。 |
+| `[unsupported-location]` | 文件不在 `.codedag/dags/` 目录下。 | 把文件移到 `.codedag/dags/` 或它的子目录里，见[文件位置与格式](/zh/docs/reference/workflow-file#file-location)。 |
+| `uses unavailable agent` | 项目设置里的 `availableAgents` 限制了可以用的 Agent，而任务选用的不在其中。报错写明这个字段在哪个设置文件里。 | 按报错的提示把这个 Agent 加进那个文件的 [`availableAgents`](/zh/docs/reference/settings#available-agents)，或者删掉整个字段。 |
+| `[agent-not-installed]`，说明里有 `is not installed on this machine` | 任务要用的 Agent 没有装在这台电脑上，`claude` 或 `codex` 命令不在 `PATH` 里。报错的 `Used by:` 列出用到它的任务，隔离分支模式下的合并冲突 Agent 记作 `mergeConflictAgent`。 | 装上它并确认在同一个终端里能直接运行，或者把这些任务改用已安装的 Agent。它同时是项目默认 Agent 时，报错还写明怎样为这台电脑改掉默认 Agent。 |
+| `[workspace-not-found]` | 这个工作流会用到的已登记工作区，目录已经不存在了。全部不存在时是错误，只有一部分不存在时是警告，工作流照常在其余工作区上运行。 | 重新运行 `cdg init{:sh}` 更新登记的工作区，见[登记到 CodeDAG](/zh/docs/guides/parallel-workspaces#register)。 |
+| `Submit anyway?`，或 `Submission cancelled` | 校验通过但有警告，需要你确认。 | 看清警告后确认，或加上 `-y` 自动确认。显式 `branchName` 与已有分支冲突的警告，在没有交互终端时会直接取消提交。 |
+| `[duplicate] Workflow already in queue` | 同一个工作流文件已经在队列中。 | 等它执行完并审核结束。想改变已提交的执行，见[修改已提交的工作流](/zh/docs/reference/cli/validate-and-submit#modify-submitted)。 |
+| `is in reviewed phase, not planning` | 这个工作流上一次的执行已经审核结束。 | 按提示先执行 `cdg dag review clear <工作流>{:sh}`，再提交。这是一次新的执行，会重新消耗额度。 |
+| `Workflow has review snapshot state`，一次提交多个工作流时标为 `[review-snapshot]` | 工作流带着单个任务的审核记录：提交之前用 `cdg task review{:sh}` 的 `accept`、`cancel` 或 `defer` 审核过其中的任务。 | 按提示先执行 `cdg dag review clear <工作流>{:sh}` 清除这些记录，再提交，规则见[还没提交的工作流中的任务审核记录](/zh/docs/reference/cli/review#unsubmitted-task-reviews)。 |
+| `Not enough credits for this submission.` 或 `No active paid subscription found for this account.` | 额度不足，或者没有有效的订阅。 | 见[额度不足或无订阅时](/zh/docs/account/credits-and-subscription#insufficient-credits)。 |
+| `Sign-in failed:` | 提交需要登录，而登录没有完成。 | 见[登录失败或反复要求登录](#sign-in-problems)。 |
+| `Precheck failed:` | 提交前向 CodeDAG 服务核对额度时出错，冒号后面是这一次的原因。 | 连不上服务或服务端出错时，等服务恢复后重新提交，见[服务不可用时](/zh/docs/account/login-and-account#service-unavailable)。服务端拒绝了这次请求时（例如工作流内容超出服务端的限制），原样重试结果不会变，按报错里服务端给出的原因处理后再提交。核对中途需要重新登录而登录没有完成时，见[登录失败或反复要求登录](#sign-in-problems)。 |
+
+## 并发只有 1 [#concurrency-one]
+
+任务一个接一个地执行，可以按下面的顺序排查，前一项解决之后再看后一项。
+
+- **任务之间有依赖。** 只有互不依赖的任务才能同时执行，先确认工作流的依赖关系确实允许并行。
+- **可用的工作区不够。** 默认的隔离分支模式下，每个同时执行的任务都要占用一个工作区，主仓库算一个，其余靠登记的副本。只登记了主仓库时，并发就是 1。[准备副本](/zh/docs/guides/parallel-workspaces#prepare-replicas)并用 `cdg init{:sh}` 登记；工作流的 [`excludeWorkspaces`](/zh/docs/reference/workflow-file#exclude-workspaces) 排除掉的工作区也不算在内。
+- **`maxConcurrency` 没有跟着更新。** 并发上限取工作流文件里的 [`maxConcurrency`](/zh/docs/reference/workflow-file#max-concurrency)，没写时取项目设置，都没有时是 1。第一次运行 `cdg init{:sh}` 会把它写成 1 加副本数；新增副本之后重新运行 `cdg init{:sh}`，它发现生效的上限低于工作区数量时会问要不要改成新的数字，默认改，也可以直接传 `--max-concurrency{:sh}` 写进去。上限只写在团队设置 `.codedag/settings.jsonc` 里时，初始化把它当成团队的决定，不会询问。当时选了不改、或者要绕过团队的取值，就在工作流文件里写上 `maxConcurrency`，或者修改 `.codedag/local/settings.local.jsonc`，见[项目设置的 `maxConcurrency`](/zh/docs/reference/settings#max-concurrency)。
+- **工作区被已开始的任务占着。** 隔离分支模式下，一个任务开始之后，直到审核结束前都占着它的工作区和并发名额；停在 `done` 等审核、被暂停或被中断的任务也不例外。让它跑完并审核，或者用 `cdg task review cancel{:sh}` / `defer` 结束它，工作区才会腾出来。
+
+项目设置在提交时读取，修改设置只对之后提交的工作流生效。共享工作区模式不需要副本，同时执行的任务数只由 `maxConcurrency` 决定。
+
+## 主仓库分支被切走 [#branch-switched]
+
+在默认的隔离分支模式下，这是预期的行为：主仓库也是一个工作区，运行期间 CodeDAG 会把它切到分配给它的任务分支上，工作流结束后它停在集成分支 `cdg/<工作流名>/integration` 上，不会切回你原来的分支。你的主分支本身没有被改动，原因见[任务分支、集成分支与起点](/zh/docs/concepts/workspaces-and-branches#branches)。
+
+工作流结束后，想回到主分支就自己执行 `git checkout main`。这一步也决定下一个工作流从哪里开始：不切回去、工作流文件里也没写 `baseRef` 时，下一个工作流会接着这个集成分支的结果开始。
+
+想在工作流运行期间继续在主仓库里开发，可以在工作流文件里写 `excludeWorkspaces: ["."]`，任务就只在副本里执行，前提是至少登记了一个副本，做法见[想在工作流运行时同时手动开发](/zh/docs/guides/parallel-workspaces#keep-main-repo)。共享工作区模式不建分支，也不会切换主仓库的分支。
+
+## task view 连不上或没反应 [#task-view-problems]
+
+`cdg task view{:sh}` 把当前终端接到任务 Agent 的原生会话上，所以它对终端环境和任务所处的阶段都有要求。按你看到的情况处理：
+
+- **画面错乱，或按键没有反应。** 命令没有运行在真实可交互的终端里，例如在脚本、CI 或 Agent 的命令工具里运行。换到一个真实的终端，或者用 tmux 承载它。
+- **提示 `Task has not started yet.`** 任务还没有会话可以进去：它还在等待调度，或者停在启动前的搁置原因上（工作区不干净、分支问题等），或者从没启动就被暂停、中断了。等它开始，或者按[任务或工作流停在 on-hold](#on-hold) 处理搁置的原因。
+- **提示 `Session ID not found. Please provide --session-id`。** 会话已经结束，命令要重新打开它，却没有记录到会话 ID。从 Agent 自己的记录中找到会话 ID，用 `--session-id` 补上，写法见[cdg task view](/zh/docs/reference/cli/control#task-view)。
+- **提示 `Session socket not found` 或 `Connection refused`。** 命令此刻连接不上任务的会话，例如任务刚刚开始、会话还没准备好。稍等片刻再试；仍然不行时，用 `cdg task status{:sh}` 看任务是不是已经停下，再按它的状态处理。
+
+任务已经中断、它的会话也不在运行时，进入会话需要先恢复任务：命令会先说明这一点再询问，默认不恢复，选 Yes 才恢复并连接。没有交互终端可以作答时（例如在 Agent 的命令工具里直接运行），命令报错并以退出码 1 结束，要恢复就加 `--recover`。只想看它做过什么，用 `cdg task logs{:sh}` 读日志。
+
+退出会话按 Ctrl+C，任务会接着执行；交流完之后及时退出，一直连着可能让任务迟迟不能自然结束，见[进入会话、修改与退出](/zh/docs/guides/intervene-and-control#task-view)。
+
+## 初始化与配置 [#init-and-settings]
+
+- **`cdg init{:sh}` 提示 `Neither CLI was detected on this machine.`** CodeDAG 在当前终端的 `PATH` 中找不到 `claude` 或 `codex`。先安装 Claude Code 或 Codex，确认在同一个终端里能直接运行它们，再重新运行 `cdg init{:sh}`。
+- **重新运行 `cdg init{:sh}` 时，提示 `File conflicts detected.` 并询问已存在的文件怎样处理。** 想留住自己改过的内容就选保留（Keep），想换回初始化模板就选覆盖（Overwrite）；已经提交到 `.codedag` 仓库的文件自动保留，不在询问之列。各选项的含义见[逐个询问时的六个选择](/zh/docs/reference/cli/init#file-conflicts)。
+- **在 clone 副本里运行 `cdg init{:sh}`。** 这个 clone 已经登记为某个项目的副本时，CodeDAG 会认出它，在询问之前给出提示，然后按所属项目的主仓库继续初始化，不在副本里创建 `.codedag/`。还没有登记过的 clone 则会被当成一个独立的新项目，这是正常行为；想把它作为副本，回到主仓库运行 `cdg init{:sh}` 登记，见[在哪个目录运行](/zh/docs/reference/cli/init#where-to-run)。
+- **提示 `Failed to parse project settings file` 或 `Invalid project settings file`。** 设置文件 `.codedag/settings.jsonc` 或 `.codedag/local/settings.local.jsonc` 不是合法的 JSONC，或者某个字段的取值不合法。按输出里的 `Location:` 与 `Reason:` 修正文件。设置文件里拼错的字段名不会报错，而是被直接忽略，改了设置却没有效果时，先核对字段名，见[文件格式与写错时的结果](/zh/docs/reference/settings#format)。
+
+## 登录失败或反复要求登录 [#sign-in-problems]
+
+- **提示 `Sign-in failed:`，或者 `cdg auth status{:sh}` 提示 `Failed to show auth status:`，例如超时、在浏览器里拒绝了授权，或者连不上服务。** 重新运行一次即可；由 `cdg init{:sh}` 或 `cdg dag submit{:sh}` 触发的登录失败时，原命令也会退出，需要重新执行。
+- **提示 `Configured URL is not an approved CodeDAG auth endpoint.`** 当前终端里设置了环境变量 `CODEDAG_AUTH_BASE_URL`。CLI 只连接 `https://app.codedag.com`，这个变量只要有值，登录和需要登录的命令就都会以这条报错结束。取消它（`unset CODEDAG_AUTH_BASE_URL{:sh}`）后重新运行。
+- **提示 `Failed to save credentials to the local secure storage.`** 浏览器里的登录已经完成，但登录凭证没能保存到这台电脑上，这次登录没有生效。确认 CodeDAG 的全局目录（默认是 `~/.codedag`）可写、磁盘空间充足后重新登录。
+- **在 SSH 远程会话、容器或没有图形界面的服务器里无法登录。** 登录必须在运行 `cdg` 的同一台电脑上用浏览器完成，这类环境目前无法登录，见[没有桌面浏览器时](/zh/docs/account/login-and-account#no-browser)。对这类环境的支持已列入后续版本的规划。
+- **过一段时间就要求重新登录。** 登录状态长时间不用会失效；把登录凭证复制到另一台电脑上使用，还会让这个账号在所有电脑上的登录一起作废。见[登录状态能保持多久](/zh/docs/account/login-and-account#credentials)与[登出、多台电脑与切换账号](/zh/docs/account/login-and-account#sign-out)。
+- **登录后是另一个账号。** 浏览器里的网页控制台还登录着别的账号时，CLI 登录会直接沿用它，见[登出、多台电脑与切换账号](/zh/docs/account/login-and-account#sign-out)。
+- **排队中的工作流因为登录状态停在 `on-hold`。** 见[账号与额度闸门](#startup-gate)。
+- **CodeDAG 服务暂时不可用。** 见[服务不可用时](/zh/docs/account/login-and-account#service-unavailable)。
+
+## 版本相关 [#versions]
+
+**CodeDAG CLI 版本过低。** CodeDAG 服务对 CLI 设有最低版本要求，版本过低时，需要连接服务的操作会提示你升级。用 `brew upgrade codedag{:sh}` 升级后重试，见[安装与登录](/zh/docs/get-started/installation)。
+
+**Claude Code 版本过低。** CodeDAG 支持的 Claude Code 最低版本是 2.1.196。检测到本机装有 Claude Code 时，`cdg init{:sh}` 会核对版本，版本过低或取不到版本号时给出警告，初始化照常完成。忽略这个警告的话，问题会在任务执行时暴露：任务停在 `on-hold`，原因为 `agent-version-unsupported`，日志里有 `Claude CLI <版本> is unsupported for reliable lifecycle detection.`。用 `claude update{:sh}` 升级，再执行 `cdg task recover{:sh}`；如果恢复时仍提示版本不受支持，说明当前终端里的 `claude` 还是旧版本。
+
+**Claude Code 版本高于已验证的范围。** CodeDAG 已验证到 Claude Code 2.1.292，更新的版本通常也能正常工作。个别情况下 CodeDAG 无法判断任务是否已经完成，任务会停在 `agent-lifecycle-state-unavailable`，日志说明版本高于已验证的范围，工作多半已经完成、并没有丢失，按 [Agent 会话问题](#hold-agent-session)里这个原因的做法处理。也可以固定或回退 Claude Code 的版本，或者升级 CodeDAG。
+
+**CodeDAG Guide 插件与 CLI 版本不一致。** 运行 `cdg plugin status{:sh}`，按输出中 `Action:` 一行的提示操作，通常是执行其中给出的 `cdg plugin update{:sh}` 命令，见[更新插件](/zh/docs/guides/guide-plugin#update)；插件与 CLI 的兼容规则见[版本兼容](/zh/docs/reference/cli/plugin#compatibility)。
+
+## 任务已经有了审核结论，才发现问题 [#after-conclusion]
+
+任务被接受、取消或推迟之后，才发现它的结果不对，或者结论给错了。最终结论在这次执行里不能再改，无论它是你给的还是自动接受的，原因见[审核结论不能更改](/zh/docs/concepts/review-gates#no-undo)。能补救的是代码结果，不是审核结论：在隔离分支模式下，任务的改动都还在分支上，等这次执行结束，用 Git 处理，再用新的工作流接着做。
+
+Git 操作要等这次执行结束之后再做：执行期间，下游拿到的是上游得到结论那一刻的结果，之后再改上游的任务分支，下游也拿不到；集成分支被改动，还会让工作流停下或审核报错。共享工作区模式没有这些分支，任务写下的文件一直留在工作区里，工作流结束后直接修改或用 Git 撤销即可。
+
+### 已经接受的结果有问题 [#accepted-result]
+
+工作流还在执行时，先决定要不要让它做完。还没做完的任务不依赖这个结果，就让它做完；它们都建立在这个结果之上，继续执行只是白做，现在就停下工作流、收下已经完成的结果，步骤见[工作流做到一半，很难继续](#start-over)。
+
+执行结束之后，按问题的性质处理它的改动：
+
+| 情况 | 做法 |
+|---|---|
+| 能在现有结果上补好 | 手工修改，或者在新的工作流里安排一个任务把它补完 |
+| 必须撤掉，后面的任务没有在它之上改动多少 | 在集成分支上撤销它的提交 |
+| 必须撤掉，后面的任务都建立在它之上 | 另拼一条不含它的分支，把它和它的下游放进新的工作流重做 |
+
+撤销提交在集成分支上做，工作流结束后主仓库就停在这条分支上。任务的提交通常就是以任务标题为提交说明的那一个：
+
+```bash title="Terminal"
+git log --oneline --no-merges main..cdg/<工作流名>/integration
+git revert <提交>
+```
+
+后面的任务已经在它之上改了很多时，撤销容易冲突，它们的旧结果也还留在集成分支上。这时改为另拼一条分支：每条任务分支只包含这个任务和它上游的结果，所以从这次工作流的起点新建一条分支，把不依赖它的任务分支合并进来，得到的就是去掉它和它的下游之后的结果。
+
+```bash title="Terminal"
+# 从这次工作流的起点新建分支，这里的起点是 main
+git checkout -b <新分支> main
+# 逐条合并不依赖那个任务的任务分支
+git merge cdg/<工作流名>/t<任务 ID>-<标题>
+```
+
+任务分支怎样列出、在 clone 副本里执行的任务分支在哪里，见[只要其中几个任务的结果](/zh/docs/guides/finish-and-merge#pick-tasks)。
+
+要补做或重做的任务写进新的工作流，让它从处理好的结果开始：在集成分支上处理的，写法见[只补做其中几个任务](/zh/docs/guides/finish-and-merge#continue-remaining)；另拼了分支的，在新工作流里写上 `baseRef: <新分支>`。整套结果都不想要时不必整理分支，清除审核记录后重新提交整个工作流，见[想再运行一次](/zh/docs/guides/finish-and-merge#run-again)。
+
+### 任务被误取消或误推迟 [#ended-by-mistake]
+
+被取消或推迟的任务，改动默认存在快照分支里，没有丢。但这次执行里的下游拿不到它：它们拿到的只有这个任务的上游结果，当时用 `--downstream hold` 搁置的下游，放开之后也是如此。所以还需要这份结果的下游不要放开，把它们也取消或推迟；等工作流审核结束，把改动从快照分支取回到集成分支上，见[取回需要的部分](/zh/docs/reference/branches-and-files#restore-changes)，再把这些下游写进新的工作流。已经在没有它的情况下做完的下游要不要重做，按上一节判断。
+
+## 工作流做到一半，很难继续 [#start-over]
+
+一次执行已经很难在原处修好时，与其继续修补，不如把已经做完的结果收下，再用一个新的工作流接着做剩下的部分。下面几种情况适合这样做：同一个原因处理之后反复出现；工作区被手工改动得太多，已经分不清哪些是任务的结果；工作流的拆分或 prompt 本身有问题，而已提交的执行只能按提交时的定义进行；已经接受的结果有问题，还没做完的任务又都建立在它之上。
+
+隔离分支模式下，可以按下面的步骤收口：
+
+1. 用 `cdg dag kill <工作流>{:sh}` 停下工作流，执行中的任务立即中断。想让它们先把手头这一轮做完，改用 `cdg dag pause <工作流>{:sh}`，等工作流不再显示 `in-progress`。
+2. 逐个检查已经开始、但没有审核结论的任务。结果不完整的，用 `cdg task review cancel <任务 ID> -w <工作流> --downstream cascade{:sh}` 取消它，默认会把它已有的改动存进快照分支，之后仍能取回。它的结果不会交给下游，还没开始的下游任务在这次执行里也不会再开始。
+3. 用 `cdg dag review accept <工作流>{:sh}` 结束整个工作流。其余已经执行完的任务随之被接受，通过审核的结果合并到集成分支 `cdg/<工作流名>/integration`，主仓库停在这个分支上；从没开始的任务不会得到审核结果。
+4. 把剩下的工作和刚才取消的任务写进一个新的工作流，再提交。主仓库停在集成分支上，不写 `baseRef` 的新工作流会从这些结果接着开始，也可以写 `baseRef: cdg/<工作流名>/integration` 明确指定。新工作流按任务数另外消耗 CodeDAG 额度。
+
+第 3 步会接受所有还没有结论的已执行任务，所以第 2 步要把结果不完整的任务都先处理掉。已经被接受的任务结果有问题时，它的改动会进入集成分支，提交新工作流之前先按[已经接受的结果有问题](#accepted-result)处理。之后怎样把结果合入主分支，见[合入主分支](/zh/docs/guides/finish-and-merge#merge)。
+
+如果这次执行的结果都不想要，改用 `cdg dag review cancel <工作流>{:sh}` 结束它，集成分支回到这次执行的起点。共享工作区模式没有任务分支和集成分支，做完的改动直接留在工作区里，结束工作流之后用新的工作流接着做即可。
+
+## 收集信息以便求助 [#get-help]
+
+按这一页排查之后问题仍然没有解决，可以把下面这些信息整理好，再告诉我们：
+
+- `cdg --version{:sh}` 的输出，所用 Agent 的版本（`claude --version{:sh}` 或 `codex --version{:sh}`），以及操作系统。
+- 出问题的工作流的 `cdg dag status <工作流>{:sh}` 输出。
+- 出问题的任务的 `cdg task status <任务 ID> -w <工作流>{:sh}` 输出，其中的 `Reason:` 与 `Diagnostic:` 最重要。
+- 这个任务的日志尾部，例如 `cdg task logs <任务 ID> -w <工作流> -n 100{:sh}` 的输出。
+- 问题出现之前你执行过的命令，以及工作流文件中与问题相关的部分。
+
+日志里包含任务 Agent 的输出，可能带有你的代码、路径或密钥，发送之前先检查一遍，删掉不宜外传的内容。
+
+整理好之后，写信到 <Email user="hi" /> 告诉我们。适合公开讨论的问题，也可以提交到 [GitHub Issues](https://github.com/CodedagAI/codedag-home/issues)。

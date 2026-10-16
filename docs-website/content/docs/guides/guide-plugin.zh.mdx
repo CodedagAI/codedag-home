@@ -1,0 +1,121 @@
+---
+title: 管理 CodeDAG Guide 插件
+description: 为 Claude Code 与 Codex 安装 CodeDAG Guide 插件，选择安装范围，查看状态并保持更新。
+icon: Puzzle
+---
+
+## 插件是什么 [#what-it-is]
+
+CodeDAG Guide 插件为 Claude Code 和 Codex 装上一份使用 CodeDAG 的技能 `codedag-guide`。装好之后，你用自然语言描述目标，Agent 就能自己拆分任务、写出工作流文件，再用 `cdg` 校验、提交、跟踪进度和推进审核，替你完成编排，用法见[让 Agent 帮你编排](/zh/docs/get-started/let-your-agent-orchestrate)。
+
+插件由 CodeDAG 统一安装和升级，日常用 `cdg plugin{:sh}` 管理。它在两家 Agent 里的插件标识都是 `codedag@codedag`。
+
+## 安装插件 [#install]
+
+`cdg init{:sh}` 初始化项目时，会为本机装有的每个 Agent 问一次是否安装插件，选项对应下面的[三种安装范围](#scopes)。当时跳过了，或者之后才装了另一个 Agent，就用 `cdg plugin install{:sh}` 补装：
+
+```bash title="Terminal"
+# 为本机装有的 Claude Code 和 Codex 安装，User 范围
+cdg plugin install
+
+# 只为 Claude Code 安装，Project 范围
+cdg plugin install --claude --scope project
+```
+
+加 `--claude` 或 `--codex` 只为其中一个 Agent 安装，`--scope` 选择安装范围，默认是 `user`。
+
+插件只在新会话中生效。安装之前就开着的 Claude Code 或 Codex 会话看不到它，退出之后用 `claude --resume{:sh}` 或 `codex resume{:sh}` 恢复，就能在原来的对话里接着用。
+
+### 选择安装范围 [#scopes]
+
+三种范围的区别在于插件在哪里生效。个人使用时，User 范围最省事：装一次，这台电脑上所有仓库里的会话都能用。
+
+| 范围 | 在哪里生效 | 适合 |
+|---|---|---|
+| `user`（默认） | 你在这台电脑上打开的所有仓库 | 个人使用，或者在多个仓库里使用 CodeDAG |
+| `project` | 当前 Git 仓库。插件配置写进仓库里的文件，提交之后随仓库共享 | 希望团队成员打开这个仓库时都能用上插件 |
+| `local` | 只有当前这份 checkout。配置留在本机、不随仓库共享，CodeDAG 会让 Git 忽略它们；同一仓库的其他 worktree 或 clone 里也不生效 | 只想在一个仓库里试用，不影响其他仓库和团队成员 |
+
+安装 Project 或 Local 范围时，要在目标仓库的目录里运行命令。Project 范围共享的是仓库里的插件配置，而不是每台电脑上的安装：其他成员拉取这些配置之后，还要在自己的电脑上运行一次 `cdg init{:sh}`，按提示完成插件安装，插件才会在他们的 Agent 里生效。新成员接入项目时本来就要运行这条命令，见[新成员接入](/zh/docs/guides/team-sharing#onboarding)。
+
+这两种范围都会在仓库里写入插件配置文件，例如 Claude Code 的 `.claude/settings.json`（Project 范围）或 `.claude/settings.local.json`（Local 范围），装完之后要你做的事不同：
+
+- **Project 范围：** 文件受版本管理，装完之后提交到仓库，团队成员也因此拿到这份配置。留着不提交，在默认的隔离分支模式下，任务会在开始前停在 `on-hold`，原因是 `workspace-dirty`（见[工作区有未提交的改动](/zh/docs/troubleshooting/troubleshooting#hold-workspace)）。
+- **Local 范围：** 不用处理，安装时 CodeDAG 已经让 Git 忽略这些文件。它们此前已经提交进仓库时，忽略规则不起作用，安装会直接失败并让你改用 User 或 Project 范围，见[Local 范围写入的忽略规则](/zh/docs/reference/cli/plugin#local-exclude)。
+
+## 查看安装状态 [#status]
+
+想确认插件装没装好、装在哪个范围、要不要更新，在你使用 Agent 的仓库里运行 `cdg plugin status{:sh}`。它为每个 Agent 输出一组状态，包括是否安装（`Plugin installed`）、安装范围（`Scope`）和是否启用（`Enabled`），最后一行 `Action` 给出下一步：显示 `No action needed` 时什么也不用做，否则照它给出的命令执行。只想看一个 Agent 时，加 `--claude` 或 `--codex`。全部字段的含义见[cdg plugin status](/zh/docs/reference/cli/plugin#status)。
+
+在哪个目录运行会影响结果。User 范围的安装在任何目录都能看到，Project 和 Local 范围的安装只有在对应的仓库里运行时才看得到，所以在别的目录看到 `Plugin installed: false`，并不代表这个仓库里没有装。
+
+`Enabled` 为 `false` 时，插件装着但在 Agent 里被停用，Agent 同样用不上它，`Action` 会提示重新启用。重新启用要在 Agent 自己那边操作：Claude Code 运行 `claude plugin enable codedag@codedag{:sh}`，Codex 在会话里打开 `/plugins`。
+
+## 更新插件 [#update]
+
+运行 `cdg plugin update{:sh}`，把已安装的插件更新到最新版本。它默认处理本机装有的所有 Agent，加 `--claude` 或 `--codex` 只更新其中一个；还没装插件的 Agent 不会因此被装上。更新在插件原来的范围内进行，也保留你在 Agent 里的启用或停用选择；如果安装已经损坏，同一条命令会就地修复。更新之后的插件同样只在新会话中生效。
+
+```bash title="Terminal"
+cdg plugin update
+```
+
+需不需要更新，`cdg plugin status{:sh}` 的 `Action` 会告诉你。升级 CLI 之后值得看一眼，原因见[升级 CLI 之后，要不要更新插件](#after-cli-upgrade)。
+
+如果你直接修改过插件的技能文件，更新默认不会覆盖你的修改。在终端里运行时，命令会先问你是保留修改还是换成官方内容，默认保留；由脚本或 Agent 这类非交互方式运行时，它保留修改并跳过这次更新。确定不再需要这些修改时，加上 `--reset-local-changes`，命令不再询问，直接换成官方内容：
+
+```bash title="Terminal"
+cdg plugin update --reset-local-changes
+```
+
+<Callout type="idea">
+想让 Agent 按你的习惯编排，例如默认用哪一档授权、在哪类任务之后安排人工审核，把这些要求写进 CLAUDE.md（Claude Code）或 AGENTS.md（Codex），让插件的技能文件保持由 CodeDAG 管理。技能文件在更新时会被换成新版本，改在里面的内容迟早要手动迁移；写在 CLAUDE.md 或 AGENTS.md 里的要求不受插件更新影响，放在项目里还能随仓库共享给团队。
+</Callout>
+
+## 更换安装范围或卸载 [#change-scope]
+
+要换范围，先运行 `cdg plugin uninstall{:sh}` 卸载（Project 或 Local 范围的插件要在装有它的仓库里卸载；只处理一个 Agent 时加 `--claude` 或 `--codex`），再用新的 `--scope` 安装，最后开一个新会话。只想卸载时，做第一步就够了。已安装的插件不能直接换范围：对它再运行一次 `cdg plugin install --scope <范围>{:sh}`，命令只会提示插件已经装在某个范围，然后跳过。
+
+卸载命令没有 `--scope` 选项，清除的是在当前位置能看到的所有安装：在仓库里运行时，这个仓库的 Project、Local 安装和 User 范围的安装会一起被清除；在仓库之外运行时，只清除 User 范围的安装。从 Project 范围卸载会改动仓库里受版本管理的配置文件，这次改动同样需要提交。两个方向换范围的完整示例见[更换安装范围](/zh/docs/reference/cli/plugin#change-scope)。
+
+## 用 Agent 自己的命令安装 [#manual-install]
+
+插件也可以不经过 `cdg`，用 Claude Code 或 Codex 自己的插件命令安装：先把 GitHub 仓库 `CodedagAI/codedag-plugins` 添加为插件来源（marketplace，名为 `codedag`），再从中安装 `codedag@codedag`。如果你习惯在 Agent 里统一管理所有插件，可以这样装；其他情况下，`cdg plugin install{:sh}` 一条命令就能为两家 Agent 装好。
+
+<Tabs items={['Claude Code', 'Codex']}>
+  <Tab value="Claude Code">
+
+```bash title="Terminal"
+claude plugin marketplace add CodedagAI/codedag-plugins
+claude plugin install codedag@codedag
+```
+
+  </Tab>
+  <Tab value="Codex">
+
+```bash title="Terminal"
+codex plugin marketplace add CodedagAI/codedag-plugins
+codex plugin add codedag@codedag
+```
+
+  </Tab>
+</Tabs>
+
+和 `cdg plugin install{:sh}` 一样，装好之后要开新会话才生效。
+
+## 常见问题
+
+### 装好了插件，Agent 还是不会用 CodeDAG
+
+最常见的原因是会话在安装之前就打开了。插件只在新会话中生效，退出当前会话，再用 `claude --resume{:sh}` 或 `codex resume{:sh}` 恢复即可。
+
+仍然不行时，在这个仓库里运行 `cdg plugin status{:sh}`，看你正在用的那个 Agent 下面的两项。`Plugin installed` 为 `false`，可能是插件只装给了另一个 Agent，或者以 Project、Local 范围装在了别的仓库里，按 `Action` 给出的命令补装即可；`Enabled` 为 `false`，说明插件在 Agent 里被停用了，按[查看安装状态](#status)中的说明重新启用。
+
+### 升级 CLI 之后，要不要更新插件 [#after-cli-upgrade]
+
+建议更新，但不是必须。CLI 和插件各自升级，升级 CLI 并不会同时更新插件；新版 CLI 会保留已发布插件用到的命令、参数和含义，所以插件不更新，Agent 照样能正确使用 CLI，只是不知道新版本增加的用法。升级 CLI 之后运行一次 `cdg plugin status{:sh}`，按 `Action` 的提示操作即可，兼容规则见[版本兼容](/zh/docs/reference/cli/plugin#compatibility)。
+
+## 相关
+
+- [插件参考](/zh/docs/reference/cli/plugin)：各子命令的完整选项、不同目录下的卸载范围，以及更换安装范围的写法。
+- [让 Agent 帮你编排](/zh/docs/get-started/let-your-agent-orchestrate)：装好插件之后，把目标交给 Agent，由它写工作流并提交。
+- [选择 Agent、模型与权限模式](/zh/docs/guides/agents-and-permission-modes)：在 Agent 替你写的工作流里，为每个任务定下授权档。

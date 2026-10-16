@@ -1,0 +1,11 @@
+{
+  "$schema": "../../../.source/json-schema/docs.meta.json",
+  "title": "基本概念",
+  "icon": "BookOpen",
+  "pages": [
+    "how-it-works",
+    "tasks-and-sessions",
+    "workspaces-and-branches",
+    "review-gates"
+  ]
+}

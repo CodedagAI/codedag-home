@@ -1,0 +1,553 @@
+---
+title: 工作流文件参考
+description: 工作流文件中每个字段的写法、取值、默认值与覆盖顺序。
+icon: FileBraces
+---
+
+工作流文件是主仓库 `.codedag/dags/` 目录下的一个 YAML 或 JSON 文件。必填的只有 `tasks` 列表，以及每个任务的 `id`、`title` 和 `prompt`；其余字段都可以省略，省略时取项目设置中的值或各自的默认值。从零开始写一个工作流文件的步骤见[编写工作流文件](/zh/docs/guides/writing-workflows)。
+
+## 按操作查字段 [#fields-by-goal]
+
+字段分两层：标为“工作流”的字段写在文件顶层，与 `tasks` 同级，作用于整个工作流；标为“任务”的字段写在 `tasks` 的某一项里，只影响这个任务。
+
+| 想做什么 | 字段 | 位置 |
+|---|---|---|
+| 让所有任务直接在同一个工作区里运行，不建分支、不提交 | [`executionMode`](#execution-mode) | 工作流 |
+| 限制或放开同时执行的任务数 | [`maxConcurrency`](#max-concurrency) | 工作流 |
+| 固定工作流从哪个提交开始 | [`baseRef`](#base-ref) | 工作流 |
+| 不占用某些工作区，例如把主仓库留给自己继续开发 | [`excludeWorkspaces`](#exclude-workspaces) | 工作流 |
+| 指定自动合并出现冲突时由哪个 Agent 解决 | [`mergeConflictAgent`](#merge-conflict-agent) | 工作流 |
+| 让某个任务完成后停下，等你审核 | [`autoAccepted`](#tasks-auto-accepted) | 任务 |
+| 让每个任务完成后都停下，等你审核 | [`taskAutoAccepted`](#task-auto-accepted) | 工作流 |
+| 让整个工作流结束前等你给出结论 | [`dagAutoAccepted`](#dag-auto-accepted) | 工作流 |
+| 选择任务由 Claude Code 还是 Codex 执行 | [`agent`](#tasks-agent) | 任务 |
+| 指定任务使用的模型和推理力度 | [`model`](#tasks-model)、[`effort`](#tasks-effort) | 任务 |
+| 决定任务运行中哪些操作要先征得你同意 | [`mode`](#tasks-mode)，写法见[权限模式语法](#mode-syntax) | 任务 |
+| 给任务分支取一个固定的名字 | [`branchName`](#tasks-branch-name) | 任务 |
+| 在文件里记录用途、维护人等说明 | [`metadata`](#metadata) | 工作流 |
+
+## 文件位置与格式 [#file-location]
+
+工作流文件放在主仓库的 `.codedag/dags/` 目录或它的任意层子目录中，扩展名为 `.yaml`、`.yml` 或 `.json`；放在其他位置或使用其他扩展名的文件无法校验和提交。命令中怎样指定一个工作流文件，见[指定工作流](/zh/docs/reference/cli#specify-workflow)。
+
+工作流的名字来自文件相对 `.codedag/dags/` 的路径，去掉扩展名，再把其中的 `/` 换成下划线：`.codedag/dags/build.yaml` 的名字是 `build`，`.codedag/dags/team/build.yaml` 的名字是 `team_build`。这个名字出现在任务分支和集成分支里，本页写作 `<工作流名>`，所以后者的集成分支是 `cdg/team_build/integration`；名字里还有不能用在 Git 分支名中的字符时会被一并规范化，不确定时以 `cdg dag status{:sh}` 输出的 `Integration Branch` 为准。
+
+不同子目录中的同名文件得到不同的名字，日志文件也按同一个相对路径存放，所以它们互不影响。只有扩展名不同的两个文件，例如 `build.yaml` 与 `build.yml`，会得到同一个名字，共用同一套分支名和同一个日志文件。
+
+YAML 与 JSON 两种格式的字段完全相同。文件还要满足下面几条限制：
+
+- **字段名：** 区分大小写，一律使用 camelCase。CodeDAG 不认识的字段不会导致校验失败，而是被忽略并给出警告，见[校验](/zh/docs/guides/writing-workflows#validate)。
+- **YAML 语法：** 锚点（`&`）、别名（`*`）和合并键（`<<`）不受支持，文件中用到它们时校验失败，需要重复的内容直接写出来；字符串内容中出现的 `&`、`*` 字符不受影响。
+- **嵌套层数：** 不能超过 64 层，按正常结构书写的工作流文件远达不到这个限制。
+- **文件大小与任务数：** 单个工作流文件不超过 256 KiB，按文件原文的 UTF-8 字节数计算，注释和空白也算在内；一个工作流最多包含 1024 个任务。这两项由服务端在提交时检查，`cdg dag validate{:sh}` 不检查，超出时 `cdg dag submit{:sh}` 会被拒绝。
+
+## 工作流级字段 [#workflow-fields]
+
+工作流级字段写在文件顶层，除 `tasks` 外都可以省略。`maxConcurrency`、`taskAutoAccepted` 和 `dagAutoAccepted` 省略时先取项目设置中的同名字段，完整的顺序见[默认值与覆盖顺序](#precedence)。
+
+| 字段 | 类型 | 必填 | 不写时 |
+|---|---|---|---|
+| [`tasks`](#tasks) | 数组 | 是 | — |
+| [`executionMode`](#execution-mode) | `isolated-branches` 或 `shared-workspace` | 否 | `isolated-branches` |
+| [`maxConcurrency`](#max-concurrency) | 整数 | 否 | 项目设置中的值；没有设置时为 `1` |
+| [`taskAutoAccepted`](#task-auto-accepted) | `always`、`done` 或 `none` | 否 | 项目设置中的值；没有设置时为 `always` |
+| [`dagAutoAccepted`](#dag-auto-accepted) | `always`、`done` 或 `none` | 否 | 项目设置中的值；没有设置时为 `done` |
+| [`baseRef`](#base-ref) | 字符串 | 否 | 工作流开始执行时主仓库的 `HEAD`；主仓库被排除时，是第一个未被排除的副本的 `HEAD` |
+| [`excludeWorkspaces`](#exclude-workspaces) | 字符串数组 | 否 | 不排除任何工作区 |
+| [`mergeConflictAgent`](#merge-conflict-agent) | 对象 | 否 | 按合并发生的位置选择 Agent，见字段说明 |
+| [`metadata`](#metadata) | 对象 | 否 | 无 |
+
+### tasks [#tasks]
+
+`tasks` 是任务列表，也是工作流文件中唯一必填的字段。它是一个数组，至少包含一个任务，每个任务至少要写 `id`、`title` 和 `prompt`，全部可用的字段见[任务级字段](#task-fields)。
+
+```yaml title="yaml"
+tasks:
+  - id: 1
+    title: 整理测试命令
+    prompt: 找出在本地运行全部测试的命令，写入 docs/notes/testing.md。
+```
+
+### executionMode [#execution-mode]
+
+`executionMode` 决定任务在各自的分支上隔离执行，还是直接在同一个工作区里执行。它是可选字段，取值为 `isolated-branches` 或 `shared-workspace`，不写时为 `isolated-branches`。
+
+| 值 | 含义 | 适合 |
+|---|---|---|
+| `isolated-branches`（默认） | 隔离分支模式。每个任务在一个工作区里、从同一个起点开出的任务分支上执行；下游任务开始前，CodeDAG 把上游的结果合并进它的任务分支；全部任务结束后，结果合并到集成分支 `cdg/<工作流名>/integration`，主分支保持不变。 | 修改代码、需要单独检查或回退每个任务结果的工作 |
+| `shared-workspace` | 共享工作区模式。所有任务直接在同一个工作区的当前分支上执行，CodeDAG 不建分支、不合并、不提交，结果以未提交的改动留在这个工作区里。 | 文档、调研、翻译这类不编译、不运行测试的任务 |
+
+两种模式为什么存在、各自的代价是什么，见[执行模式](/zh/docs/concepts/workspaces-and-branches#execution-modes)。选定模式后，其他几个字段和审核选项的效果也随之不同：
+
+| | `isolated-branches` | `shared-workspace` |
+|---|---|---|
+| 任务在哪里执行 | 每个运行中的任务占用一个工作区 | 所有任务共用一个工作区：主仓库；主仓库被排除时，是第一个未被排除的副本 |
+| 启动任务前的检查 | 工作区有未提交的改动时，任务停在 `on-hold` | 不检查工作区是否干净 |
+| [`maxConcurrency`](#max-concurrency) | 实际并发不超过可用工作区数 | 不受工作区数限制 |
+| [`baseRef`](#base-ref) | 所有任务分支从它开出 | 只记录，不切换工作区 |
+| [`excludeWorkspaces`](#exclude-workspaces) | 被排除的工作区不参与执行 | 决定使用哪一个工作区 |
+| [`mergeConflictAgent`](#merge-conflict-agent) | 生效 | 不生效，因为不做合并 |
+| [`branchName`](#tasks-branch-name) | 可以使用 | 写了会校验失败 |
+| 完成时没有留下改动的任务 | 不自动接受，停在 `done` 等你审核 | 照常自动接受，只在状态里标注 `zero output`，见[自动接受的取值](#auto-accept-values) |
+| 审核 | 全部动作和选项都可用 | 不能使用 `--code` 选项和 `rework` 动作，见审核命令的[共享工作区模式](/zh/docs/reference/cli/review#shared-workspace) |
+
+```yaml title="yaml"
+executionMode: shared-workspace   # 任务直接在主仓库的当前分支上执行
+```
+
+### maxConcurrency [#max-concurrency]
+
+`maxConcurrency` 是同时执行的任务数上限。它是可选的整数：正整数表示最多同时执行这么多个任务，0 或负数表示工作流本身不设上限。不写时使用项目设置中的 `maxConcurrency`，`cdg init{:sh}` 默认写入的值是 1 加上副本数；项目设置中也没有时为 1，任务逐个执行。
+
+隔离分支模式下，每个运行中的任务占用一个工作区，所以实际并发还不会超过可用工作区数，也就是已登记的工作区减去 [`excludeWorkspaces`](#exclude-workspaces) 排除的那些；设为 0 或负数时，并发等于可用工作区数。可用工作区不够时，先增加副本，见[准备副本](/zh/docs/guides/parallel-workspaces#prepare-replicas)。
+
+共享工作区模式下并发不受工作区数限制，设为 0 或负数时，所有可以开始的任务会同时开始；这些任务写的是同一个工作区，CodeDAG 不隔离它们的改动，所以同时执行的任务要各写各的文件。
+
+```yaml title="yaml"
+maxConcurrency: 2   # 最多同时执行 2 个任务
+```
+
+```yaml title="yaml"
+maxConcurrency: 0   # 工作流不设上限；隔离分支模式下用满所有可用工作区
+```
+
+### taskAutoAccepted [#task-auto-accepted]
+
+`taskAutoAccepted` 是工作流中所有任务的默认审核策略，决定任务完成后是自动接受，还是停下来等你审核。它是可选字段，取值为 `always`、`done` 或 `none`，含义见[自动接受的取值](#auto-accept-values)。不写时使用项目设置中的 `taskAutoAccepted`，项目设置中也没有时为 `always`，即自动接受。
+
+任务自己写了 [`autoAccepted`](#tasks-auto-accepted) 时，以任务的为准；提交时加 `--task-auto-accepted` 选项，又可以在这一次提交中覆盖两者，见[默认值与覆盖顺序](#precedence)。
+
+```yaml title="yaml"
+taskAutoAccepted: none   # 每个任务完成后都停下，等你审核
+tasks:
+  - id: 1
+    title: 格式化代码
+    autoAccepted: always # 这个任务例外：完成后自动接受
+    prompt: 运行项目的格式化命令，格式化全部源文件。
+```
+
+### dagAutoAccepted [#dag-auto-accepted]
+
+`dagAutoAccepted` 是整个工作流的审核策略，决定所有任务都审核结束后，是自动接受整个工作流，还是停下来等你对整套结果给出结论。它与任务的审核策略各自独立：每个任务都自动接受了，整个工作流仍按这个字段决定是否停下。它是可选字段，取值为 `always`、`done` 或 `none`，含义见[自动接受的取值](#auto-accept-values)。不写时使用项目设置中的 `dagAutoAccepted`，项目设置中也没有时为 `done`，即自动接受。提交时加 `--dag-auto-accepted` 选项可以在这一次提交中覆盖它。
+
+```yaml title="yaml"
+dagAutoAccepted: none   # 所有任务结束后，等你对整个工作流给出结论
+```
+
+### baseRef [#base-ref]
+
+`baseRef` 指定工作流的起点，隔离分支模式下所有任务分支都从这个提交开出。它是可选的非空字符串，可以写成下列任意一种形式：
+
+| 写法 | 示例 |
+|---|---|
+| 本地分支名 | `main`、`feature/auth` |
+| 远程跟踪分支名 | `origin/main` |
+| 标签名 | `v1.4.0` |
+| 提交 ID，完整或至少 7 位的缩写 | `4f3c2b1` |
+| 完整引用 | `refs/heads/main`、`refs/tags/v1.4.0` |
+| Git 能解析为提交的其他表达式 | `main~1`、`HEAD~2` |
+
+写的值必须对应唯一一个提交。同名的分支和标签同时存在，或者缩写的提交 ID 对应多个提交时，CodeDAG 不会猜测：前一种情况改用 `refs/heads/...`、`refs/tags/...` 这样的完整引用，后一种情况把提交 ID 写得更长。
+
+`baseRef` 在工作流真正开始执行时才解析成一个确定的提交，而不是在提交命令时。所以写 `baseRef: main` 时，起点是工作流开始那一刻 `main` 所指的提交，排队期间 `main` 上新增的提交也会包含在内。校验只检查它不是空字符串；引用是否存在、是否唯一，要到工作流开始时才能确定，解析失败时工作流停在 `on-hold`，处理方法见[工作流无法开始执行](/zh/docs/troubleshooting/troubleshooting#dag-startup)。
+
+不写 `baseRef` 时，起点是工作流开始执行时主仓库的 `HEAD`；主仓库被 [`excludeWorkspaces`](#exclude-workspaces) 排除时，是第一个未被排除的副本的 `HEAD`。上一个工作流结束后，主仓库会停在它的集成分支上，因此不写 `baseRef` 的下一个工作流会接着上一个工作流的结果开始，见[结束后仓库停在哪](/zh/docs/guides/finish-and-merge#where-repo-stays)。想无论如何都从 `main` 开始，就写上 `baseRef: main`。
+
+共享工作区模式下，`baseRef` 只会被解析和记录，CodeDAG 不会因此切换工作区。要让共享工作区模式的任务在某个版本上运行，先自己把那个工作区切到目标提交，再提交工作流。
+
+```yaml title="yaml"
+baseRef: main     # 从工作流开始时 main 所指的提交出发
+```
+
+```yaml title="yaml"
+baseRef: v1.4.0   # 从标签 v1.4.0 出发
+```
+
+### excludeWorkspaces [#exclude-workspaces]
+
+`excludeWorkspaces` 列出这个工作流不使用的工作区。它是可选的字符串数组，每一项是一个工作区的路径：`.` 表示主仓库，相对路径以主仓库根目录为基准，也可以写绝对路径。每一项都必须是当前项目已经登记的工作区，否则校验失败；工作区的登记见[登记与更新工作区](/zh/docs/reference/cli/init#register-workspaces)。不写时，所有已登记的工作区都可以使用。
+
+隔离分支模式下，被排除的工作区不会被切换分支，也不会执行任务，可用工作区随之减少，实际并发也可能随之降低。共享工作区模式下，工作流在第一个未被排除的工作区中执行，排序时主仓库在最前，其后按副本的登记顺序。无论哪种模式，都至少要留下一个工作区：排除了全部已登记工作区时校验失败，工作流不会被提交。
+
+排除主仓库后，你可以在主仓库里继续开发，工作流只在副本中执行。这时建议同时写上 [`baseRef`](#base-ref)，否则起点会取第一个副本当时所在的提交，做法见[想在工作流运行时同时手动开发](/zh/docs/guides/parallel-workspaces#keep-main-repo)。
+
+```yaml title="yaml"
+excludeWorkspaces: ["."]   # 不使用主仓库，工作流只在副本中执行
+baseRef: main
+```
+
+```yaml title="yaml"
+excludeWorkspaces:
+  - ../my-app-wt-2         # 不使用这个副本，例如它正被另一项工作占用
+```
+
+### mergeConflictAgent [#merge-conflict-agent]
+
+`mergeConflictAgent` 指定自动合并出现冲突时，由哪个 Agent 来解决。它是可选的对象，只在隔离分支模式下起作用。隔离分支模式下，CodeDAG 会在两个位置自动合并：下游任务开始前，把上游的结果合并进它的任务分支；全部任务结束后，把结果合并到集成分支。任何一处出现冲突，CodeDAG 都会启动一个 Agent 会话来解决，解决不了时对应的任务或工作流停在 `on-hold`，机制见[汇聚节点的合并与冲突](/zh/docs/concepts/workspaces-and-branches#merge-and-conflicts)，处理步骤见[合并冲突](/zh/docs/troubleshooting/troubleshooting#hold-merge-conflict)。
+
+| 子字段 | 必填 | 取值 | 不写时 |
+|---|---|---|---|
+| `agent` | 是 | `claude` 或 `codex`，必须是项目允许使用的 Agent | — |
+| `mode` | 否 | 与任务 `mode` 相同的写法，按所选 `agent` 检查，见[权限模式语法](#mode-syntax) | `yolo` |
+| `model` | 否 | 所选 Agent 支持的模型名 | Agent 自身配置的默认模型 |
+
+不写 `mergeConflictAgent` 时，两个位置各有各的默认选择：
+
+| 冲突发生在 | 不写 `mergeConflictAgent` 时由谁解决 |
+|---|---|
+| 下游任务开始前合并上游结果 | 这个下游任务自己的 `agent` 和 `model` |
+| 全部任务结束后合并到集成分支 | 提交工作流时确定的项目默认 Agent |
+
+写了之后，两个位置统一使用对象中的 `agent`、`mode` 和 `model`，其中省略的 `model` 不会沿用下游任务的 `model`。
+
+冲突会话没有应答审批的入口，所以它不沿用任务的 `mode`：`mergeConflictAgent` 里没有写 `mode` 时，包括整个字段都没写时，它一律以 `yolo` 运行，无人值守也能把合并做完。写 `mode` 只用于改用其他权限档；改用会停下来请求批准的档位时，会话一弹出审批就会停住，合并进行不下去。
+
+```yaml title="yaml"
+mergeConflictAgent:        # 所有合并冲突都交给 Claude Code 解决
+  agent: claude
+  model: opus
+```
+
+### metadata [#metadata]
+
+`metadata` 用来记录给人看的说明，例如工作流的用途、维护人或版本。它是可选的对象，内容由你自己决定，CodeDAG 不读取也不检查其中的内容。`cdg init{:sh}` 生成的模板文件里带有 `version`、`description` 等几项，可以按需保留、修改或删除。
+
+```yaml title="yaml"
+metadata:
+  description: 每周依赖升级与回归测试
+  owner: platform-team
+```
+
+## 任务级字段 [#task-fields]
+
+任务级字段写在 `tasks` 的每一项里，只作用于这个任务。
+
+| 字段 | 类型 | 必填 | 不写时 |
+|---|---|---|---|
+| [`id`](#tasks-id) | 正整数 | 是 | — |
+| [`title`](#tasks-title) | 字符串 | 是 | — |
+| [`prompt`](#tasks-prompt) | 字符串 | 与 `details` 至少写一个 | — |
+| [`description`](#tasks-description) | 字符串 | 否 | 空 |
+| [`dependencies`](#tasks-dependencies) | 整数数组 | 否 | `[]`，不等待任何任务 |
+| [`agent`](#tasks-agent) | `claude` 或 `codex` | 否 | 项目默认 Agent |
+| [`mode`](#tasks-mode) | 字符串 | 否 | Agent 自身的权限配置 |
+| [`model`](#tasks-model) | 字符串 | 否 | Agent 自身配置的默认模型 |
+| [`effort`](#tasks-effort) | 字符串 | 否 | Agent 自身配置或模型的默认推理力度 |
+| [`autoAccepted`](#tasks-auto-accepted) | `always`、`done` 或 `none` | 否 | 工作流的 `taskAutoAccepted` |
+| [`branchName`](#tasks-branch-name) | 字符串 | 否 | 自动命名 |
+
+### id [#tasks-id]
+
+`id` 是任务的编号，`dependencies` 和 `cdg task{:sh}` 下的命令都用它指定任务。它是必填的正整数，在同一个工作流内不能重复，但不要求从 1 开始，也不要求连续。
+
+### title [#tasks-title]
+
+`title` 是任务的名称，显示在状态看板和日志中，也用于生成默认的任务分支名。它是必填的字符串，不能为空。任务 Agent 收到的只有 [`prompt`](#tasks-prompt)，看不到 `title`，需要 Agent 知道的内容要写进 `prompt`。
+
+### prompt [#tasks-prompt]
+
+`prompt` 是交给任务 Agent 的指令，任务的 Agent 会话以它作为第一条输入。它是必填的字符串，也可以改用兼容写法 `details`，两者至少写一个；只写其中一个时效果相同，两者都写时只取 `prompt`，`details` 的内容不参与。写了 `prompt` 就不能留空，空串或只有空白都校验失败。
+
+每个任务都是一个全新的 Agent 会话，看不到其他任务的对话，prompt 怎样写才能让它独立完成，见[写 prompt：让一个全新的会话独立完成](/zh/docs/guides/designing-tasks-and-prompts#write-prompts)。
+
+```yaml title="yaml"
+  - id: 2
+    title: 实现搜索接口
+    prompt: |
+      阅读 docs/plans/search.md，先为方案里的每个新接口写单元测试，
+      再按方案实现搜索接口，运行全部测试直到通过。
+      只修改 server/ 目录。
+```
+
+### description [#tasks-description]
+
+`description` 是给人看的补充说明。它是可选的字符串，默认为空。它不会交给任务 Agent，要让 Agent 知道的内容写进 [`prompt`](#tasks-prompt)。
+
+### dependencies [#tasks-dependencies]
+
+`dependencies` 列出这个任务要等待的上游任务的 `id`。它是可选的整数数组，默认为空数组，即不等待任何任务，工作流开始后就可以被安排执行。列出的每个 `id` 都必须是同一个工作流中存在的任务，依赖关系也不能成环，任务依赖自己同样算作成环。
+
+任务要等所有上游都完成并通过审核之后才开始，自动接受也算通过。隔离分支模式下，上游的结果会在它开始前合并进它的任务分支。
+
+```yaml title="yaml"
+  - id: 4
+    title: 运行测试并修复
+    dependencies: [2, 3]   # 等任务 2 和任务 3 都通过审核后才开始
+    prompt: 运行全部测试，修复失败项，直到全部通过。
+```
+
+### agent [#tasks-agent]
+
+`agent` 指定执行这个任务的 Agent：`claude` 表示 Claude Code，`codex` 表示 Codex。它是可选字段，不写时使用项目默认 Agent，也就是项目设置中的 [`defaultAgent`](/zh/docs/reference/settings#default-agent)，通常在 `cdg init{:sh}` 时选定。所选的 Agent 必须在项目允许使用的 Agent 之中，否则校验失败。
+
+任务的 [`mode`](#tasks-mode) 按这个任务最终使用的 Agent 检查写法。不写 `agent` 时，`mode` 就按项目默认 Agent 检查，而默认 Agent 通常记在本机设置里，同一个文件拿到默认 Agent 不同的机器上可能校验失败，所以写了 `mode` 的任务最好同时写明 `agent`。
+
+```yaml title="yaml"
+  - id: 3
+    title: 审查实现
+    agent: claude             # 只有这个任务交给 Claude Code
+    mode: bypassPermissions
+    prompt: 审查 server/ 目录中本次新增的代码，把问题写入 docs/review.md。
+```
+
+### mode [#tasks-mode]
+
+`mode` 是任务 Agent 的权限模式，决定任务运行中哪些操作可以直接执行、哪些要先停下来征得你的同意。它是可选的非空字符串。不写时 CodeDAG 不向 Agent 传递权限模式，Agent 按它自己的配置运行，例如 Claude Code 项目或用户设置中的 `permissions.defaultMode`、Codex 的 `~/.codex/config.toml`，这时从工作流文件里看不出任务实际的授权程度。
+
+`mode` 的写法按 Agent 区分，见[权限模式语法](#mode-syntax)。想让任务无人值守地跑完，或者想在文件里固定每个任务的授权方式时，就显式写上 `mode`；无人值守与有人值守怎样取舍，见[决定无人值守还是有人值守](/zh/docs/guides/agents-and-permission-modes#unattended-or-attended)。
+
+```yaml title="yaml"
+  - id: 1
+    title: 编写实现方案
+    agent: codex
+    mode: yolo                # Codex：不请求批准、不使用沙箱
+    prompt: 阅读 docs/spec/search.md，把实现方案写入 docs/plans/search.md。
+  - id: 2
+    title: 实现搜索接口
+    dependencies: [1]
+    agent: claude
+    mode: acceptEdits         # Claude Code：文件编辑直接执行，其他命令先征得同意
+    prompt: 按 docs/plans/search.md 实现搜索接口。
+```
+
+### model [#tasks-model]
+
+`model` 指定任务使用的模型。它是可选的非空字符串，原样交给 Agent 的 `--model` 参数；不写时使用 Agent 自身配置的默认模型。CodeDAG 不检查模型名，写错的名字能通过校验，要到任务运行时才会由 Agent 报错。
+
+Claude Code 可以写 `sonnet`、`opus`、`haiku` 这样的别名，也可以写完整的模型名，见 Claude Code 的[模型配置文档](https://code.claude.com/docs/en/model-config)；Codex 写模型名，可用的模型见 Codex 的[模型文档](https://learn.chatgpt.com/docs/models)。
+
+```yaml title="yaml"
+  - id: 3
+    title: 审查实现
+    agent: claude
+    model: sonnet   # 使用最新的 Sonnet 模型
+    prompt: 审查 server/ 目录中本次新增的代码，把问题写入 docs/review.md。
+```
+
+### effort [#tasks-effort]
+
+`effort` 指定模型的推理力度。它是可选的非空字符串，原样交给 Agent；不写时由 Agent 自身的配置或所用模型的默认值决定。CodeDAG 不检查取值，写错的值要到任务运行时才会暴露。
+
+| Agent | 交给 Agent 的方式 | 常见取值 |
+|---|---|---|
+| Claude Code | `--effort` 参数 | `low`、`medium`、`high`、`xhigh`、`max` |
+| Codex | 配置项 `model_reasoning_effort` | `low`、`medium`、`high`、`xhigh`；部分模型还支持 `max` 等更高档位 |
+
+两家可用的档位都取决于所选模型，有的模型不提供最高几档，具体见 Claude Code 的[模型配置文档](https://code.claude.com/docs/en/model-config)和 Codex 的[模型文档](https://learn.chatgpt.com/docs/models)。
+
+```yaml title="yaml"
+  - id: 1
+    title: 编写实现方案
+    agent: codex
+    effort: high    # 方案决定后续所有任务，用较高的推理力度
+    prompt: 阅读 docs/spec/search.md，把实现方案写入 docs/plans/search.md。
+```
+
+### autoAccepted [#tasks-auto-accepted]
+
+`autoAccepted` 是这个任务的审核策略，决定它完成后是自动接受，还是停下来等你[审核](/zh/docs/guides/review-tasks)。它是可选字段，取值为 `always`、`done` 或 `none`，含义见[自动接受的取值](#auto-accept-values)。不写时继承工作流的 [`taskAutoAccepted`](#task-auto-accepted)，工作流也没有写时依次取项目设置和最终默认值 `always`。提交时加 `--task-auto-accepted` 选项，可以在这一次提交中覆盖所有任务的这个字段，见[默认值与覆盖顺序](#precedence)。
+
+```yaml title="yaml"
+  - id: 1
+    title: 编写实现方案
+    autoAccepted: none   # 方案写完后停下；你接受之后，下游任务才开始
+    prompt: 阅读 docs/spec/search.md，把实现方案写入 docs/plans/search.md。
+```
+
+### branchName [#tasks-branch-name]
+
+`branchName` 指定这个任务的任务分支名。它是可选的非空字符串，只能在隔离分支模式下使用，共享工作区模式下写了会校验失败。不写时，CodeDAG 自动把任务分支命名为 `cdg/<工作流名>/t<id>-<标题>`。
+
+写了 `branchName` 时，CodeDAG 按原样使用这个名字，不加前缀，也不加后缀。它需要满足以下要求，否则校验失败：
+
+- 符合 Git 分支名的规则，也就是能通过 `git check-ref-format`。
+- 在同一个工作流内不与其他任务重复。
+- 不是本工作流的集成分支 `cdg/<工作流名>/integration`，也不以快照分支的前缀 `cdg/<工作流名>/snapshots/` 开头。
+
+同名分支已经存在时，例如同一个工作流上一次运行留下的分支，校验会给出 `branch-name-conflict` 警告；不处理就提交，工作流执行到这个任务时任务会停在 `on-hold`。警告会写明这个名字被谁占着，旧分支处理掉之后可以继续使用原来的名字，做法见[使用指定的任务分支名](/zh/docs/reference/branches-and-files#branch-name)。自动命名的任务分支没有这个问题，所以只在确实需要固定分支名时才写，例如之后要把这个分支推送到远程开 PR。
+
+```yaml title="yaml"
+  - id: 2
+    title: 实现搜索接口
+    branchName: feature/search-api
+    prompt: 按 docs/plans/search.md 实现搜索接口。
+```
+
+## 自动接受的取值 [#auto-accept-values]
+
+`always`、`done`、`none` 这组取值用于所有审核策略的设置：任务的 `autoAccepted`，工作流的 `taskAutoAccepted` 和 `dagAutoAccepted`，项目设置中的同名字段，以及 `cdg dag submit{:sh}` 的 `--task-auto-accepted` 和 `--dag-auto-accepted` 选项。名字里带 `dag` 的设置作用于整个工作流，其余的作用于任务，同一个值用在这两类设置中的含义如下：
+
+| 值 | 用于任务 | 用于整个工作流 |
+|---|---|---|
+| `always` | 任务完成后自动接受，下游任务随即可以开始 | 所有任务都审核结束后，自动接受整个工作流；隔离分支模式下结果合并到集成分支，工作流离开队列 |
+| `done` | 与 `always` 相同 | 与 `always` 相同 |
+| `none` | 任务完成后停下，等你审核；你给出结论之前，下游任务不会开始，隔离分支模式下这个任务也继续占用它的工作区 | 所有任务都审核结束后停下，等你用 `cdg dag review{:sh}` 给出结论；在此之前，队列中排在它后面的工作流不会开始 |
+
+在 0.1.0 中，`always` 和 `done` 的效果相同，都表示自动接受。任务的最终默认值是 `always`，工作流的最终默认值是 `done`，所以什么都不写时，任务和工作流都会自动接受。
+
+自动接受有一个例外：隔离分支模式下，任务完成时如果没有留下任何改动，即使设为 `always` 也不会被自动接受，而是停下来等你审核。共享工作区模式下，零输出的任务照常自动接受，只在状态里标注出来。
+
+`none` 用在你想亲自把关的位置，例如后续任务都依赖它的方案类任务，或者第一次运行的新工作流。哪些节点值得这样设置、自动接受为什么是默认，见[自动接受](/zh/docs/concepts/review-gates#auto-accept)；停下之后怎样审核，见[审核任务与工作流](/zh/docs/guides/review-tasks)。
+
+## 权限模式语法 [#mode-syntax]
+
+`mode` 出现在任务和 [`mergeConflictAgent`](#merge-conflict-agent) 中，写法由它对应的 Agent 决定：Claude Code 写一个模式名，Codex 写一个简写或逗号分隔的键值对。校验会按对应的 Agent 检查格式，把一家的写法用在另一家的任务上会校验失败。
+
+### Claude Code [#mode-claude-code]
+
+Claude Code 任务的 `mode` 写一个模式名，其中不能有空格、逗号或 `=`，CodeDAG 把它作为 `--permission-mode` 参数交给 Claude Code。CodeDAG 提供两个别名：`yolo` 等同于 `bypassPermissions`，`askForPermissions` 等同于 `default`。其余模式名原样交给 Claude Code，CodeDAG 只检查格式，名字是否有效由 Claude Code 判断。
+
+| 值 | 不经你同意即可执行的操作 | 在 CodeDAG 任务中 |
+|---|---|---|
+| `bypassPermissions`，别名 `yolo` | 全部操作，跳过权限检查；少数受 Claude Code 保护的操作除外 | 运行中基本不会停下等你批准，适合无人值守；只用于你信任的任务和可控的环境 |
+| `auto` | 全部操作，由 Claude Code 的安全分类器在后台审查，被拦下的操作不执行 | 需要所用模型和账号支持 auto 模式；不支持时，会话以 `default` 模式启动，任务会在需要批准的操作处停下 |
+| `acceptEdits` | 读取、文件编辑和常用的文件系统命令，如 `mkdir`、`mv`、`cp` | 运行其他命令前会停下，等你批准 |
+| `default`，别名 `askForPermissions` | 只有读取 | 大多数编辑文件、运行命令和联网的操作前都会停下，等你批准；Claude Code 界面中称为 Manual |
+| `dontAsk` | 读取，以及你在 Claude Code 权限规则中预先允许的工具 | 不会停下等你批准，其余操作直接被拒绝 |
+| `plan` | 读取，以及 auto 模式可用时由分类器放行的命令 | 你批准计划之前不会修改文件，不适合需要改动文件的任务 |
+
+各模式的完整说明以 Claude Code 的[权限模式文档](https://code.claude.com/docs/en/permission-modes)为准。
+
+```yaml title="yaml"
+mode: acceptEdits   # 文件编辑直接执行，运行其他命令前先征得同意
+```
+
+### Codex [#mode-codex]
+
+Codex 任务的 `mode` 二选一：整个 `mode` 只写一个简写，或者写逗号分隔的若干个 `键=值`。两种写法不能混用，`approve-for-me,search=true` 这样的写法校验失败。
+
+两个简写各自代表一整套授权方式：
+
+- **`yolo`：** Codex 执行任何操作都不请求批准、不使用沙箱，并开启实时网页搜索。它可以读写任何文件、访问网络、运行任何命令，所以只用于你信任的任务和可控的环境。写成 Codex 原生选项名 `dangerously-bypass-approvals-and-sandbox` 效果相同。
+- **`approve-for-me`，也可以写 `auto`：** Codex 在 workspace-write 沙箱中运行，需要越出沙箱时按需请求批准，但审批请求先交给 Codex 的自动审查判断，不停下等你；请求被拒时，Agent 自行调整做法继续。它既能无人值守，又保留了一道审查。
+
+键值写法可以使用下面五个键。每个键最多写一次，逗号两侧可以有空格；没有写的键不向 Codex 传递，由 Codex 自身的配置决定。
+
+| 键 | 取值 | 含义 |
+|---|---|---|
+| `ask-for-approval` | `on-request`、`never` | `on-request`：由模型判断何时停下请求批准，例如要越出沙箱时；`never`：从不请求批准，沙箱不允许的操作直接失败，任务不会停下等人 |
+| `sandbox` | `read-only`、`workspace-write`、`danger-full-access` | `read-only`：命令只能读取；`workspace-write`：可以读取任何位置，只能写入任务所在的工作区，默认不能访问网络；`danger-full-access`：不做任何限制 |
+| `approvals_reviewer` | `user`、`auto_review` | 审批请求交给谁判断：`user` 交给你，会话停下等你应答；`auto_review` 交给 Codex 的自动审查，不停下等人。`ask-for-approval=never` 时 Codex 不产生审批请求，这个键也就不起作用 |
+| `search` | `true`、`false` | `true`：开启实时网页搜索；`false`：关闭网页搜索工具。不写时按 Codex 自身的配置，Codex 默认使用缓存的搜索结果 |
+| `network_access` | `true`、`false` | 是否允许 `workspace-write` 沙箱中的命令访问网络。不写时按 Codex 自身的配置，Codex 默认不允许 |
+
+五个键可以任意组合，只有 `network_access` 有附加要求：写它时必须同时写明 `sandbox=workspace-write`。表外的键名、表外的取值和重复的键，都在 `cdg dag validate{:sh}` 和 `cdg dag submit{:sh}` 阶段报错，不会原样交给 Codex。表中列出的是当前版本 Codex 接受的取值，Codex 早期的审批策略 `untrusted` 和已被 Codex 弃用的 `on-failure` 都在其外，写了会得到 `ask-for-approval must be on-request or never, received 'untrusted'` 这样的报错。
+
+```yaml title="yaml"
+# 只允许写入任务所在的工作区，越界时由模型请求批准
+mode: "ask-for-approval=on-request,sandbox=workspace-write"
+```
+
+```yaml title="yaml"
+# 在上面的基础上允许命令联网，例如安装依赖或访问测试服务
+mode: "ask-for-approval=on-request,sandbox=workspace-write,network_access=true"
+```
+
+```yaml title="yaml"
+# 把审批请求交给 Codex 的自动审查，不停下等你应答
+mode: "approvals_reviewer=auto_review,ask-for-approval=on-request,sandbox=workspace-write,network_access=true"
+```
+
+```yaml title="yaml"
+# 开启实时网页搜索，但不放开命令的网络访问
+mode: "sandbox=workspace-write,search=true"
+```
+
+```yaml title="yaml"
+# 从不请求批准：沙箱内能做的直接做，做不到的直接失败，任务不会停下等人
+mode: "ask-for-approval=never,sandbox=workspace-write,network_access=true"
+```
+
+审批与沙箱的详细行为以 Codex 的[配置文档](https://learn.chatgpt.com/docs/config-file/config-reference)为准。
+
+## 默认值与覆盖顺序 [#precedence]
+
+同一项设置可以出现在多处：`cdg dag submit{:sh}` 的选项、任务字段、工作流字段、项目的本机设置 `.codedag/local/settings.local.jsonc` 和共享设置 `.codedag/settings.jsonc`。CodeDAG 在提交时按下表从左到右取第一个写了值的来源，都没有写时使用最终默认值。
+
+| 设置项 | 优先级从高到低 | 最终默认 |
+|---|---|---|
+| 任务的审核策略 | `--task-auto-accepted` → 任务的 `autoAccepted` → 工作流的 `taskAutoAccepted` → 本机设置 → 共享设置 | `always` |
+| 整个工作流的审核策略 | `--dag-auto-accepted` → 工作流的 `dagAutoAccepted` → 本机设置 → 共享设置 | `done` |
+| 并发上限 | 工作流的 `maxConcurrency` → 本机设置 → 共享设置 | `1` |
+| 任务的 Agent | 任务的 `agent` → 项目默认 Agent，即设置中的 `defaultAgent`，本机设置优先于共享设置 | `codex`；项目不允许使用 Codex 时为 `claude` |
+| 任务的 `mode`、`model`、`effort` | 任务字段 → Agent 自身的配置 | Agent 的内置默认 |
+
+取值在提交时确定，之后再修改文件或设置，不影响已经提交的这一次执行。表中最后一行例外：任务没写 `mode`、`model`、`effort` 时，CodeDAG 不替它取值，由 Agent 每次启动会话时按自己当时的配置决定，所以提交之后修改 Agent 的配置，还没启动的任务会按新配置运行。希望这一次执行固定使用某个权限模式或模型，就在任务里写明。
+
+提交命令的两个选项只作用于这一次提交，不修改任何文件，用法见[只对这一次提交调整审核设置](/zh/docs/reference/cli/validate-and-submit#auto-accept-options)。本机设置与共享设置各放什么、怎样只对自己生效，见[设置写在哪](/zh/docs/reference/settings#files)。自动合并冲突时使用哪个 Agent，有单独的规则，见 [`mergeConflictAgent`](#merge-conflict-agent)。
+
+## 补充配置示例 [#examples]
+
+下面两个文件都是完整的工作流，可以直接保存到 `.codedag/dags/` 中，再按自己的项目修改 prompt。
+
+第一个工作流只在副本中执行，并固定从 `main` 开始，你可以同时在主仓库里继续开发。任务 1 和任务 2 同时执行，各占一个副本，所以项目中至少要登记两个副本；任务 3 开始前，CodeDAG 会把前两个任务的结果合并进它的任务分支。
+
+```yaml title=".codedag/dags/deps-upgrade.yaml"
+baseRef: main              # 从 main 开始，不受主仓库当前所在分支的影响
+excludeWorkspaces: ["."]   # 不使用主仓库，工作流只在副本中执行
+maxConcurrency: 2
+tasks:
+  - id: 1
+    title: 升级前端依赖
+    agent: codex
+    mode: yolo
+    prompt: |
+      把 web/ 目录下的依赖升级到当前主版本内的最新版本，
+      运行 web/ 的全部测试并修复失败项。只修改 web/ 目录。
+  - id: 2
+    title: 升级后端依赖
+    agent: codex
+    mode: yolo
+    prompt: |
+      把 server/ 目录下的依赖升级到当前主版本内的最新版本，
+      运行 server/ 的全部测试并修复失败项。只修改 server/ 目录。
+  - id: 3
+    title: 记录升级内容
+    dependencies: [1, 2]
+    agent: codex
+    mode: yolo
+    prompt: |
+      对比本次升级前后的依赖版本，把升级了哪些依赖、有哪些需要注意的变化
+      写入 docs/notes/deps-upgrade.md。只写这一个文件（已存在时直接覆盖）。
+```
+
+第二个工作流先写方案，方案写完后停下等你确认，再由两个任务分别实现接口和页面。两个实现任务使用固定的分支名，便于之后单独推送；全部任务结束后合并到集成分支时如果出现冲突，交给 Claude Code 解决。
+
+```yaml title=".codedag/dags/search-feature.yaml"
+mergeConflictAgent:              # 合并出现冲突时，交给 Claude Code 解决
+  agent: claude
+tasks:
+  - id: 1
+    title: 编写实现方案
+    agent: codex
+    mode: yolo
+    autoAccepted: none           # 方案写完后停下，等你确认再开始实现
+    prompt: |
+      阅读 docs/spec/search.md，把搜索功能的实现方案写入 docs/plans/search.md，
+      列出要修改的模块、接口变化和测试要点。只写方案，不修改代码。
+  - id: 2
+    title: 实现搜索接口
+    dependencies: [1]
+    agent: codex
+    mode: yolo
+    branchName: feature/search-api
+    prompt: |
+      按 docs/plans/search.md 实现搜索接口，并补充对应的单元测试。
+      运行全部测试直到通过。
+  - id: 3
+    title: 实现搜索页面
+    dependencies: [1]
+    agent: claude
+    mode: bypassPermissions
+    branchName: feature/search-ui
+    prompt: |
+      按 docs/plans/search.md 实现搜索页面，并补充对应的组件测试。
+      运行全部测试直到通过。
+```
+
+## 相关
+
+- [编写工作流文件](/zh/docs/guides/writing-workflows)：从最小结构开始写一个工作流文件，并在提交前校验。
+- [选择 Agent、模型与权限模式](/zh/docs/guides/agents-and-permission-modes)：为每个任务选择 Agent、模型和授权方式。
+- [项目设置](/zh/docs/reference/settings)：共享设置与本机设置中的字段及其默认值。
+- [校验与提交](/zh/docs/reference/cli/validate-and-submit)：`cdg dag validate{:sh}` 与 `cdg dag submit{:sh}` 的参数和选项。

@@ -1,0 +1,121 @@
+---
+title: Manage the CodeDAG Guide Plugin
+description: Install the CodeDAG Guide plugin for Claude Code and Codex, choose an installation scope, check its status, and keep it up to date.
+icon: Puzzle
+---
+
+## What the plugin is [#what-it-is]
+
+The CodeDAG Guide plugin gives Claude Code and Codex a skill for using CodeDAG, named `codedag-guide`. Once it's installed, you describe your goal in plain language, and the agent can split the work into tasks and write the workflow file on its own, then use `cdg` to validate and submit it, track progress, and handle reviews. In short, it does the orchestrating for you. For how to use it, see [Let Your Agent Orchestrate](/docs/get-started/let-your-agent-orchestrate).
+
+CodeDAG handles installing and upgrading the plugin for both agents, and you manage it day to day with `cdg plugin{:sh}`. Its plugin identifier is `codedag@codedag` in both agents.
+
+## Install the plugin [#install]
+
+When `cdg init{:sh}` initializes a project, it asks once for each agent installed on this machine whether to install the plugin. The choices correspond to the [three installation scopes](#scopes) below. If you skipped it then, or installed the other agent only later, install the plugin with `cdg plugin install{:sh}`:
+
+```bash title="Terminal"
+# Install for Claude Code and Codex, whichever are installed on this machine, at the user scope
+cdg plugin install
+
+# Install for Claude Code only, at the project scope
+cdg plugin install --claude --scope project
+```
+
+Add `--claude` or `--codex` to install for just one of the agents. `--scope` selects the installation scope, and the default is `user`.
+
+The plugin takes effect only in new sessions. A Claude Code or Codex session that was already open before you installed the plugin can't see it. Exit that session and resume it with `claude --resume{:sh}` or `codex resume{:sh}`, and you can use the plugin in the same conversation.
+
+### Choose an installation scope [#scopes]
+
+The three scopes differ in where the plugin takes effect. If you work on your own, the user scope is the least trouble: install once, and sessions in every repository on this computer can use the plugin.
+
+| Scope | Where it takes effect | Best for |
+|---|---|---|
+| `user` (default) | Every repository you open on this computer | Working on your own, or using CodeDAG in several repositories |
+| `project` | The current Git repository. The plugin configuration is written to files in the repository and, once committed, is shared along with the repository | Making the plugin available to every team member who opens this repository |
+| `local` | Only the current checkout. The configuration stays on this machine and isn't shared with the repository, and CodeDAG has Git ignore it. It doesn't take effect in the same repository's other worktrees or clones either | Trying the plugin out in one repository without affecting other repositories or team members |
+
+To install at the project or local scope, run the command from inside the target repository. What the project scope shares is the plugin configuration in the repository, not the installation on each computer. After other members pull that configuration, they still have to run `cdg init{:sh}` once on their own computers and follow the prompts to finish installing the plugin. Only then does it take effect in their agents. New members run this command when they join a project anyway. See [Onboard new members](/docs/guides/team-sharing#onboarding).
+
+Both of these scopes write plugin configuration files into the repository, such as Claude Code's `.claude/settings.json` (project scope) or `.claude/settings.local.json` (local scope). What you need to do after installing differs:
+
+- **Project scope:** The files are under version control. Commit them to the repository after you install, which is also how your team members get the configuration. If you leave them uncommitted, then in the default isolated-branches mode, tasks stop at `on-hold` before they start, with the reason `workspace-dirty` (see [The workspace has uncommitted changes](/docs/troubleshooting/troubleshooting#hold-workspace)).
+- **Local scope:** There's nothing to do, because CodeDAG has Git ignore these files when it installs the plugin. If the files were already committed to the repository, the ignore rules have no effect, and the installation fails right away and tells you to use the user or project scope instead. See [Ignore rules written for the local scope](/docs/reference/cli/plugin#local-exclude).
+
+## Check the installation status [#status]
+
+To confirm whether the plugin is installed properly, which scope it's installed at, and whether it needs an update, run `cdg plugin status{:sh}` in the repository where you use the agent. It prints a set of fields for each agent, including whether the plugin is installed (`Plugin installed`), its installation scope (`Scope`), and whether it's enabled (`Enabled`). The last line, `Action`, gives the next step. When it shows `No action needed`, there's nothing to do. Otherwise, run the command it gives. To look at just one agent, add `--claude` or `--codex`. For what every field means, see [cdg plugin status](/docs/reference/cli/plugin#status).
+
+The directory you run the command in affects the result. A user-scope installation is visible from any directory, while project-scope and local-scope installations are visible only when you run the command in the corresponding repository. So seeing `Plugin installed: false` in some other directory doesn't mean the plugin isn't installed in this repository.
+
+When `Enabled` is `false`, the plugin is installed but has been disabled in the agent, so the agent still can't use it, and `Action` tells you to re-enable it. You re-enable it on the agent's side: for Claude Code, run `claude plugin enable codedag@codedag{:sh}`, and for Codex, open `/plugins` in a session.
+
+## Update the plugin [#update]
+
+Run `cdg plugin update{:sh}` to update the installed plugin to the latest version. By default, it covers every agent installed on this machine. Add `--claude` or `--codex` to update just one. An agent that doesn't have the plugin yet doesn't get it installed this way. The update stays within the plugin's existing scope and keeps your choice of enabled or disabled in the agent. If the installation is broken, the same command repairs it in place. Like a newly installed plugin, an updated one takes effect only in new sessions.
+
+```bash title="Terminal"
+cdg plugin update
+```
+
+The `Action` line of `cdg plugin status{:sh}` tells you whether an update is needed. It's worth a look after you upgrade the CLI. For the reason, see [Do I need to update the plugin after upgrading the CLI?](#after-cli-upgrade).
+
+If you've edited the plugin's skill files directly, an update doesn't overwrite your edits by default. When you run the command in a terminal, it first asks whether to keep your edits or replace them with the official content, and the default is to keep them. When it's run non-interactively, by a script or an agent, it keeps your edits and skips the update. If you're sure you no longer need those edits, add `--reset-local-changes`. The command then replaces them with the official content without asking:
+
+```bash title="Terminal"
+cdg plugin update --reset-local-changes
+```
+
+<Callout type="idea">
+If you want the agent to orchestrate the way you like, such as which access level to use by default or which kinds of tasks to follow with a manual review, put those requirements in CLAUDE.md (Claude Code) or AGENTS.md (Codex), and leave the plugin's skill files for CodeDAG to manage. Skill files are replaced with the new version on every update, so anything you change in them has to be migrated by hand sooner or later. Requirements written in CLAUDE.md or AGENTS.md aren't affected by plugin updates, and if you keep them in the project, they're also shared with your team along with the repository.
+</Callout>
+
+## Change the installation scope or uninstall [#change-scope]
+
+To change the scope, first uninstall the plugin with `cdg plugin uninstall{:sh}`, then install it with the new `--scope`, and finally open a new session. A plugin at the project or local scope has to be uninstalled from inside the repository where it's installed, and to handle only one agent, add `--claude` or `--codex`. If all you want is to uninstall, the first step is enough. You can't change the scope of an installed plugin directly. If you run `cdg plugin install --scope <scope>{:sh}` on it again, the command only reports the scope the plugin is already installed at and skips it.
+
+The uninstall command has no `--scope` option. It removes every installation that's visible from where you run it. Inside a repository, it removes that repository's project-scope and local-scope installations together with the user-scope installation. Outside any repository, it removes only the user-scope installation. Uninstalling from the project scope changes version-controlled configuration files in the repository, and that change needs to be committed too. For complete examples of changing the scope in both directions, see [Change the installation scope](/docs/reference/cli/plugin#change-scope).
+
+## Install with the agent's own commands [#manual-install]
+
+You can also install the plugin without going through `cdg`, using Claude Code's or Codex's own plugin commands. First add the GitHub repository `CodedagAI/codedag-plugins` as a plugin source (a marketplace, named `codedag`), then install `codedag@codedag` from it. That's a good fit if you prefer to manage all your plugins from within the agent. Otherwise, a single `cdg plugin install{:sh}` command installs the plugin for both agents.
+
+<Tabs items={['Claude Code', 'Codex']}>
+  <Tab value="Claude Code">
+
+```bash title="Terminal"
+claude plugin marketplace add CodedagAI/codedag-plugins
+claude plugin install codedag@codedag
+```
+
+  </Tab>
+  <Tab value="Codex">
+
+```bash title="Terminal"
+codex plugin marketplace add CodedagAI/codedag-plugins
+codex plugin add codedag@codedag
+```
+
+  </Tab>
+</Tabs>
+
+As with `cdg plugin install{:sh}`, the plugin takes effect only after you open a new session.
+
+## Common questions
+
+### The plugin is installed, but the agent still doesn't know how to use CodeDAG
+
+The most common cause is that the session was opened before the plugin was installed. The plugin takes effect only in new sessions, so exit the current session and resume it with `claude --resume{:sh}` or `codex resume{:sh}`.
+
+If that doesn't help, run `cdg plugin status{:sh}` in this repository and look at two fields under the agent you're using. If `Plugin installed` is `false`, the plugin may have been installed only for the other agent, or installed at the project or local scope in a different repository. Run the command that `Action` gives to install it. If `Enabled` is `false`, the plugin has been disabled in the agent. Re-enable it as described in [Check the installation status](#status).
+
+### Do I need to update the plugin after upgrading the CLI? [#after-cli-upgrade]
+
+We recommend updating, but you don't have to. The CLI and the plugin are upgraded separately, and upgrading the CLI doesn't update the plugin along with it. A new CLI version keeps the commands and arguments that released plugins use, along with their meanings, so even without a plugin update, the agent still uses the CLI correctly. It just doesn't know about anything the new version adds. After you upgrade the CLI, run `cdg plugin status{:sh}` once and do what `Action` says. For the compatibility rules, see [Version compatibility](/docs/reference/cli/plugin#compatibility).
+
+## Related
+
+- [Plugin reference](/docs/reference/cli/plugin): The full options of each subcommand, which installations are removed depending on where you run the uninstall command, and how to change the installation scope.
+- [Let Your Agent Orchestrate](/docs/get-started/let-your-agent-orchestrate): With the plugin installed, hand your goal to the agent and have it write the workflow and submit it.
+- [Choose Agents, Models, and Permission Modes](/docs/guides/agents-and-permission-modes): Set the access level for each task in the workflows the agent writes for you.

@@ -1,0 +1,177 @@
+---
+title: 提交、观察与日志
+description: 提交工作流，从项目、工作流和任务三个层级查看进度，读执行日志，并判断任务是否在正常推进。
+icon: Activity
+---
+
+`cdg dag submit{:sh}` 把工作流放进项目的[队列](/zh/docs/concepts/how-it-works#queue)，轮到它时在后台执行；命令在入队后立即返回，关掉终端也不影响执行。提交之后，用 `cdg status{:sh}`、`cdg dag status{:sh}` 和 `cdg task status{:sh}` 从项目、工作流和任务三个层级查看[状态](/zh/docs/concepts/how-it-works#status)，用 `cdg dag logs{:sh}` 和 `cdg task logs{:sh}` 看任务 Agent 做了什么。CodeDAG 没有任务超时，任务很久没有动静时，要由你判断它是不是卡住了。
+
+## 提交工作流 [#submit]
+
+工作流文件用 `cdg dag validate{:sh}` [校验](/zh/docs/guides/writing-workflows#validate)通过后，用 `cdg dag submit{:sh}` 提交。工作流进入这个项目的队列，轮到它时在后台开始执行，关掉终端也不影响它。
+
+```bash title="Terminal"
+cdg dag submit api-docs
+```
+
+命令在工作流入队后立即返回，输出里会显示它在队列中的位置，以及查看状态和日志的命令。
+
+一次可以提交多个工作流，名字之间用空格隔开，例如 `cdg dag submit api-docs release-notes{:sh}`，它们按书写的顺序排进队列，见[一次提交多个工作流](/zh/docs/reference/cli/validate-and-submit#multiple)。想只对这一次提交改变审核设置，例如让每个任务完成后都停下等你审核，可以用 `--task-auto-accepted` 等选项，写法见[只对这一次提交调整审核设置](/zh/docs/reference/cli/validate-and-submit#auto-accept-options)。
+
+### 提交时检查什么 [#submit-checks]
+
+提交之前，CodeDAG 会确认下面几件事。任何一项不通过，工作流都不会进入队列；一次提交多个工作流时，只要其中一个不通过，所有工作流都不会提交。
+
+1. **工作流文件有效。** 提交会重新做一遍 `cdg dag validate{:sh}` 的检查，有错误就不提交。只有警告时，命令先列出警告，再询问 `Submit anyway?`，默认不提交；看过警告、确认不影响执行，可以加 `-y` 跳过这次询问。
+2. **这个工作流不在队列中。** 同一个工作流提交之后，在它审核结束、离开队列之前，不能再提交一次。
+3. **这个工作流没有审核结束。** 审核已经结束的工作流，要先用 `cdg dag review clear{:sh}` 清除审核记录，才能再次提交，见[清除审核记录与重新提交](/zh/docs/reference/cli/review#clear-and-resubmit)。
+4. **已经登录 CodeDAG 账号。** 还没登录时，命令会先让你[登录](/zh/docs/account/login-and-account#sign-in)，登录完成后接着提交。
+5. **CodeDAG 额度够用。** 账号剩余的额度要够运行这次提交的全部任务；额度不足或没有有效的订阅时，提交会被拒绝。
+
+提交被拒绝时，按输出中的提示在故障排除的[提交被拒绝](/zh/docs/troubleshooting/troubleshooting#submit-rejected)一节里找到对应的处理方法。
+
+<Callout type="info">
+提交时只检查额度够不够，既不扣除，也不为这个工作流预留。额度在工作流排到队首、真正开始执行之前扣除，每个任务 1 点，见[什么时候扣除额度](/zh/docs/account/credits-and-subscription#when-charged)。
+</Callout>
+
+### 提交后提示工作区有未提交的改动 [#dirty-workspace]
+
+提交输出的末尾出现一段黄色提示，第一行是 `The workflow is on hold because the target workspace has uncommitted changes.`，说明工作流已经进入队列，但第一个要用的工作区（默认是主仓库）不干净：任务无法开始，停在 `on-hold`，原因是 `workspace-dirty`。在默认的隔离分支模式下，CodeDAG 要在工作区里切换到任务分支、提交任务的改动，所以每个任务开始前都要求它的工作区里没有未提交的改动，未跟踪的新文件也算。
+
+工作流不需要重新提交。在那个工作区里把改动提交、暂存（例如 `git stash -u`）或丢弃，然后运行 `cdg dag recover api-docs{:sh}`，任务会重新准备并开始。不想为这个任务清理工作区时，也可以直接结束它，做法见[工作区有未提交的改动或未完成的 Git 操作](/zh/docs/troubleshooting/troubleshooting#hold-workspace)。
+
+## 想在提交的终端里跟着看：`--attach` [#attach]
+
+想从头看着一个工作流跑完时，提交时加上 `--attach`，当前终端会接着显示这个工作流的日志，直到它结束。提交之后就要离开，或者要同时关注几个工作流时，直接提交，之后随时用后面几节的命令查看。
+
+```bash title="Terminal"
+cdg dag submit api-docs --attach
+```
+
+日志的内容与 `cdg dag logs -f{:sh}` 相同，读法见[日志](#logs)。工作流排在后面时，要等轮到它开始执行，日志才会出现；它中途停在 `on-hold` 时，跟随也随之结束，终端会给出提示。
+
+跟随期间有两个按键，作用差别很大。Ctrl+C 只让这个终端不再跟随，工作流在后台照常执行，之后想重新跟上，运行 `cdg dag logs api-docs -f{:sh}`。`Ctrl+\` 则会中断整个工作流，效果与 `cdg dag kill{:sh}` 相同，之后要用 `cdg dag recover{:sh}` 让它继续，见[想立刻停下](/zh/docs/guides/intervene-and-control#kill)。
+
+跟随的日志是只读的，你在这个终端里输入的内容不会传给任务 Agent。想看 Agent 自己的界面、和它对话或应答审批，另开一个终端运行 `cdg task view{:sh}`，见[进入会话、修改与退出](/zh/docs/guides/intervene-and-control#task-view)。
+
+跟随期间唯一需要你输入的是审核。某个任务或整个工作流设了人工审核时，轮到它等你审核，终端会停下日志，显示 `Task 1 is ready for review (done).` 这样的提示和可选的审核动作，你可以当场给出结论。在菜单里按 Esc 表示这次不审核：跟随就此结束，任务或工作流仍停在那里等你，之后用 `cdg task review{:sh}` 或 `cdg dag review{:sh}` 给出结论，见[审核任务与工作流](/zh/docs/guides/review-tasks)。
+
+## 想知道现在怎么了：三个层级的 status [#status]
+
+`cdg status{:sh}` 看整个项目的队列，`cdg dag status <工作流>{:sh}` 看一个工作流里的每个任务，`cdg task status <任务 ID> -w <工作流>{:sh}` 看单个任务的细节。排查时从上往下看：先找到停下的工作流，再找到停下的任务，最后看它为什么停下。`cdg dag status{:sh}` 省略工作流、`cdg task status{:sh}` 省略 `-w` 时，指的都是队列中排在第一位的工作流。
+
+下面的例子里，工作流 `api-docs` 提交之后迟迟没有开始执行，三条命令从上往下，逐步找到了原因：
+
+```bash title="Terminal"
+$ cdg status
+[TZ: -04:00] 2026-09-30 10:53:37
+
+Planning Workflows (1):
+  📝 .codedag/dags/release-notes.yaml
+
+Submitted Workflows (1):
+  #1   🔘 [pending]     [on-hold]  .codedag/dags/api-docs.yaml
+
+$ cdg dag status api-docs
+[TZ: -04:00] 2026-09-30 10:53:38
+
+Workflow: .codedag/dags/api-docs.yaml
+  Phase: 📤 submitted
+  Queue Position: 1
+  Status: 🔘 pending
+  Substatus: on-hold
+  Docs: https://codedag.com/docs/troubleshooting/troubleshooting#on-hold
+  Integration Workspace: /Users/you/my-app
+  Integration Branch: cdg/api-docs/integration
+  Base Commit: ae07d384aa41aa5aaa2041af5bfd529f8584f461
+
+Submitted Tasks (2):
+  🔘 [pending]     [on-hold]  Task 1: 整理接口清单
+  🔘 [pending]     [blocked]  Task 2: 编写接口文档
+
+Progress: 0/2 tasks completed (0%)
+
+$ cdg task status 1 -w api-docs
+[TZ: -04:00] 2026-09-30 10:53:38
+
+Task 1 in .codedag/dags/api-docs.yaml
+Title: 整理接口清单
+Phase: 📤 submitted
+Status: 🔘 pending
+Substatus: on-hold
+Reason: workspace-dirty
+Diagnostic: Task workspace has uncommitted changes: ?? notes.txt
+Docs: https://codedag.com/docs/troubleshooting/troubleshooting#hold-workspace
+Workspace: /Users/you/my-app
+Branch: cdg/api-docs/t1-整理接口清单
+```
+
+`cdg status{:sh}` 只说明排在队首的 `api-docs` 处于 `[pending] [on-hold]`，也就是被搁置了；`cdg dag status{:sh}` 显示被搁置的是任务 1，任务 2 在等它；`cdg task status{:sh}` 才给出原因 `workspace-dirty`：分配给任务 1 的工作区里有未提交的改动，`Diagnostic:` 一行列出了是哪些文件，处理方法见[提交后提示工作区有未提交的改动](#dirty-workspace)。
+
+任务被搁置的原因只在 `cdg task status{:sh}` 里显示，而且一次只写一个任务 ID 时才显示。工作流本身被搁置时，例如轮到它开始执行时 CodeDAG 额度不足，原因会直接出现在 `cdg status{:sh}` 那一行末尾的括号里，以及 `cdg dag status{:sh}` 的 `Reason:` 行。
+
+各种状态与子状态的组合表示什么，见[状态含义](/zh/docs/reference/states)；哪些情况只需要等、哪些需要你动手，见其中的[需要处理时](/zh/docs/reference/states#what-to-do)。
+
+三个命令都可以加 `--watch`，每秒刷新一次，直到所看的工作流或任务都审核结束，各自的结束条件见[持续刷新状态](/zh/docs/reference/cli/status-and-logs#watch)。
+
+## 想看任务在做什么：日志 [#logs]
+
+`cdg dag logs <工作流>{:sh}` 按任务分段显示整个工作流的日志，加 `-f` 持续跟随，加 `-n` 只看末尾几行；只关心一个任务时，用 `cdg task logs <任务 ID> -w <工作流>{:sh}`。
+
+```bash title="Terminal"
+# 按任务分段，显示整个工作流的全部日志
+cdg dag logs api-docs
+
+# 先显示最后 50 行，再持续跟随新的日志
+cdg dag logs api-docs -n 50 -f
+
+# 只看任务 2 的最后 50 行
+cdg task logs 2 -w api-docs -n 50
+```
+
+加上 `-f` 之后，几个任务的日志按时间先后交错显示，工作流审核结束、离开队列时跟随自动结束。日志往往很长，想了解近况时，先用 `-n` 看末尾的几十行更快。省略工作流时显示队首的工作流；工作流审核结束之后，仍然可以指定名字查看它的日志。
+
+日志记录的是任务 Agent 在终端界面上的输出：它的回复、调用的工具、执行的命令和命令的结果，CodeDAG 另外在每个任务开始和结束时各写一行 `START:` 与 `END:`。因为是从终端界面逐行记录下来的，日志里还夹杂着 Agent 界面上的动画、计时和状态栏刷新留下的残片，读起来不如在 Agent 里直接看整洁。Agent 一次性输出的文字，例如它的回复正文、权限询问、命令与文件名，在日志里保留了词间空格，可以按完整的短语搜索。
+
+日志文件保存在主仓库的 `.codedag/local/logs/` 下，路径与工作流文件相对 `.codedag/dags/` 的路径相同，扩展名换成 `.log`；同一个工作流再次执行时，新的日志接在同一个文件后面。文件的查看与清理见[日志文件位置](/zh/docs/reference/branches-and-files#log-files)。
+
+日志是只读的记录，在任何终端、脚本或 Agent 的命令工具里都能读，读它不会影响任务，平时观察用它就够了。想看 Agent 自己的界面、和它对话或应答审批时，再用 `cdg task view{:sh}` 进入会话，两者怎样选见[选择观察与修改方式](/zh/docs/guides/intervene-and-control#choose-intervention)。
+
+## 怎样判断它是不是卡住了 [#is-it-stuck]
+
+任务一直是 `working`、日志很久看不到有意义的新内容，不一定是卡住了。任务 Agent 派出子 Agent 在后台工作，或者在运行一条耗时很长的命令时，主会话可能很长时间只有计时和状态栏在变；CodeDAG 也没有任务超时，不会因为一个任务运行得久就中断它。所以是否介入要由你判断，一般连续十分钟以上看不到任何进展，再动手排查。
+
+最需要留意的是任务 Agent 在等你的情况：它在等你批准一个操作或回答一个问题，无人应答时会一直等下去，而任务的状态仍显示为 `working`，只有日志的末尾停在 Agent 的确认界面或提问上，时间不再更新。例如：
+
+```bash title="Terminal"
+$ cdg task status 1 -w api-docs
+[TZ: -04:00] 2026-09-30 11:01:53
+
+Task 1 in .codedag/dags/api-docs.yaml
+Title: 整理接口清单
+Phase: 📤 submitted
+Status: 🟢 in-progress
+Substatus: working
+
+$ cdg task logs 1 -w api-docs -n 12
+[Task   1] [2026-09-30 10:59:14] ──────────────────────────────────────────────────────────────────────────────────────────
+[Task   1] [2026-09-30 10:59:14]  Create file
+[Task   1] [2026-09-30 10:59:14]  docs/api/endpoints.md
+[Task   1] [2026-09-30 10:59:14] ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+[Task   1] [2026-09-30 10:59:14]   1 暂无接口
+[Task   1] [2026-09-30 10:59:14] ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+[Task   1] [2026-09-30 10:59:14]  Do you want to create endpoints.md?
+[Task   1] [2026-09-30 10:59:14]  ❯ 1. Yes
+[Task   1] [2026-09-30 10:59:14]    2. Yes, and switch to accept edits (auto-approve file edits and common file commands)
+[Task   1] [2026-09-30 10:59:14]       for this session (shift+tab)
+[Task   1] [2026-09-30 10:59:14]    3. No
+[Task   1] [2026-09-30 10:59:14]  Esc to cancel · Tab to amend
+```
+
+这里任务 1 的状态是 `working`，日志却停在两分多钟之前，末尾是 Claude Code 询问是否创建 `endpoints.md` 的界面：它在等人批准。用 `cdg task view{:sh}` 进入会话作出选择即可，做法见[想应答一个审批](/zh/docs/guides/intervene-and-control#approval)。完整的排查步骤，以及确认卡住之后怎样中断并在原会话里接着做，见[任务长时间没有新输出](/zh/docs/troubleshooting/troubleshooting#no-output)。
+
+## 相关
+
+- [干预与控制](/zh/docs/guides/intervene-and-control)：暂停、中断和恢复任务，进入会话纠正方向或应答审批。
+- [状态含义](/zh/docs/reference/states)：阶段、状态、子状态与审核结果各表示什么，看到它们时该等待还是处理。
+- [查看状态与日志](/zh/docs/reference/cli/status-and-logs)：状态与日志命令的全部参数和写法。

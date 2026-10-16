@@ -1,0 +1,191 @@
+---
+title: Mix Claude Code and Codex
+description: Have Claude Code and Codex divide the work or check each other in one workflow, and learn which configuration to watch when you mix them.
+icon: Blend
+---
+
+Every task in a workflow can use the `agent` field to say whether Claude Code or Codex runs it. One workflow can therefore split the work between the two agents, or have one check the other's results. This page assumes that both are installed on your computer and working.
+
+## Why mix agents [#why]
+
+The two agents' models don't judge things the same way, and when they look at the same code, they tend to miss different problems. Having one check the other's results, or having both do the same work and comparing, catches problems you'd miss with only one. A task that one agent does poorly or refuses to do can also go to the other. Their usage limits are counted separately too, so when one hits its limit, tasks assigned to the other can keep going. See [The two usage limits are independent](#usage-limits).
+
+## Three ways to divide the work [#patterns]
+
+There are three common ways to divide the work, and they differ in the role the second agent plays. It can check and fix the other's results, do the same work alongside the other, or just take the tasks it's better suited to. The first two are for cross-checking, and the third is for playing to each agent's strengths.
+
+Each example below is a complete workflow file that you can save to `.codedag/dags/` and run as is. To keep the focus on the division of work, the prompts are short. For real use, you can flesh them out with [the structure in Design Tasks and Prompts](/docs/guides/designing-tasks-and-prompts#prompt-structure).
+
+### One agent does the work, the other checks and fixes it [#review-and-fix]
+
+The most common pattern is to have one agent complete a task, give the next task to the other agent to review and fix the result, and hand it back to the first for a recheck if needed. Every check is done by the agent that didn't write the code in the previous step. In the workflow below, Codex refactors an overly long function, Claude Code reviews and fixes the refactoring, and Codex then rechecks Claude Code's fixes:
+
+```yaml title=".codedag/dags/refactor-review.yaml"
+tasks:
+  - id: 1
+    title: Refactor an overly long function
+    agent: codex
+    mode: yolo
+    prompt: |
+      Find the longest, hardest-to-read function in the project and refactor it without changing its behavior: first add tests that cover its current behavior, then refactor, and finally run the tests to confirm they all pass.
+      Record which function you chose, why you chose it, and what you changed in docs/reviews/refactor.md.
+
+  - id: 2
+    title: Review and fix the refactoring
+    dependencies: [1]
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      The previous task refactored a function and described the work in docs/reviews/refactor.md.
+      Run git diff main...HEAD to see all of its changes. Check whether the refactoring changed the original behavior, whether the new tests would catch a change in behavior, and whether the code really is easier to read.
+      Fix the problems you confirm are real, and run the tests to confirm they all pass. Append the problems you found and how you handled them to docs/reviews/refactor.md, in a section titled "Review and fixes".
+
+  - id: 3
+    title: Recheck the fixes
+    dependencies: [2]
+    agent: codex
+    mode: yolo
+    prompt: |
+      Read the "Review and fixes" section of docs/reviews/refactor.md. It's another agent's review of this refactoring, along with the fixes it made.
+      Run git diff main...HEAD to see all the changes so far. Go through the fixes one by one and confirm that each is correct and complete and introduces no new problems. Correct any fix that isn't right.
+      Run the tests to confirm they all pass, and append your conclusions to the same file, in a section titled "Recheck".
+```
+
+The three tasks run one after another in the default isolated-branches mode, so the workflow runs even when the primary repository is your only workspace. Before a downstream task starts, the upstream changes have already been merged into its branch as commits, so a review task can run `git diff main...HEAD` to see every change made since the workflow started. If the workflow didn't start from `main`, replace `main` with the branch it started on.
+
+The review findings and how they were handled all go into `docs/reviews/refactor.md`, and the next agent reads the previous one's conclusions from that file (see [Pass conclusions downstream](/docs/guides/designing-tasks-and-prompts#pass-results)). A task should write down its conclusion even when it finds no problems, because otherwise the downstream task has no way of knowing. Also, in isolated-branches mode, a task that leaves no changes at all [isn't auto-accepted](/docs/concepts/review-gates#zero-output) and stops to wait for your review.
+
+On top of the tasks that do the work, this pattern adds only the tasks that check it, which makes it the cheapest way to cross-check. It suits work that should be checked as soon as it's written, such as implementing features, fixing bugs, and refactoring. Its limitation is that the reviewer fixes whatever it decides is a problem as it goes, and that can include "fixing" problems that aren't real. The next agent's recheck is there to catch changes like that. If you want the other agent to judge each problem before anything is changed, split checking and fixing into two tasks. The checking task only lists the problems and doesn't change code. The fixing task goes to the other agent, which decides whether each problem is real and fixes only the ones that are. When there are more stages to check, keep alternating down the chain.
+
+Alternating checks still don't replace your own final sign-off. CodeDAG considers a task complete when its agent stops working, and it doesn't read what a check concluded. Even if the recheck task can't get things fixed and gives up in the end, it becomes `done` and, by default, is auto-accepted right away (see [Verification tasks](/docs/concepts/review-gates#verification-task)). To look at the result yourself before it's handed off, set `autoAccepted: none` on the last task. For how to review, see [Review Tasks and Workflows](/docs/guides/review-tasks).
+
+### Both agents do the work, then a task synthesizes the results [#dual-path]
+
+When you want to miss as little as possible, have both agents do the same work without seeing each other's output, and then have a task that depends on both verify, deduplicate, and merge the results. In the workflow below, each agent reviews the most recent commit on its own, and a final task synthesizes the two reviews into one list of issues. To use it for your own reviews, replace the review scope with the commit range or directory you want reviewed:
+
+```yaml title=".codedag/dags/cross-review.yaml"
+executionMode: shared-workspace   # All three tasks only write report files, so they don't need branches
+maxConcurrency: 2                 # Let the two reviews run at the same time
+
+tasks:
+  - id: 1
+    title: Review the latest commit (Claude Code)
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      Review the changes introduced by the most recent commit (use git show HEAD to see them). Look for bugs, missed edge cases, and code that's hard to maintain.
+      For each issue, state its location, the cause, and a suggested fix, and write the issues to docs/reviews/review-claude.md (overwrite the file if it already exists).
+      Do the review independently, and don't read any other files under docs/reviews/. Only read the code. Don't run tests, and don't modify any other existing files.
+
+  - id: 2
+    title: Review the latest commit (Codex)
+    agent: codex
+    mode: yolo
+    prompt: |
+      Review the changes introduced by the most recent commit (use git show HEAD to see them). Look for bugs, missed edge cases, and code that's hard to maintain.
+      For each issue, state its location, the cause, and a suggested fix, and write the issues to docs/reviews/review-codex.md (overwrite the file if it already exists).
+      Do the review independently, and don't read any other files under docs/reviews/. Only read the code. Don't run tests, and don't modify any other existing files.
+
+  - id: 3
+    title: Synthesize the two reviews
+    dependencies: [1, 2]
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      docs/reviews/review-claude.md and docs/reviews/review-codex.md are two agents' independent reviews of the same commit.
+      Check each issue against the code. Merge duplicate issues, remove issues that aren't real, and keep the findings that only one review has.
+      Write the result to docs/reviews/review.md, and note for each issue which review it came from, or that both raised it. Write only this one file (overwrite it if it already exists).
+```
+
+The two review tasks' prompts differ only in the output path. Each writes to its own file so that the two paths' results don't overwrite each other. The synthesis task doesn't just put the two lists together. It also checks each issue against the code, because either agent can report issues that aren't real. Either agent can run this task. Pick the one you trust more, and use `model` to give it a stronger model if needed.
+
+This example uses [shared-workspace mode](/docs/concepts/workspaces-and-branches#execution-modes). All three tasks only write report files, so they have no use for branches or commits. The two reviews can also run at the same time without replicas. In this mode, the number of tasks that run at once is determined by `maxConcurrency` alone, and the default in project settings is 1 when there are no replicas, so the workflow sets it to 2. When you submit, CodeDAG prints `Non-isolated concurrency mode.` to remind you that writes from tasks running at the same time are no longer isolated from one another. Here each path writes its own file, so that isn't a problem. The two paths work in the same directory and can see the files the other is writing. That's why the prompts tell them not to read the other files under `docs/reviews/`, which keeps them independent, and not to run tests, so that the two sides' builds and tests don't interfere with each other in the same directory.
+
+When both paths need to change code, use the default isolated-branches mode instead. Each path works on its own branch, so neither can see the other in the first place, and before the synthesis task starts, both paths' changes are merged into its branch. For the two paths to run at the same time, you need at least two workspaces. To set them up, see [Run in Parallel with Workspaces](/docs/guides/parallel-workspaces).
+
+The same work gets done twice, so this pattern suits situations where missing a problem is costly, such as an important review before a merge, a security check, or root-cause analysis of a hard bug. You can also have each agent write its own version of a plan and let the synthesis task compare the two, then pick the better one or combine them into one.
+
+### Assign by what each task needs [#by-task]
+
+When you don't need cross-checking, mixing can simply mean giving each task to the agent that suits it better. In the workflow below, Claude Code writes a plan, Codex implements it, and Claude Code writes the change description. This particular assignment is only an illustration:
+
+```yaml title=".codedag/dags/todo-fix.yaml"
+tasks:
+  - id: 1
+    title: Write a plan
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      Find the TODO in the project (a TODO or FIXME comment) that's most worth handling and still small in scope. If you can't find one, pick a very small improvement instead.
+      Write a plan to docs/plans/todo.md: what to change, which files are involved, and how to verify it. Write only the plan, and don't change any code.
+
+  - id: 2
+    title: Implement the plan
+    dependencies: [1]
+    agent: codex
+    mode: yolo
+    prompt: |
+      Following docs/plans/todo.md, write a minimal test first, then implement, and run the tests to confirm they all pass. Don't modify the plan file.
+
+  - id: 3
+    title: Write the change description
+    dependencies: [2]
+    agent: claude
+    mode: bypassPermissions
+    prompt: |
+      Run git diff main...HEAD to see all the changes from this run, and compare them with docs/plans/todo.md.
+      Write a change description for code reviewers to docs/plans/todo-pr.md: what changed, why it was changed this way, and how to verify it.
+```
+
+Base the choice of agent for each task on your own project, not on fixed rules. Common considerations include:
+
+- **Configuration.** Skills and MCP servers are configured separately for each agent. When a skill or MCP server that a task needs is set up for only one of them, give the task to that one.
+- **Reliability.** Consider which agent handles a given kind of task more reliably in your codebase. To find out, give the same task to each of them once and compare.
+- **Refusals and getting stuck.** When one agent refuses a task or keeps getting it wrong, give it to the other. For example, content in a security review that describes attack paths may be blocked by one agent's safety policy.
+- **Usage.** Give more tasks to whichever agent has more of its usage limit left.
+
+When you move a task to the other agent, `agent` isn't the only thing to change. `mode` has to be rewritten in that agent's syntax as well. See [Set `agent` and `mode` on every task](#agent-and-mode).
+
+## Set `agent` and `mode` on every task [#agent-and-mode]
+
+In a workflow that mixes agents, set both `agent` and `mode` on every task, so that the file itself states who runs each task and at what access level. The two agents use different `mode` syntax, and validation checks `mode` against the agent the task actually uses, so one agent's syntax fails on the other's task. For example, if you set `bypassPermissions` on a Codex task, validation reports `Invalid codex mode 'bypassPermissions'` and lists the shorthands and keys that Codex accepts. Only two shorthands are accepted by both. `yolo` means full access for both, and `auto` hands approvals to the agent's own automatic review for both, except that Claude Code's `auto` still stops and asks for your approval in a few cases. For each agent's syntax and which level to choose for unattended runs, see [Modes for Claude Code](/docs/guides/agents-and-permission-modes#claude-code) and [Modes for Codex](/docs/guides/agents-and-permission-modes#codex).
+
+A task that sets `mode` but not `agent` goes to the project's default agent, so on a machine with a different default agent, the other agent runs it. Unless the `mode` is `yolo` or `auto`, the two shorthands that both agents accept, it also no longer passes validation there.
+
+## Before you mix agents [#prerequisites]
+
+Confirm two things before you mix agents: the project isn't restricted to a single agent, and both agents can read the same set of project rules.
+
+By default, a project doesn't restrict which agents you can use. An agent that you installed only after initialization can go into tasks and `mergeConflictAgent` without any change to the settings. The available agents are restricted only when project settings define `availableAgents`, which means you or your team set the restriction on purpose. When a workflow uses an agent that the field excludes, validation reports an error and tells you which file the field is in. Add the agent you want to `availableAgents` in that file as the message says, or delete the whole field if you no longer need the restriction. See [`availableAgents`](/docs/reference/settings#available-agents) in Project Settings.
+
+Second, the two agents read different project rule files. Codex reads `AGENTS.md`. Claude Code goes by `CLAUDE.md`, and when a project has a `CLAUDE.md`, it doesn't read `AGENTS.md` directly. To have both follow the same rules, a common approach is to write the rules in `AGENTS.md` and import that file from `CLAUDE.md` with `@AGENTS.md`. For details, see Claude Code's [memory documentation](https://code.claude.com/docs/en/memory#agents-md) and Codex's [AGENTS.md documentation](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
+
+## Who resolves merge conflicts [#merge-conflicts]
+
+In isolated-branches mode, if several parallel paths have all changed code, their changes can conflict when they're merged, and CodeDAG starts a separate agent session to resolve the conflict (see [Merges and conflicts at join nodes](/docs/concepts/workspaces-and-branches#merge-and-conflicts)). When you don't set `mergeConflictAgent`, which agent resolves a conflict depends on where it occurs:
+
+- **When upstream results are merged before a join task starts**, the join task's own agent resolves the conflict, using the task's `model`. For example, if a Codex task depends on one Claude Code task and one Codex task, Codex resolves the conflict between the two paths.
+- **When all tasks have finished and the results are merged into the integration branch**, the project's default agent resolves the conflict. That's the default agent in effect when the workflow was submitted.
+
+So in a workflow that mixes agents, different agents may end up resolving conflicts, and not necessarily the one you'd want. To send every merge conflict to one agent, set `mergeConflictAgent` at the top level of the workflow file:
+
+```yaml title="yaml"
+mergeConflictAgent:    # Hand every merge conflict to Codex
+  agent: codex
+```
+
+With this set, that agent resolves conflicts in both places, and the `model` comes from `mergeConflictAgent` too, not from the task. You don't need to set `mode`. The conflict session doesn't follow the task's `mode`, and when `mode` is omitted it always runs with full access, so it never stops to wait for a person anyway. There's no way to respond to an approval request in that session, so setting a level that asks for your approval would only leave it stuck on an approval. For the full description of the field, see [`mergeConflictAgent`](/docs/reference/workflow-file#merge-conflict-agent).
+
+## The two usage limits are independent [#usage-limits]
+
+Claude Code and Codex each count usage against their own limit, so when one hits its limit, only the tasks assigned to it are affected. A task that hits the limit stops at `on-hold`, and tasks for the same agent that start afterward soon stop too. Tasks assigned to the other agent run as usual, as long as they don't depend on a stopped task.
+
+So when you split parallel paths between the two agents and one hits its limit, the other agent's path can keep running. In a chain that alternates between the two, though, once one agent stops, every later task has to wait until the stopped task is recovered, no matter which agent it's assigned to. For how to stop only the affected tasks after you hit a limit and recover them once the limit resets, see [Agent usage limits or rate limits](/docs/troubleshooting/troubleshooting#agent-usage-limits). For how to plan usage together with concurrency, see [Concurrency and usage limits](/docs/account/cost-control#concurrency).
+
+The limits discussed here are the usage limits on each agent's own account, and they have nothing to do with CodeDAG credits. Whichever agent a task goes to, it uses CodeDAG credits at 1 credit per task.
+
+## Related
+
+- [Choose Agents, Models, and Permission Modes](/docs/guides/agents-and-permission-modes): Choose an access level for each task, and see how modes are written for Claude Code and for Codex.
+- [Review Tasks and Workflows](/docs/guides/review-tasks): Look at the results yourself after the cross-checks, then accept them or request changes.
+- [Control Cost](/docs/account/cost-control): Estimate a workflow's CodeDAG credits and agent usage, and choose a model per task.

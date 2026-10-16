@@ -1,0 +1,15 @@
+{
+  "$schema": "../../.source/json-schema/docs.meta.json",
+  "title": "CodeDAG ドキュメント",
+  "root": true,
+  "pages": [
+    "introduction",
+    "get-started",
+    "concepts",
+    "guides",
+    "account",
+    "reference",
+    "troubleshooting",
+    "release-notes"
+  ]
+}

@@ -1,0 +1,167 @@
+---
+title: Finish, Merge, and Clean Up
+description: After a workflow has been reviewed, check the results on the integration branch, merge into the main branch, run the workflow again, and clean up the branches and workspaces left behind.
+icon: GitMerge
+---
+
+Once a workflow has been reviewed and is in `reviewed`, CodeDAG's part of the work is done. In the default isolated-branches mode, the results that passed review are all on the local integration branch `cdg/<workflow-name>/integration`. Your main branch hasn't been changed, and nothing has been pushed to a remote repository. Checking the results, merging into the main branch, and cleaning up the extra branches are all yours to do with Git. Shared-workspace mode has none of these branches. See [Finish in shared-workspace mode](#shared-workspace).
+
+## Check the results on the integration branch [#inspect]
+
+The integration branch `cdg/<workflow-name>/integration` brings together every task result that was accepted in this run. It was created from this workflow's base, so comparing it with `main` shows all the changes the workflow made. For how the branches relate to one another, see [Task branches, the integration branch, and the base](/docs/concepts/workspaces-and-branches#branches).
+
+```bash title="Terminal"
+git log --oneline --no-merges main..cdg/<workflow-name>/integration
+git diff --stat main...cdg/<workflow-name>/integration
+```
+
+The first command lists the commits the tasks left. `--no-merges` leaves out the merge commits that CodeDAG created when it merged the task branches. When CodeDAG accepts a task, it commits the task's changes to its task branch, and the commit message defaults to the task title, so you can match each commit to the task that made it. Here's the output for `add-notes`, a workflow with three tasks:
+
+```bash title="Terminal"
+569eb2f Build notes index
+a251a6a Write beta note
+483711d Write alpha note
+```
+
+CodeDAG doesn't look at whether tests pass, either when it determines that a task is finished or when it auto-accepts a result, so confirming that the changes are correct is up to you. Before you merge, read through the changes, then run your project's tests on the integration branch. If the primary repository took part in the run, it's left on the integration branch when the workflow finishes, so you can read the code and run the tests right there.
+
+When a workflow sets `dagAutoAccepted: none` and has stopped to wait for your decision, the integration branch already holds the merged results. You can check them with the same commands first and then [review the whole workflow](/docs/guides/review-tasks#dag-review).
+
+## Merge into the main branch [#merge]
+
+When and how to merge is your decision, and you do it yourself. You can push to the remote and open a pull request, merge locally, or take the results of only a few tasks. CodeDAG itself never pushes to your remote repository or pulls from it.
+
+On a team, you'd usually create a new branch from the integration branch, named according to your team's conventions, then push it and open a pull request:
+
+```bash title="Terminal"
+git checkout -b <your-branch-name> cdg/<workflow-name>/integration
+git push -u origin <your-branch-name>
+```
+
+If the workflow started from a feature branch you already had, switch back to that branch instead, merge the integration branch into it, and then push. You can also push the integration branch as is, but its name comes from the workflow name, so a teammate who runs the same workflow gets a branch with the same name, and the two collide when they're pushed to the same remote.
+
+If you don't need code review, as in a personal project, you can merge locally. Switch back to `main`, then merge the integration branch:
+
+```bash title="Terminal"
+git checkout main
+git merge cdg/<workflow-name>/integration
+```
+
+CodeDAG takes no part in this merge. If `main` got new commits while the workflow was running and the merge conflicts as a result, resolve the conflicts the way you normally would.
+
+### Take the results of only a few tasks [#pick-tasks]
+
+Each task's result is still on its own task branch, named like `cdg/<workflow-name>/t<task-id>-<title>`, so you can also skip the integration branch and merge only a few of the tasks into `main`:
+
+```bash title="Terminal"
+git branch --list 'cdg/<workflow-name>/*'
+git merge cdg/<workflow-name>/t<task-id>-<title>
+```
+
+Watch the dependencies when you merge. CodeDAG merged the upstream results into a downstream task's branch before that task started, so merging that branch brings the upstream results along with it. If you want only that task's own changes, use `git cherry-pick` to pick out its own commit instead. That's usually the commit whose message is the task's title.
+
+Two more cases need separate handling. For a task that was canceled or deferred, the changes were saved by default to a snapshot branch whose name starts with `cdg/<workflow-name>/snapshots/`, and the task branch has been rolled back to its state before the task began. For how to restore the changes, see [Restore some of the changes from a snapshot](/docs/reference/branches-and-files#restore-from-snapshot). And when your replicas are clones, the branch of a task that ran in a clone exists only in that clone, not in the primary repository. Fetch it from that clone when you need it.
+
+## Where the repository is left after a workflow finishes [#where-repo-stays]
+
+After a workflow finishes, CodeDAG doesn't switch the workspaces back to the branches they were on. If the primary repository took part in the run, it's left on the workflow's integration branch, and each replica is left on the branch of the last task it ran. Your `main` hasn't changed. To get back to it, run `git checkout main` yourself. For why it works this way, see [Task branches, the integration branch, and the base](/docs/concepts/workspaces-and-branches#branches).
+
+Where you leave the primary repository also determines where the next workflow starts. A workflow that doesn't set `baseRef` takes as its base the commit that's checked out in the primary repository when the workflow starts running. If the primary repository is still on the integration branch, the next workflow builds on this run's results. If you've switched back to `main`, it starts from `main`. To make the base independent of whichever branch the primary repository happens to be on at the time, set [`baseRef`](/docs/reference/workflow-file#base-ref) in the workflow file, for example `baseRef: main`.
+
+To keep the primary repository from being switched during the run as well, set `excludeWorkspaces: ["."]` in the workflow file so that tasks run only in replicas. The primary repository's branch then stays as it is the whole time. See [Keep developing while a workflow runs](/docs/guides/parallel-workspaces#keep-main-repo).
+
+## Run the workflow again [#run-again]
+
+A workflow that has already been reviewed can't be submitted again as is. `cdg dag submit{:sh}` tells you that it's in the `reviewed` phase. Clear its review first, which returns it to `planning`, and then submit it:
+
+```bash title="Terminal"
+cdg dag review clear <workflow-name>
+cdg dag submit <workflow-name>
+```
+
+Resubmitting starts a new run. The run uses the workflow file as it is at the moment you submit, and when it starts running, it uses CodeDAG credits again, based on the number of tasks. For the charging rules, see [When credits are charged](/docs/account/credits-and-subscription#when-charged). You can't clear the review of a workflow that's still in the queue. Give it a workflow-level review decision first. For the steps, see [Modify a submitted workflow](/docs/reference/cli/validate-and-submit#modify-submitted).
+
+Before you submit, check where the new run will start. Without `baseRef`, it starts from the commit that's checked out in the primary repository at that moment. If the primary repository is still on the previous run's integration branch, or you've already merged the previous results into `main`, the new run builds on the previous results either way, and the tasks work on code that has already been changed. To redo the work from the original code, run `git checkout main` before you merge, or set `baseRef: main` in the workflow file.
+
+If the branches from the previous run still exist, the new run's branch names include the time the run started so that the names don't collide, as in `cdg/add-notes-20260930-105924/integration`. The workflow's name doesn't change, and you still write `add-notes` in commands. A branch name that a task sets with [`branchName`](/docs/reference/workflow-file#tasks-branch-name) isn't changed automatically. If the old branch with that name still exists, the task stops at `on-hold`. For what to do, see [Branch problems](/docs/troubleshooting/troubleshooting#hold-branch).
+
+### Submit under a different file name [#new-file-name]
+
+When a workflow runs over and over, for example when a scheduled job submits it once a day, you can also skip clearing the review. Each time, make a copy of the workflow file, add a suffix to the file name, and submit the new file.
+
+```bash title="Terminal"
+cp .codedag/dags/add-notes.yaml .codedag/dags/add-notes-20261010.yaml
+cdg dag submit add-notes-20261010
+```
+
+A workflow's name comes from its file name, so the new file is a different workflow. You can submit it before the previous run's review is finished, and if the previous run is still in the queue, the new one waits behind it. The records of each run are kept separately too. You can still check the status and review results of earlier runs with `cdg dag status <workflow-name>{:sh}`, this run's branches are all under `cdg/add-notes-20261010/`, and its logs are written to its own file. The cost is one more workflow file, one more set of branches, and one more log file for every run. For how to clean up the branches and logs, see [Clean up branches and workspaces](#cleanup).
+
+The rules for the base and for charging are the same as when you clear the review and resubmit. If a task sets `branchName`, the new file still has the same branch name, and the task likewise stops at `on-hold` if the old branch still exists.
+
+### Run only a few of the tasks [#continue-remaining]
+
+Resubmitting always runs the whole workflow. When you only need to run a few tasks that were left undone, or redo a few, write them into a new workflow file and submit it separately. It uses credits for those few tasks only, which costs less than running the whole workflow again.
+
+The new workflow has to start from the results that were already accepted. Without `baseRef`, it builds on those results as long as the primary repository is still on the previous workflow's integration branch, or you've merged the results into `main` and switched back to it. You can also say so explicitly with `baseRef: cdg/<workflow-name>/integration`. The original upstream tasks aren't in the new workflow, so you can't list them in `dependencies`. Their results are already in the base, so just name the files to read in the prompt.
+
+If the workflow is still running but has become hard to continue partway through, first keep the results that are already done by following the steps in [A workflow is partway through and hard to continue](/docs/troubleshooting/troubleshooting#start-over). Then carry on in the same way.
+
+## Clean up branches and workspaces [#cleanup]
+
+Once a workflow has been reviewed and the results you need have been merged, you can clean up the branches and logs it left behind, along with any replicas you no longer use. Clean up only workflows whose review is finished. For a workflow that's still in the queue or waiting for review, CodeDAG still has merging and reviewing to do on its branches, and deleting them disrupts it. For example, if the integration branch is deleted, the workflow stops at `on-hold`.
+
+### Delete branches
+
+All the branches a workflow leaves behind start with `cdg/<workflow-name>/`. They include the task branches, the integration branch, and the snapshot branches under `cdg/<workflow-name>/snapshots/`. Git doesn't let you delete a branch that's checked out in a workspace, and after a workflow finishes, the primary repository is on the integration branch and each worktree replica is on the branch of the last task it ran. So move them off these branches first. Otherwise, the deletion fails with a `cannot delete branch ... used by worktree` error:
+
+```bash title="Terminal"
+git checkout main
+# Run once for each worktree replica
+git -C ../<project-name>-wt-1 checkout --detach
+```
+
+Then list the workflow's branches and, once you've confirmed the list, delete them all together:
+
+```bash title="Terminal"
+git branch --list 'cdg/<workflow-name>/*'
+git branch --list 'cdg/<workflow-name>/*' --format='%(refname:short)' | xargs git branch -D
+```
+
+A workflow that has been run again also has the set of branches with the time in their names. List them with `git branch --list 'cdg/<workflow-name>-*/*'{:sh}` and, once you've confirmed the list, delete them the same way. When your replicas are clones, delete the branches of tasks that ran in a clone from inside that clone. The `codedag-mirror` remote is maintained by CodeDAG, so leave it as it is. If a branch in it is holding a fixed branch name, release it with `cdg branch release <branch-name>{:sh}`.
+
+<Callout type="warn">Snapshot branches hold the changes of canceled, deferred, or reworked tasks as they were at the time, and once you delete a snapshot branch, those changes can't be restored. Before you delete, make sure there's nothing in them that you still want to keep.</Callout>
+
+### Delete old logs
+
+Each workflow's logs are written to a single `.log` file under `.codedag/local/logs/`. For the path, see [Log file locations](/docs/reference/branches-and-files#log-files). When you run the workflow again, the new logs are appended to the end of the same file. When you no longer need the file, just delete it.
+
+### Remove replicas you no longer use
+
+You can keep replicas for as long as you like, and later workflows go on using them to run tasks in parallel. When you really no longer need a worktree replica, remove it and then run `cdg init{:sh}` again so that the registered replicas match what actually exists:
+
+```bash title="Terminal"
+git worktree remove ../<project-name>-wt-1
+cdg init
+```
+
+For how to keep your existing configuration when you reinitialize, see [Reinitialize and keep existing configuration](/docs/reference/cli/init#reinitialize).
+
+## Finish in shared-workspace mode [#shared-workspace]
+
+Shared-workspace mode has no task branches or integration branch, and it doesn't switch the primary repository's branch. Everything the tasks produce is left as uncommitted changes in the workspace they ran in, which is the primary repository by default, for you to check and commit yourself. None of the branch operations in the preceding sections apply in this mode. Running the workflow again works the same way: run `cdg dag review clear{:sh}` and then `cdg dag submit{:sh}`. The new run works on top of the files that are already in the workspace.
+
+## Common questions
+
+### The workflow stopped while merging into the integration branch
+
+After all tasks have been reviewed, CodeDAG merges each task's result into the integration branch. If changes from several tasks conflict and a separate agent session can't resolve the conflicts in three rounds, the workflow stops at `on-hold` with the reason `integration-merge-conflict`. At that point, the integration branch doesn't have the complete results yet. Finish the merge in the workspace where the integration branch is checked out, which is usually the primary repository, and then run `cdg dag recover <workflow-name>{:sh}`. The workflow goes on to merge in the rest of the results. For the detailed steps, see [Merge conflicts](/docs/troubleshooting/troubleshooting#hold-merge-conflict).
+
+### The integration branch has no changes
+
+The most common cause is that the workflow-level review ended with `cancel` or `defer`. In isolated-branches mode, both actions return the integration branch to this workflow's base. By default, CodeDAG first saves the full set of results to a snapshot branch whose name starts with `cdg/<workflow-name>/snapshots/dag-review-`, and you can restore them from there when you need them. See [Restore some of the changes from a snapshot](/docs/reference/branches-and-files#restore-from-snapshot). The other possibility is that all the tasks were canceled or deferred. Their individual changes are likewise saved on snapshot branches by default.
+
+## Related
+
+- [Review Tasks and Workflows](/docs/guides/review-tasks): How to check the results and give a decision when a task or workflow is stopped at a review gate.
+- [Review](/docs/reference/cli/review): The arguments and defaults of the review actions, and the rules for clearing a review.
+- [File and Branch Operations](/docs/reference/branches-and-files): Restore changes from a snapshot branch, and save workflow configuration separately.

@@ -1,0 +1,88 @@
+---
+title: Let Your Agent Orchestrate
+description: Hand your goal to Claude Code or Codex with the CodeDAG Guide plugin installed. It writes the workflow, submits it, and tracks the run, and you make only the key decisions.
+icon: Bot
+---
+
+## What this approach is
+
+Once the CodeDAG Guide plugin is installed, Claude Code or Codex knows how to use `cdg`. You describe what you want done in plain language, and it splits the work into tasks, writes the workflow file, validates and submits it, tracks progress during the run, and reports back to you when the run is over. The agent that operates `cdg` for you here is called the orchestrating agent. Each task in the workflow still runs in a fresh session, and that session is called a task agent. For more on how the roles are divided, see [Who does what](/docs/concepts/how-it-works#roles).
+
+Compared with writing a workflow by hand, the only thing that changes is who writes the file and who runs the commands. The workflow file still lives in the primary repository's `.codedag/dags/` directory, and the fields, commands, and states are all the same. You can open the file to review or edit it before the agent submits it, and you can run `cdg` commands yourself at any time to check on the run or intervene. Keep in mind that a submitted workflow runs as it was defined at submission, so editing the file afterward doesn't affect that run.
+
+## Prerequisites
+
+For this approach, CodeDAG has to be ready to use, your Claude Code or Codex has to have the CodeDAG Guide plugin installed, and you have to be working in a session opened after the plugin was installed.
+
+- You've completed [Installation and Sign-In](/docs/get-started/installation).
+- You've accepted Claude Code's full-access warning. If no Claude Code task has ever run with full access on this machine, do this once first: run `claude --permission-mode bypassPermissions{:sh}` in a terminal, choose "Yes, I accept", and then exit. Claude Code won't ask again. If you skip this, you can still do it afterward: the task is put on hold until you accept. For what to do then, see [Accept Claude Code's full-access warning in advance](/docs/guides/agents-and-permission-modes#accept-bypass-warning).
+- The plugin is installed. If you chose to install the plugin when you ran `cdg init{:sh}` in this repository, or you've installed it at the user scope from any repository, this is already done. Otherwise, run `cdg plugin install --scope user{:sh}`. It installs the plugin for the Claude Code and Codex installed on this machine, and the plugin then works in all your repositories.
+- Your session was opened after the plugin was installed. The plugin takes effect only in new sessions. Exit any session that was already open, then resume it with `claude --resume{:sh}` or `codex resume{:sh}`.
+
+If you're not sure, run `cdg plugin status{:sh}` in this repository to check. When both `Plugin installed` and `Enabled` are `true` under the agent you're using, the plugin is installed and enabled. If it shows as not installed, the `Action` line in the output gives the command to install it. For installation scopes and how to update, see [Manage the CodeDAG Guide Plugin](/docs/guides/guide-plugin).
+
+## A prompt you can paste as is
+
+Open a new Claude Code or Codex session at the root of the repository you want to work on, and paste in the prompt below. It asks for the same thing as the [second workflow](/docs/get-started/second-workflow) tutorial: find two TODOs first, then have two tasks implement them separately.
+
+```text title="Prompt"
+Use CodeDAG to get the following done for me. Write the workflow file and show it to me first, and submit it only after I confirm.
+
+Goal: Find the two TODOs in this project that are quickest to finish and implement each of them. For each one, write a minimal test first, then implement until the test passes. Filter the TODOs by my role and area of responsibility. They can come from TODO or FIXME comments in the code, to-do lists in the docs, skipped tests, or an issue tracker you have access to, such as GitHub Issues, Linear, or Jira. If you can't find suitable TODOs, propose two small changes instead, based on what this project is for, its current state, and my responsibilities.
+
+Task breakdown: Up to you. What I have in mind is one task that picks the two items and writes the goal, affected files, and completion criteria for each to docs/plans/agent-todos.md, followed by two tasks that each implement one of the items, running at the same time.
+
+Access level: Use full access for every task so they run to completion unattended. If a task still asks for approval while it's running, tell me what it's asking for first. Don't approve it on my behalf.
+
+Review: Stop after the task that picks the TODOs finishes, and continue only after I've read the plan. Auto-accept the other tasks when they finish.
+
+Workspaces: You can use any workspace registered with the project. If there's only the primary repository, run the tasks one after another. Use the primary repository's current commit as the base. Before you submit, make sure these workspaces have no uncommitted changes. If they do, tell me, and don't commit or discard them for me.
+
+Report: When everything is done, tell me what each task did, which branch its result is on, whether the tests pass, and anything I should pay attention to. I'll merge into the main branch myself.
+```
+
+The first line of the prompt says to use CodeDAG and asks the agent to show you the workflow before it submits. Don't leave out the mention of CodeDAG: without it, the agent is likely to start changing code right in the current session instead of writing a workflow. Each of the six items that follow has its own job. The goal is stated as a result you can verify. The task breakdown can be left entirely to the agent, though sharing what you have in mind saves a few rounds of back-and-forth. The report item says what you want to know at the end. Access level, review, and workspaces set the boundaries of this run, which the agent needs to know before it submits. For what they mean, see [Three things to agree on before it submits](#confirm-before-submit). To use the prompt for your own goal, keep the structure and rewrite the content.
+
+<Callout type="idea">
+If you make the same requests every time, such as always reviewing the workflow before it's submitted or always running unattended, put them in your project's CLAUDE.md or AGENTS.md. The orchestrating agent gives these rules priority, so you don't have to write them into every prompt.
+</Callout>
+
+## Three things to agree on before it submits [#confirm-before-submit]
+
+The access level determines what this run can do, the workspaces determine where it does it, and manual review determines where it stops. The first time you use this approach, the access level is the only one you have to decide. If you don't mention the other two, the defaults apply.
+
+- **Access level.** With full access, a task agent no longer asks for consent before it acts, and the workflow can run to completion unattended. With moderate access, a task stops when it reaches an operation that needs approval and waits for you to respond, or for the orchestrating agent to respond on your behalf within the scope you've agreed on. If you don't say which level to use, the orchestrating agent asks you before it submits. For the tradeoffs between the two levels, see [Decide between unattended and attended runs](/docs/guides/agents-and-permission-modes#unattended-or-attended).
+- **Workspaces.** By default, every workspace registered with the project takes part in the run, including the primary repository, and the workflow starts from the primary repository's current commit. If you have other development work to do in the primary repository during the run, have the agent exclude the primary repository from CodeDAG's workspaces. See [Keep developing while a workflow runs](/docs/guides/parallel-workspaces#keep-main-repo).
+- **Manual review.** By default, each task is auto-accepted when it finishes, and the workflow doesn't stop partway. To look at a task's result before the workflow continues, name that task in your prompt. See [Review Gates and Auto-Accept](/docs/concepts/review-gates).
+
+## What it does [#what-it-does]
+
+From receiving your prompt to reporting the results, the orchestrating agent follows the default procedure that CodeDAG Guide defines. Where you've asked for something different, your instructions take precedence.
+
+1. **Check the setup.** It first checks whether the project is initialized and which workspaces are available. If the project isn't initialized yet, it runs `cdg init{:sh}` for you.
+2. **Write the workflow and hand it to you for review.** It splits the goal into tasks, writes them as a workflow file under `.codedag/dags/`, and shows it to you first if that's what you asked for. You can open the file and check it yourself. For how to read it, see [Write a Workflow File](/docs/guides/writing-workflows).
+3. **Validate and submit.** It runs `cdg dag validate{:sh}` first, fixes any errors, and works out the cause of any warnings before it moves on. Then it runs `cdg dag submit{:sh}`. If you asked to review the workflow first, it waits for your confirmation before submitting.
+4. **Track the run.** For the first few minutes after submission, it checks status and logs frequently to confirm that the tasks have all started normally. Once things are stable, it slows down to one check every 5 to 10 minutes, because checking more often doesn't make tasks any faster and only takes up context in its own session. A task that has produced no new output for a long time isn't necessarily stuck: the task agent may have dispatched subagents that are working in the background. So it usually waits for more than ten minutes with no activity at all before it steps in to take a look.
+5. **Respond to approval requests during the run.** An approval concerns a single operation in the middle of a task: when a task agent wants to do something that its access level doesn't let through, such as running a command, it stops and waits for someone to approve it. The orchestrating agent then runs `cdg task view{:sh}` inside tmux to enter the task's session and reads the approval request on the screen. If the request is within the agreed scope, it responds on your behalf, exits the session, and lets the task continue. If the request is outside that scope, it relays the request to you and waits for your decision. The environment where it runs commands usually has no interactive terminal, so this step requires tmux on your machine. Without tmux, only you can respond to approvals, by entering the session yourself. See [Respond to an approval request](/docs/guides/intervene-and-control#approval).
+6. **Handle result reviews after tasks finish.** A review concerns a task's whole result once the task is done: the result has to be accepted before it's handed to downstream tasks. When a finished task stops to wait for review (because you set up manual review, or because the task was held back for producing no changes), the orchestrating agent first looks at the task's logs and changes, then proceeds as agreed: it accepts the result, has the task agent keep working on the existing result, or leaves the decision to you.
+7. **Report the results.** After the workflow finishes, it tells you what each task did and which branch the changes are on. In the default isolated-branches mode, the results of all tasks are merged on the integration branch `cdg/<workflow-name>/integration`, each task also has its own task branch, and the main branch is unchanged. If it chose shared-workspace mode, there are no such branches, and the results stay right in the working directory.
+
+Tracking happens only while this session is open. Closing the session doesn't affect the workflow, which keeps running in the background as usual. It just means nobody is watching it for you. You can run `cdg status{:sh}` yourself at any time to check progress, or open a new session and have it pick up the tracking.
+
+On long runs, a task agent may hit Claude Code's or Codex's own usage limits, such as the 5-hour window. When that happens, the task stops partway, and the orchestrating agent first stops the other affected tasks. After the limit resets, it has the stopped tasks resume in their original sessions, and this step doesn't use any more CodeDAG credits. For the full procedure, see [Agent usage limits or rate limits](/docs/troubleshooting/troubleshooting#agent-usage-limits).
+
+## What it won't do for you
+
+The orchestrating agent saves you from writing files, typing commands, and watching progress. The safety boundaries and the final decisions stay in your hands.
+
+- **It doesn't set the safety boundaries for you.** Which access level to use and who responds to approvals inside tasks are your decisions. It only carries out the plan you set.
+- **It doesn't approve anything beyond what you agreed on.** For approvals outside the agreed scope, and for destructive operations such as deleting or overwriting, it asks you first.
+- **It doesn't merge into the main branch or push to a remote.** The results stay in your local repository, and CodeDAG itself doesn't push to your remote repository or pull from it either. For how to check and merge the results, see [Finish, Merge, and Clean Up](/docs/guides/finish-and-merge). If you explicitly ask, it can also run those Git commands for you.
+- **It doesn't decide for you whether the goal was met.** A finished workflow only means that every task ran to completion and was accepted according to the rules, and the default auto-accept doesn't check whether the results are correct. It reports what each task did and what needs your attention. Whether the code can be merged is for you to decide after you've checked it.
+
+These boundaries come from CodeDAG Guide's guidance and from what you and the agent have agreed on. They aren't limits that the software enforces. When the orchestrating agent runs commands itself, it's bound only by the permission settings of your session. To make sure certain operations, such as pushing to a remote, always require your consent, rely on those settings.
+
+## Next steps
+
+- [Manage the CodeDAG Guide Plugin](/docs/guides/guide-plugin): Choose an installation scope, update the plugin, and customize orchestration behavior without changing the skill files that ship with the plugin.
+- [Choose Agents, Models, and Permission Modes](/docs/guides/agents-and-permission-modes): Before you set an access level for each task, understand what full access and moderate access each cost you.

@@ -1,0 +1,177 @@
+---
+title: Status and Logs
+description: The syntax and scope of the status and log commands, and the options for refreshing status continuously, following logs, and limiting the number of lines.
+icon: Activity
+---
+
+After you submit a workflow, use the status commands to check the progress of workflows and tasks, and the log commands to see what the task agents did. For how to use them to narrow down a problem level by level, and how to read the logs, see [Submit, Monitor, and Read Logs](/docs/guides/run-and-monitor).
+
+## Check status [#status-commands]
+
+The status commands work at three levels. `cdg status{:sh}` lists the workflows in the whole project, `cdg dag status{:sh}` shows every task in one workflow, and `cdg task status{:sh}` shows the detailed status of the tasks you specify.
+
+| What you want to see | Command | How to give the workflow | When the workflow is omitted |
+|---|---|---|---|
+| Every workflow in the project, with its phase and status | `cdg status{:sh}` | Takes no arguments | — |
+| One workflow and the status of each of its tasks | `cdg dag status [workflow]{:sh}` | Positional argument or `-w`, but not both | The workflow at the head of the queue |
+| The detailed status of specific tasks, including why a task is on hold | `cdg task status <task-id...> [-w <workflow>]{:sh}` | `-w` | The workflow at the head of the queue |
+
+All three commands accept `--watch`, which keeps the output refreshing. See [Refresh status continuously](#watch). For what the phases, statuses, substatuses, and review results in the output mean, see [State Meanings](/docs/reference/states).
+
+### cdg status [#cdg-status]
+
+```bash title="Terminal"
+cdg status [--watch]
+```
+
+`cdg status{:sh}` takes no arguments. It shows every workflow in the current project, grouped by phase into three groups: workflows that haven't been submitted yet, workflows in the queue, and workflows that have been reviewed. `cdg dag ls{:sh}` and `cdg dag list{:sh}` are aliases for it and behave identically.
+
+The not-yet-submitted group lists the workflow files in `.codedag/dags/` and in its subdirectories at any depth: first the files in the directory itself, then each subdirectory in turn. Workflows that have been submitted or reviewed go in the other two groups and aren't repeated here.
+
+### cdg dag status [#dag-status]
+
+```bash title="Terminal"
+cdg dag status [workflow] [--watch]
+```
+
+`cdg dag status{:sh}` shows a workflow's phase and status, along with the status of each of its tasks. It isn't limited to workflows in the queue. For a workflow that hasn't been submitted, it lists the tasks. For a workflow that has been reviewed, it shows the review results of the workflow and of each task. `cdg task ls{:sh}` and `cdg task list{:sh}` are aliases for it under `task` and show the same output.
+
+Give the workflow as a positional argument or with `-w` (also written `--workflow-file` or `--dag`), but not both in the same command. See [Positional argument and `-w`](/docs/reference/cli#workflow-option). When you omit it, the command shows the workflow at the head of the queue. If the queue is empty, the command reports an error.
+
+### cdg task status [#task-status]
+
+```bash title="Terminal"
+cdg task status <task-id...> [-w <workflow>] [--watch]
+```
+
+`cdg task status{:sh}` shows the status of the tasks you specify within a single workflow. Task IDs are required: give one or more, separated by spaces. For the syntax, see [Specify one or more tasks](/docs/reference/cli#task-ids). This command doesn't support task selectors. To see every task in a workflow, use `cdg dag status{:sh}`. Give the workflow with `-w`. When you omit it, the command uses the workflow at the head of the queue. As with `cdg dag status{:sh}`, you can also name a workflow that hasn't been submitted or one that has been reviewed.
+
+With a single task ID, the command shows that task's details. When the task is on hold, a `Reason:` line gives the reason, often followed by a `Diagnostic:` line with the specifics. For a task that stopped because preparation failed before it started (reasons such as `workspace-dirty` and `branch-name-conflict`), that line states why preparation failed. For a task whose agent session ran into a problem, it states what happened on the agent's side. The next line, `Docs:`, links to the troubleshooting section for that reason. With several IDs, each task gets only one status line, and neither these lines nor the [code location](#code-location) is shown. So to find out why a task stopped, give one ID at a time:
+
+```bash title="Terminal"
+cdg task status 2 -w feature
+```
+
+### Code location [#code-location]
+
+Both the single-task details from `cdg task status{:sh}` and the workflow details that `cdg dag status{:sh}` prints under `Workflow:` at the top of its output show where the code is: its workspace, branch, and base commit. These lines come after the status, reason, and diagnostic lines. Use them when you want to see what a task changed before you review it, or when you need to go to the right directory to fix something by hand. For example, once you have a task's workspace and base commit, `git -C <workspace> diff <base-commit>{:sh}` shows everything the task changed.
+
+The values shown are the ones recorded during the run. They aren't read from the current state of Git. A value that hasn't been determined yet isn't shown, and its line doesn't appear.
+
+- **Single-task details:** `Workspace:` is the workspace directory the task actually runs in, and `Branch:` is its task branch. Both are determined together when the task begins starting up, so a task that has never started has neither. `Base Commit:` is the commit the task branch was at before the task began. The task's changes are the difference between that commit and the current contents of the task branch, and taking a snapshot, discarding changes, and reworking the task all roll back to it. The base commit is determined only after the task branch has been prepared and the upstream results have been merged, so a task stopped for a reason that arises during startup, such as `workspace-dirty` or `merge-conflict`, has only the first two lines.
+- **Workflow details:** `Integration Workspace:` and `Integration Branch:` are the integration workspace and the integration branch. `Base Commit:` is the base commit of the whole workflow. Every task branch is created from it, and the integration branch returns to it too after you end the workflow with `cdg dag review cancel{:sh}` or `defer`. All three lines are determined at once when the workflow finishes starting up. So a workflow has no code location if it hasn't been submitted, is waiting in the queue, or stopped at `dag-startup-failed` or `mirror-unavailable` as soon as it started.
+- **Shared-workspace mode:** No task branches are created, and there's no separate integration workspace. The single-task details and the workflow details each have just one line, `Workspace:`, which is the directory the whole workflow runs in.
+
+After a workspace is released, `(released; used by this run)` is appended to the path on the `Workspace:` or `Integration Workspace:` line. It means the path is only where this run took place. The directory may since have been assigned to another task or workflow, and a different branch may be checked out there. In isolated-branches mode, a task releases its workspace when the task itself enters `reviewed`. In shared-workspace mode, a task releases its workspace when its workflow does. A workflow, in either mode, releases its workspace when it enters `reviewed`. The branch and base commit lines are still shown as usual, so you can still find the changes from that run.
+
+After you clear the review with `cdg task review clear{:sh}` or `cdg dag review clear{:sh}`, the task or workflow returns to `planning`, and the code location is no longer shown.
+
+### Tasks with no process running them [#stale-owner]
+
+After the machine restarts, or a process crashes or is forcibly terminated, a task's status stays at `working` even though no process is running it anymore. The status commands recognize these tasks and tell you in their output how to recover them. The commands themselves are read-only, so checking status doesn't restart execution.
+
+- **Single-task details:** The substatus shows as `working (stale owner)`. The next line, `Diagnostic:`, gives the command to recover this task, and the line after that is the `Docs:` link.
+- **Task lists:** `cdg dag status{:sh}`, and `cdg task status{:sh}` with several IDs, show `[working (stale owner)]` in the substatus column for these tasks in the `Submitted Tasks` group. `cdg dag status{:sh}` also adds a `Diagnostic:` line to the workflow details that lists the IDs of all such tasks in the workflow, followed by a `Docs:` link. `cdg task status{:sh}` puts this line after all the groups, lists only the tasks in this query, and includes no link.
+- **Queue view:** `cdg status{:sh}` adds a `Diagnostic:` line below the row of any workflow that has such tasks. Its content is the same as in the task lists, and the workflow's row itself doesn't change.
+
+```bash title="Terminal"
+# Diagnostic line in the single-task details
+Diagnostic: The persisted task worker is no longer running. Use 'cdg task recover 2 -w .codedag/dags/feature.yaml' to resume the original session.
+# Diagnostic line in task lists and the queue view
+Diagnostic: The persisted task workers for tasks 2, 3 are no longer running. Use 'cdg dag recover feature' to resume the original sessions.
+```
+
+The task lists and the queue view suggest `cdg dag recover{:sh}` instead of recovering tasks one by one. A machine restart usually interrupts every task that was running in the workflow, so recovering the whole workflow once is enough. That command also recovers any tasks in the workflow that you paused or killed on purpose. For the full steps, see [After a machine restart or process crash](/docs/troubleshooting/troubleshooting#after-restart).
+
+### Tasks with no review decision [#unreviewed]
+
+When you end a workflow directly with a workflow-level review such as `cdg dag review cancel{:sh}` or `defer`, the tasks in it that have started running but haven't been reviewed get the same decision as the workflow. The tasks that haven't started also enter `reviewed` together with the workflow but have no review decision of their own.
+
+- **Single-task details:** The `Disposition:` line shows `unreviewed`, with no icon. It's followed by the `Status:` and `Substatus:` the task had when it entered `reviewed` with the workflow.
+- **Multi-task lists:** These tasks go in the `Unreviewed Tasks` group. Each line has the same format as in `Submitted Tasks` and shows the status and substatus the task had at that time. The groups appear in the order Submitted, Unreviewed, Reviewed, Planning, and empty groups aren't shown.
+
+## Refresh status continuously [#watch]
+
+All three status commands accept `--watch`. Instead of printing once and exiting, the command refreshes once a second and stops on its own when the condition in the table below is met. You can press Ctrl+C at any time to exit.
+
+| Example | Refreshes until |
+|---|---|
+| `cdg status --watch{:sh}` | No workflows are left in the queue, that is, every submitted workflow has been reviewed |
+| `cdg dag status feature --watch{:sh}` | The `feature` workflow has been reviewed and has left the queue |
+| `cdg task status 2 3 -w feature --watch{:sh}` | Tasks 2 and 3 have both left the `submitted` phase, that is, each has its own review decision or was reviewed along with the workflow |
+
+`--watch` takes effect only while there's still something to watch. `cdg status{:sh}` requires at least one workflow in the queue. `cdg dag status{:sh}` requires that the workflow you query has been submitted and hasn't been reviewed yet. `cdg task status{:sh}` requires that at least one of the tasks you query is in that state. When the condition isn't met, the command prints a one-line notice, shows the current status once, and exits.
+
+When you omit the workflow, `cdg dag status --watch{:sh}` and `cdg task status --watch{:sh}` stay on the workflow that was at the head of the queue when the command started. They don't switch to the workflow that reaches the head next. The two stop under different conditions. `cdg dag status --watch{:sh}` waits until that workflow has been reviewed. `cdg task status --watch{:sh}` looks only at the selected tasks and stops refreshing once all of them have been reviewed, without waiting for the workflow.
+
+In an interactive terminal, each refresh updates the output in place. When the output is redirected to a file, or the command runs in a script or an agent's shell tool, each refresh appends a full copy of the status, and the command doesn't return until its stop condition is met. In those cases, it's better to run the command without `--watch` each time you need the status.
+
+## cdg dag logs and cdg task logs [#logs]
+
+`cdg dag logs{:sh}` reads the logs of every task in a workflow, and `cdg task logs{:sh}` reads the log of just one task. Both take the same options.
+
+```bash title="Terminal"
+cdg dag logs [workflow] [-f] [-n <lines>]
+cdg task logs <task-id> [-w <workflow>] [-f] [-n <lines>]
+```
+
+| | `cdg dag logs{:sh}` | `cdg task logs{:sh}` |
+|---|---|---|
+| What it reads | The logs of every task in the workflow | The log of one task. Takes only one task ID |
+| How to give the workflow | Positional argument or `-w`, but not both | `-w` |
+| When the workflow is omitted | The workflow at the head of the queue | The workflow at the head of the queue |
+| Options | `-f` and `-n`. See [Log options](#log-options) | Same as `cdg dag logs{:sh}` |
+
+`-w` can also be written `--workflow-file` or `--dag`. For the forms a workflow can take, see [Specify a workflow](/docs/reference/cli#specify-workflow). Both commands read the log files under `.codedag/local/logs/` in the primary repository. For where the files are and how they're named, see [Log file locations](/docs/reference/branches-and-files#log-files).
+
+Both commands find the log file by the workflow's path. They can read the logs of a workflow in the queue, one that has been reviewed, or one that hasn't been submitted, as long as the workflow file still exists and still passes validation. So after you clear the review with `cdg dag review clear{:sh}`, you can keep reading the workflow's earlier logs without resubmitting it. For a workflow that hasn't been submitted, the section headings in `cdg dag logs{:sh}` and the task IDs for `cdg task logs{:sh}` both come from the workflow file's current contents. A task that appears in the log but is no longer in the file gets the heading `Task N`.
+
+The log file is created only when the workflow's first task starts running. While the workflow is still waiting in the queue, or has started but its first task hasn't, there are no logs to read:
+
+- **Without `-f`:** The command says that the log file hasn't been created yet and gives the command for waiting with `-f`. The exit code is 0.
+- **With `-f`:** The command says that it's waiting for this workflow's logs and keeps running. As soon as the log file appears, it shows the log from the beginning and then keeps following.
+
+```bash title="Terminal"
+$ cdg dag logs feature
+No logs yet for .codedag/dags/feature.yaml. The log file is created when the workflow's first task starts.
+→ Use 'cdg dag logs feature -f' to wait for log output
+```
+
+A workflow that has been reviewed, or that hasn't been submitted, won't produce any more logs. When it has no log file, the command prints `No logs found for <workflow-path>.` and exits, with or without `-f`. The exit code is 0.
+
+All of these messages go to stderr, and stdout carries only log lines. So when you redirect the output to a file, the file contains only logs.
+
+`cdg task logs{:sh}` validates the task ID against the tasks defined in the workflow file. When the workflow has no such task, the command prints `Task N not found in workflow: <workflow-path>` and exits with code 1. When the task exists but hasn't written any log lines yet, the command reports no error and prints nothing.
+
+### Log options [#log-options]
+
+Both log commands have two options, `-f` and `-n`. `-f` keeps following newly written logs, and `-n` shows only a given number of lines from the end. With neither, the command shows all the existing logs from the beginning of the log file and then exits.
+
+| Option | Value | Default | Description |
+|---|---|---|---|
+| `-f`, `--follow` | None | Doesn't follow | After showing the existing logs, keeps running and shows new lines as they're written, until the workflow has been reviewed and leaves the queue. Press Ctrl+C at any time to exit |
+| `-n`, `--tail <lines>` | A non-negative integer | No limit. Shows from the beginning of the file | Shows only the last `<lines>` lines. `0` shows none of the existing logs. With `-f`, shows these lines first and then starts following |
+
+`-n` accepts only a non-negative integer. With a value such as `abc`, `-1`, or `1.5`, the command reports an error, prints no logs, and exits with code 1.
+
+Without `-n`, the command reads the entire log file, and every run of the same workflow is appended to that file. So for a workflow that has been resubmitted, the logs of its earlier runs are shown too. With `-f` but not `-n`, the command likewise shows all of those logs first and then starts following. When you care only about recent output, add `-n`. To see only what's written after the command starts, use `-n 0 -f{:sh}`.
+
+How `cdg dag logs{:sh}` displays the logs depends on the options. With neither `-f` nor `-n`, the logs are grouped by task, with each task's lines together. With `-n`, the command takes the last lines of the whole file without grouping them by task, so lines from several tasks may be mixed together. With `-f`, the tasks' lines are interleaved in the order they were written. Every line begins with the task ID and the time, so you can tell interleaved lines apart. `cdg task logs{:sh}` shows only one task's lines, and `-n` counts only that task's lines.
+
+When `-f` stops depends on the whole workflow, not on any one task. `cdg task logs -f{:sh}` keeps waiting after the task finishes running and writes its `END:` line, until the task's workflow has been reviewed. If you only want to watch that one task, press Ctrl+C when you've seen enough. When you omit the workflow, the command follows the workflow that was at the head of the queue when it started. When the workflow is no longer in the queue, whether it has been reviewed or hasn't been submitted, `-f` just shows the existing logs and exits.
+
+```bash title="Terminal"
+# Show all the logs for the feature workflow, grouped by task
+cdg dag logs feature
+# The last 100 lines of the whole workflow, not grouped by task
+cdg dag logs feature -n 100
+# Show the last 20 lines for task 2 first, then follow its new logs
+cdg task logs 2 -w feature -n 20 -f
+```
+
+## Related
+
+- [Submit, Monitor, and Read Logs](/docs/guides/run-and-monitor): Work down through the three levels of status to track down a problem, make sense of the logs, and tell whether a task is stuck.
+- [State Meanings](/docs/reference/states): What each phase, status, substatus, and review result means, and whether to wait or act when you see it.
+- [Control and Intervene](/docs/reference/cli/control): The syntax for pausing, killing, and recovering tasks and for entering a task's session when you need to step in.
+- [Troubleshooting](/docs/troubleshooting/troubleshooting#on-hold): What to do, reason by reason, when a task or workflow is stopped at `on-hold`.

@@ -1,0 +1,9 @@
+{
+  "title": "账号、额度与成本",
+  "icon": "CreditCard",
+  "pages": [
+    "login-and-account",
+    "credits-and-subscription",
+    "cost-control"
+  ]
+}

@@ -1,0 +1,237 @@
+---
+title: プロジェクトを初期化する
+description: cdg init の 2 つの実行方法、各オプションに指定できる値、再初期化のときに既存の設定を残す方法。
+icon: CirclePlay
+---
+
+`cdg init{:sh}` は、Git リポジトリを CodeDAG の[プロジェクト](/ja/docs/concepts/how-it-works#project)にします。プライマリリポジトリのルートに `.codedag/` を作り、並列実行に使うレプリカのワークスペースを登録し、デフォルトのエージェントと同時実行数の上限をローカル設定に書き込みます。このコマンドは何度でも実行できます。レプリカを増減したあとは、もう一度実行して登録を更新する必要があります。自分で書いたワークフローが変更されることはありません。初回の初期化の流れ全体はクイックスタートの[プロジェクトを初期化する](/ja/docs/get-started/quickstart#init-project)、レプリカの準備と登録の手順は[並列実行とワークスペース](/ja/docs/guides/parallel-workspaces)を参照してください。
+
+## 構文と前提条件 [#syntax]
+
+`cdg init{:sh}` には、対話形式と非対話形式の 2 つの実行方法があります。どちらになるかは、`--primary-workdir` を指定したかどうかだけで決まります。
+
+```bash title="Terminal"
+# 対話形式：現在のディレクトリからプライマリリポジトリを見つけ、項目ごとに尋ねる
+cdg init [オプション]
+# 非対話形式：プライマリリポジトリもレプリカもオプションで指定する
+cdg init --primary-workdir <プライマリリポジトリのパス> [オプション]
+```
+
+対話形式の初期化では、レプリカの方式、デフォルトのエージェント（このコンピューターに両方がインストールされている場合だけ）、CodeDAG Guide プラグインをインストールするかどうかを、順に尋ねられます。非対話形式の初期化ではこれらを尋ねず、デフォルトのエージェントとプラグインは、オプションと後述のルールに従って処理されます。そのため、スクリプトの中で実行する場合や、エージェントに代わりに実行させる場合に向いています。プロジェクトがすでに初期化されている場合、非対話形式の初期化は `.codedag/` にある既存のファイルをすべて残し、このときも質問は表示されません。[再初期化と既存の設定の保持](#reinitialize)を参照してください。対話型ターミナルのない環境では、対話形式の初期化は最初の質問のところでそのまま終了し、何も変更しません。この場合は、代わりに非対話形式を使ってください。
+
+実行する前に、次の準備が必要です。
+
+- プライマリリポジトリが Git リポジトリであること。タスクを並列に実行させるには、レプリカもあらかじめ Git で作成しておく必要があります。CodeDAG が代わりに作ることはありません。1 つのプロジェクトのレプリカは、すべて git worktree か、すべて clone かのどちらかにし、混在させることはできません。
+- このコンピューターに Claude Code と Codex の少なくとも一方がインストールされていて、現在のターミナルで `claude` または `codex` コマンドがそのまま見つかること。Claude Code がインストールされている場合、初期化ではそのバージョンも確認されます。[Claude Code のバージョン確認](#claude-version)を参照してください。
+- CodeDAG アカウントにログインしていること。まだログインしていない場合、`cdg init{:sh}` は先にログインへ案内します。[ログインする](/ja/docs/account/login-and-account#sign-in)を参照してください。
+
+### どのディレクトリで実行するか [#where-to-run]
+
+`cdg init{:sh}` は、プライマリリポジトリのルートで実行します。非対話形式の初期化では、`--primary-workdir` で指定したディレクトリがプライマリリポジトリになるため、どこで実行しても同じです。どちらの方法でも、`.codedag/` が作られるのはプライマリリポジトリのルートだけで、レプリカに 2 つ目が作られることはありません。
+
+対話形式の初期化をほかのディレクトリで実行した場合は、現在のディレクトリが属する Git リポジトリをもとに、プライマリリポジトリを探します。
+
+- プライマリリポジトリのサブディレクトリ、または `.codedag/` ディレクトリで実行した場合は、外側のプロジェクトリポジトリが見つかり、ルートで実行した場合と同じになります。
+- 登録済みのレプリカで実行した場合は、worktree のレプリカでも clone のレプリカでも同じ動作になります。コマンドはまず、このディレクトリがどのプロジェクトのレプリカであるかを表示し（`is registered as a replica of the CodeDAG project at`）、そのプロジェクトのプライマリリポジトリを起点にして初期化します。設定されるのは元のプロジェクトのままで、レプリカに `.codedag/` が新しく作られることはありません。
+- まだ登録していない clone で実行した場合は、結果が異なります。clone はそれ自体が独立した Git リポジトリなので、CodeDAG はその clone をプライマリリポジトリとして扱い、別のプロジェクトを作ります。
+
+1 つのディレクトリが同時に 2 つのプロジェクトに属することはできません。そのため、あるプロジェクトのレプリカとして登録済みのディレクトリを、別のプロジェクトのプライマリリポジトリにすることはできません。`--primary-workdir` に指定したパス、または対話形式の clone 方式で入力したプライマリリポジトリのパスがこうしたディレクトリを指している場合、初期化は何も書き込まないうちに `Cannot use <パス> as the primary workspace` で失敗します。終了コードは 1 で、どちらのプロジェクトの登録も元のままです。このレプリカをどうしても独立したプロジェクトにしたい場合は、まず、それが属するプロジェクトのプライマリリポジトリに戻って `cdg init{:sh}` を一度実行し、レプリカのリストからこのレプリカを外します。そのあとで、このレプリカ自身のディレクトリで初期化します。
+
+### Claude Code のバージョン確認 [#claude-version]
+
+このコンピューターに Claude Code がインストールされている場合、初期化は、レプリカの方式が決まったあとで `claude --version{:sh}` を一度実行します。バージョンが、CodeDAG がサポートする最低バージョンの 2.1.196 より古い場合は、警告が出力されます。
+
+```bash title="Terminal"
+Warning: Claude Code 2.1.100 is older than 2.1.196, the minimum version CodeDAG supports. Until you upgrade it (for example, with `claude update`), tasks that run on Claude Code are put on hold with agent-version-unsupported.
+```
+
+`claude --version{:sh}` の実行に失敗した場合や、出力にバージョン番号が含まれていない場合は、代わりに、バージョンを特定できないことを知らせる警告が出力され、括弧内に理由が示されます。
+
+どちらの警告が出ても、初期化は中止されず、デフォルトのエージェントの選択にも影響しません。プロジェクトは通常どおり作成されます。ただし、Claude Code をアップグレードするまで、Claude Code に任せたタスクはすべて `on-hold` で止まり、理由は `agent-version-unsupported` になります。警告にある方法（たとえば `claude update{:sh}` の実行）でアップグレードすれば、そのあとに投入したワークフローがこの保留になることはありません。すでに止まっているタスクの対処方法は、[バージョンに関する問題](/ja/docs/troubleshooting/troubleshooting#versions)を参照してください。
+
+## オプション [#options]
+
+| オプション | 値 | 省略した場合 | 説明 |
+|---|---|---|---|
+| `--primary-workdir <path>` | プライマリリポジトリのルートのパス | 対話形式で実行されます | 指定すると、非対話形式で実行されます。パスはリポジトリのルートでなければならず、サブディレクトリを指している場合、初期化は失敗します。 |
+| `--replica-workdirs <paths...>` | 1 つまたは複数のレプリカのディレクトリ（スペースで区切る） | レプリカは登録されません | `--primary-workdir` も同時に指定した場合にだけ有効です。`--primary-workdir` なしでこのオプションだけを指定すると、コマンドはまず、このオプションが無視されることを知らせる警告を表示し、そのあとは通常どおり対話形式の初期化に進みます。レプリカは、そこでチェックを付けた内容で決まります。どのディレクトリも、すでに存在している必要があります。 |
+| `--max-concurrency <number>` | 正の整数 | 共有設定の `maxConcurrency`。ない場合は、レプリカの数に 1 を加えた値 | ローカル設定の `maxConcurrency` に書き込まれ、ワークフローファイルに同時実行数の上限が書かれていない場合に使われます。どちらの方法でも使えます。 |
+| `--default-agent <agent>` | `claude`（Claude Code）または `codex`（Codex） | [デフォルトのエージェントの決定ルール](#default-agent)に従います | このコンピューターにインストール済みのエージェントでなければなりません。どちらの方法でも使えます。指定すると、デフォルトのエージェントは尋ねられなくなります。 |
+| `--no-install-guide-plugins` | なし | 非対話形式の初期化は、このコンピューターにインストール済みの各エージェントに、User スコープでプラグインをインストールします | 非対話形式の初期化で、プラグインをインストールしません。対話形式の初期化には効果がありません。 |
+
+`--primary-workdir` と `--replica-workdirs` に指定するパスも、対話形式の初期化で入力するパスも、絶対パスと相対パスのどちらでも書けます。相対パスは、コマンドを実行したときの現在のディレクトリを基準に解決され、登録時にはすべて絶対パスに変換されます。
+
+`--max-concurrency` が受け付けるのは正の整数だけで、0、負の数、小数を指定すると初期化は失敗します。プロジェクトのデフォルトとして同時実行数の上限を設けないようにしたい場合は、初期化のあとで、ローカル設定の `maxConcurrency` を 0 に変更します。[`maxConcurrency`](/ja/docs/reference/settings#max-concurrency) を参照してください。
+
+初期化がローカル設定 `.codedag/local/settings.local.jsonc` に書き込むのは、チームの共有設定と異なる値だけです。デフォルトのエージェント `defaultAgent` と同時実行数の上限 `maxConcurrency` は、共有設定 `.codedag/settings.jsonc` の値と同じであれば書き込まれません。そのため、あとでチームが共有設定を変更すると、このコンピューターの値も一緒に変わります。再初期化のときにこの 2 つのフィールドがどう更新されるかは、[再初期化と既存の設定の保持](#reinitialize)を参照してください。
+
+初期化のあとでインストールしたエージェントも、そのままワークフローで使えます。初期化は、プロジェクトで使えるエージェントのリスト `availableAgents` を書き込まないからです。このフィールドは、プロジェクトで使えるエージェントを意図的に制限するためだけのもので、書かれていない場合は、サポートされているすべてのエージェントを使えます。[`availableAgents`](/ja/docs/reference/settings#available-agents) を参照してください。
+
+### デフォルトのエージェントの決まり方 [#default-agent]
+
+`agent` フィールドを書いていないタスクは、デフォルトのエージェントが実行します。初期化は、次の表に従ってデフォルトのエージェントを決めます。このコンピューターにどちらもインストールされていない場合、初期化は失敗します。
+
+| 状況 | デフォルトのエージェント |
+|---|---|
+| `--default-agent` を指定した | 指定したエージェント。インストールされていない場合、初期化は失敗します |
+| このコンピューターにどちらか一方だけがインストールされている | そのエージェント |
+| 両方がインストールされていて、対話形式の初期化である | どちらにするかを尋ねられます |
+| 両方がインストールされていて、非対話形式の初期化であり、共有設定の `defaultAgent` がこのコンピューターにインストールされている | チームのデフォルトのエージェント |
+| 上のどれにも当てはまらない | Codex |
+
+対話形式の初期化の質問では、チームのデフォルトのエージェントが 1 番目に並び、もう一方には、このコンピューターだけの上書きであることが示されます。
+
+```bash title="Terminal"
+Both Claude Code and Codex are installed.
+The team default agent in .codedag/settings.jsonc is Claude Code.
+Which agent would you like to use as your default for this project?
+1. Claude Code (team default)
+2. Codex (override for this machine only)
+```
+
+チームと同じほうを選ぶと、ローカル設定に `defaultAgent` は書き込まれず、あとでチームが共有設定を変更したときに、自分の側も一緒に変わります。共有設定に `defaultAgent` がない場合、質問にはチームのデフォルト値を説明する行がなく、2 つの選択肢にも注記は付きません。
+
+チームが指定したデフォルトのエージェントがこのコンピューターにインストールされていない場合、初期化は上の表に従って別のエージェントを選んでローカル設定に書き込み、チームのデフォルト値がここでは使えないことを知らせます。
+
+```bash title="Terminal"
+Team default agent 'codex' in .codedag/settings.jsonc is not installed on this machine. Your default agent 'claude' is saved in .codedag/local/settings.local.jsonc.
+```
+
+スクリプトで初期化する場合は、`--default-agent` を明記すると、どのコンピューターでも同じデフォルトのエージェントになります。書かない場合、結果は、各コンピューターにどのエージェントがインストールされているかによって変わります。
+
+### CodeDAG Guide プラグイン [#guide-plugin]
+
+初期化の最後のステップでは、CodeDAG Guide プラグインを扱います。このプラグインを入れると、Claude Code と Codex が `cdg` の使い方を身につけます。対話形式の初期化では、このコンピューターにインストール済みのエージェントごとに、User、Project、Local のどのスコープにインストールするか、または Skip を選んで今はインストールしないかを尋ねられます。非対話形式の初期化では尋ねず、インストール済みの各エージェントに、User スコープでそのままインストールします。ほかのスコープを使いたい場合は、`--no-install-guide-plugins` を付けてこのステップをスキップし、あとからプロジェクトのディレクトリで `cdg plugin install{:sh}` を使って、必要なスコープでインストールします。
+
+すでにプラグインが入っているエージェントについては、インストールスコープは尋ねられません。以前にいずれかのリポジトリで User スコープでインストールしたことがある場合も、このプロジェクトの前回の初期化でインストール済みの場合も、すでに入っているものとして扱われます。あとからインストールする、更新する、スコープを変更するためのコマンドは[プラグイン](/ja/docs/reference/cli/plugin)、3 つのスコープの違いは[インストールスコープを選ぶ](/ja/docs/guides/guide-plugin#scopes)を参照してください。
+
+## ワークスペースの登録と更新 [#register-workspaces]
+
+`cdg init{:sh}` を実行するたびに、CodeDAG は、それまでの登録を、今回決まったレプリカのリストにまるごと置き換えます。追加、移動、削除されたレプリカを、CodeDAG が自分で検出することはありません。そのため、レプリカを増減または移動したあとは、もう一度実行する必要があります。そのときのリストには、新しく追加したレプリカだけでなく、引き続き使うレプリカをすべて含めてください。存在しなくなったディレクトリが登録に残っている場合、ワークフローはそのディレクトリをスキップして残りのワークスペースで実行を続け、検証時には再初期化するよう案内されます。[CodeDAG に登録する](/ja/docs/guides/parallel-workspaces#register)を参照してください。
+
+対話形式の初期化では、どのレプリカを登録するかは、最初の質問 `Select your repository setup method` への回答で決まります。
+
+| 回答 | 登録されるレプリカ |
+|---|---|
+| `1. I have set up git worktrees for this project` | 続いて表示される質問でチェックを付けた worktree。[登録する worktree を選ぶ](#select-worktrees)を参照してください |
+| `2. I have cloned this repository into multiple directories` | 入力した clone のディレクトリ。まずプライマリリポジトリのパスの確認を求められます。デフォルト値は現在のディレクトリから推定され、書き換えられます。続いて、各 clone のパスをスペースで区切って入力します。何も入力せずに Enter を押すと、レプリカは登録されません |
+| `3. I haven't configured any replicas yet, and I need help` | この時点では決まりません。worktree と clone の簡単な説明が表示されたあと、この質問がもう一度表示され、そのまま続けて 1、2、4 のいずれかを選べます。レプリカは、別のターミナルでその場で作ることもできます。作り終えたら戻って、1 または 2 を選びます |
+| `4. I don't need concurrent tasks, only sequential execution` | レプリカは登録されず、プライマリリポジトリだけが使われます |
+
+### 登録する worktree を選ぶ [#select-worktrees]
+
+worktree 方式を選ぶと、コマンドは、プライマリリポジトリ以外のすべての worktree を `git worktree list{:sh}` の順に一覧表示します。各行には、チェックの状態、番号、パス、括弧付きのブランチ名が表示されます（detached HEAD の場合、括弧内は `detached HEAD` になります）。
+
+```bash title="Terminal"
+? Select the worktrees to register as replicas:
+  CodeDAG runs concurrent tasks in the selected worktrees.
+  Worktrees created by Claude Code or Codex for their own sessions are not selected by default.
+◉ 1. /work/project-wt-1 (feature-a)
+◯ 2. /work/project/.claude/worktrees/fix-bug (worktree-fix-bug, created by Claude Code)
+◯ 3. /home/me/.codex/worktrees/ab12/project (codex/task, created by Codex)
+
+↑↓ navigate • Space toggle • a toggle all • 1-9 jump • ⏎ confirm • Esc cancel
+```
+
+Claude Code や Codex が自身のセッション用に作った worktree には、デフォルトではチェックが付いておらず、括弧内にどちらが作ったかが示されます。それ以外の worktree には、デフォルトでチェックが付いています。キー操作は、質問の最後の行に表示されています。このうち Esc は初期化全体をキャンセルするもので、ファイルは何も書き込まれません。1 つもチェックを付けなかった場合、プロジェクトにレプリカは登録されず、プライマリリポジトリだけが使われます。一覧表示できる worktree がない場合は、この質問は表示されず、結果は同じです。
+
+ディレクトリがすでに存在しない worktree は、この一覧に入りません。コマンドは質問の前にそれらを表示し、残っている記録を削除するよう案内します。
+
+```bash title="Terminal"
+Skipped worktrees whose directories no longer exist (run `git worktree prune` to remove them):
+  - /work/project-wt-3
+```
+
+ローカル設定を新しく作成する場合、同時実行数の上限はチェックの結果から計算され、チェックを付けたレプリカの数に 1 を加えた値になります。
+
+### 非対話形式で登録する [#register-non-interactive]
+
+非対話形式の初期化では、`--replica-workdirs` でレプリカを列挙します。書き方は worktree でも clone でも同じです。次のコマンドは、プライマリリポジトリ 1 つと worktree のレプリカ 2 つを登録します。初回の初期化であれば、同時実行数の上限は 3 になります。
+
+```bash title="Terminal"
+cdg init --primary-workdir /Users/you/my-app --replica-workdirs /Users/you/my-app-wt-1 /Users/you/my-app-wt-2
+```
+
+あとで `my-app-wt-2` を使わなくなった場合は、`my-app-wt-1` だけを列挙して、もう一度実行します。レプリカを移動した場合は、リストに新しいパスを書きます。`--replica-workdirs` をまったく書かなかった場合、プロジェクトのワークスペースはプライマリリポジトリ 1 つだけになります。これらはどれも、初期化済みのプロジェクトでの再実行にあたります。既存のファイルがどう扱われるか、同時実行数の上限がレプリカの数に合わせて変わるかどうかは、[再初期化と既存の設定の保持](#reinitialize)を参照してください。
+
+## 再初期化と既存の設定の保持 [#reinitialize]
+
+プロジェクトがすでに初期化されている場合、`.codedag/` にある、初期化テンプレートと同じ名前のファイルがどう扱われるかは、実行方法によって異なります。
+
+- **非対話形式の初期化：** 既存のファイルはすべてそのまま残され、質問は一切表示されません。初期化が完了したかどうかは、終了コードでわかります。
+- **対話形式の初期化：** `.codedag` リポジトリにコミット済みのファイルは自動的に残され、それ以外の既存のファイルについては、1 つずつ尋ねられます。`.codedag` にまだコミットが 1 つもない場合は、すべての既存のファイルについて尋ねられます。
+
+対象になるファイルは、`.gitignore`、`settings.jsonc`、`local/settings.local.jsonc`、`dags/untitled_dag.yaml` と、`templates/` にある 2 つの空のテンプレートです。自分で書いたワークフローと、`.codedag/` にあるそのほかのファイルは対象外で、変更されません。`.codedag` リポジトリそのものが初期化し直されることもなく、コミット履歴もリモートの URL も元のままです。
+
+自動的に残されるファイルは、ファイルの競合についての質問の前に一覧表示され、括弧内に残された理由が示されます。
+
+```bash title="Terminal"
+Existing files kept (committed in the .codedag repository and shared with your team):
+  - .codedag/.gitignore
+  - .codedag/settings.jsonc
+To replace a file with the CodeDAG default, delete it and rerun `cdg init`.
+```
+
+そのため、チームで共有している設定とワークフローが再初期化で上書きされることはなく、新しいメンバーがクローンしてきた `.codedag` で初期化するときも、1 つずつ答える必要はありません。
+
+### 1 つずつ尋ねられるときの 6 つの選択肢 [#file-conflicts]
+
+対話形式の初期化は、質問の対象として残ったファイルについて、`File conflicts detected.` の一覧のあとで 1 つずつ尋ねます。どの質問にも、6 つの選択肢があります。
+
+| 選択肢 | 効果 |
+|---|---|
+| `1. Keep` | このファイルを残し、次のファイルの質問に進みます |
+| `2. Overwrite` | このファイルを初期化テンプレートで置き換えます。置き換える前に、もう一度確認を求められます。そのあと、次のファイルの質問に進みます |
+| `3. Keep All` | このファイルと残りのすべてのファイルを残し、それ以上は尋ねません |
+| `4. Overwrite All` | このファイルと残りのすべてのファイルを置き換えます。確認の前に、置き換えられるファイルが一覧表示されます |
+| `5. Apply & Exit` | ここまでのファイルは、すでに行った選択どおりに処理されます。このファイルと残りのファイルはすべて残され、それ以上は尋ねません |
+| `6. Abort` | 今回の初期化をキャンセルし、何も変更しません。ワークスペースの登録も元のままです。Esc を押した場合も同じです |
+
+Abort 以外の選択肢では、いずれも初期化が完了し、今回の結果に合わせてワークスペースの登録が更新されます。
+
+ローカル設定 `local/settings.local.jsonc` は、`.codedag` リポジトリのバージョン管理の対象にならないため、必ず質問の対象になります。残す場合と置き換える場合の違いが最も大きいのは、2 つの設定ファイルです。
+
+| ファイル | 残した場合 | 置き換えた場合 |
+|---|---|---|
+| `local/settings.local.jsonc`（ローカル設定） | デフォルトのエージェントと同時実行数の上限は元の値のままで、初期化でデフォルトのエージェントを尋ねられることもありません。今回指定した `--default-agent` と `--max-concurrency` は、この場合もファイル内の該当するフィールドにそのまま書き込まれます。[ローカル設定を残した場合](#kept-local-settings)を参照してください | 今回の初期化に従って生成し直されます。デフォルトのエージェントは[決定ルール](#default-agent)に従い、同時実行数の上限は、`--max-concurrency` の値、共有設定の値、現在のレプリカの数に 1 を加えた値のいずれかになります。このファイルに手作業で追加したそのほかの設定は失われます |
+| `settings.jsonc`（共有設定） | 元のままです | 空のオブジェクト `{}` になり、元の共有設定はすべて失われます |
+
+そのほかのファイルは、置き換えるとどれも初期化テンプレートの内容に戻ります。自分で書き換えた `dags/untitled_dag.yaml` も元に戻されます。`.gitignore` を残すことを選んだ場合でも、CodeDAG は、`local/` を無視する行がその中に必ずあるようにします。
+
+### ローカル設定を残した場合 [#kept-local-settings]
+
+ローカル設定を残した場合、初期化はこのファイルを書き直しません。ただし、今回指定したオプションに従って、ファイル内のフィールドをその場で更新します。コメント、そのほかの設定、書式は変わりません。`--default-agent` と `--max-concurrency` は、それぞれ確認のメッセージを 1 行出力します。
+
+```bash title="Terminal"
+✓ Updated maxConcurrency to 3 in .codedag/local/settings.local.jsonc.
+```
+
+`--max-concurrency` を指定しなかった場合、初期化は、実際に適用される同時実行数の上限が、現在のワークスペースの数、つまりプライマリリポジトリとレプリカの合計より小さくないかを確認します。レプリカを追加してローカル設定を残した場合が、まさにこれに当たります。対話形式の初期化では、上限をその数に引き上げるかどうかを尋ねられ、デフォルトは Yes です。
+
+```bash title="Terminal"
+maxConcurrency in .codedag/local/settings.local.jsonc is 1, but this project now has 3 workspaces (1 primary + 2 replicas).
+Update maxConcurrency to 3?
+```
+
+No を選ぶか Esc を押した場合は変更されず、コマンドは、手作業で書き換える方法と、`--max-concurrency` を付けて実行し直す方法の 2 つを案内します。非対話形式の初期化では尋ねず、同じ内容を警告として出力します。この場合も、終了コードは 0 です。この確認が行われないのは、共有設定に `maxConcurrency` が書かれていて、ローカル設定がそれを上書きしていない場合だけです。その値は、チームが意図して決めたデフォルト値だからです。
+
+残したチームの共有設定またはローカル設定を解析できない場合や、値が不正な場合は、どちらの方法でも、ファイルの書き込みとワークスペースの登録の更新より前に、終了コード 1 で失敗します。`--default-agent` に指定したエージェントがプロジェクトの `availableAgents` で除外されている場合、非対話形式の初期化は同じように終了コード 1 で失敗します。対話形式の初期化は、書き込めないことを知らせる警告を 1 件出力するだけで、今回明示的に指定したオプションをスキップし、初期化は通常どおり完了します。
+
+## デフォルトのエージェントまたは同時実行数を変更する [#change-defaults]
+
+プロジェクトを初期化したあとで、デフォルトのエージェントを変えたい場合や、同時実行数の上限を調整したい場合は、ローカル設定 `.codedag/local/settings.local.jsonc` の `defaultAgent` または `maxConcurrency` を直接変更します。再初期化する必要はありません。`--default-agent` または `--max-concurrency` を付けて、`cdg init{:sh}` をもう一度実行することもできます。この 2 つのオプションの値は、ローカル設定が新しく作成された場合にも、置き換えられた場合にも、残された場合にも書き込まれます。[ローカル設定を残した場合](#kept-local-settings)を参照してください。
+
+```jsonc title=".codedag/local/settings.local.jsonc"
+{
+  "defaultAgent": "claude", // agent を書いていないタスクは Claude Code が実行するようになる
+  "maxConcurrency": 3 // 同時に実行するタスクは最大 3 つ
+}
+```
+
+変更が反映されるのは、そのあとに投入したワークフローだけで、投入済みのワークフローには影響しません。2 つのフィールドに指定できる値とデフォルト値は、[`defaultAgent`](/ja/docs/reference/settings#default-agent) と [`maxConcurrency`](/ja/docs/reference/settings#max-concurrency) を参照してください。特定のワークフローだけを変えたい場合は、そのワークフローファイルに [`maxConcurrency`](/ja/docs/reference/workflow-file#max-concurrency) を書くか、タスクに [`agent`](/ja/docs/reference/workflow-file#tasks-agent) を書きます。
+
+## 関連ページ
+
+- [並列実行とワークスペース](/ja/docs/guides/parallel-workspaces)：レプリカの準備、CodeDAG への登録、同時に実行されるタスクの数が何で決まるか。
+- [プロジェクト設定](/ja/docs/reference/settings)：`cdg init{:sh}` が書き込むローカル設定と、共有設定とローカル設定の上書きのルール。
+- [プラグイン](/ja/docs/reference/cli/plugin)：初期化のあとで CodeDAG Guide プラグインをインストールまたは更新する方法と、インストールスコープを変更する方法。

@@ -1,0 +1,160 @@
+---
+title: Workspaces and Branches
+description: How parallel tasks run in isolation, each in its own workspace and on its own branch, how results are merged into the integration branch, and when you don't need this isolation.
+icon: FolderGit2
+---
+
+CodeDAG lets tasks in a workflow that don't depend on one another modify the same repository at the same time. By default, each running task has a workspace to itself, which is either the primary repository or one of its replicas, so you can run at most as many tasks at once as you have workspaces. A task's changes are committed on its own task branch, CodeDAG automatically merges upstream results into downstream tasks, and once everything has passed review, the results are merged into an integration branch. No commits are added to your main branch. Workflows that don't compile code or run tests don't need this isolation and can use shared-workspace mode instead.
+
+## Workspaces [#workspaces]
+
+Several tasks changing code at the same time can't share one directory. A checkout can be on only one branch at a time, and one task's half-finished code would be picked up when another task compiles or runs tests. So every task that runs concurrently needs a checkout of its own. The primary repository and each replica of a [project](/docs/concepts/how-it-works#project) are exactly that, one checkout apiece. CodeDAG calls each of them a **workspace** and assigns them to tasks as they run.
+
+In the default isolated-branches mode, each task has a workspace to itself from the time it starts running until its review is finished. The number of workspaces is therefore the upper limit on how many tasks run concurrently, and `maxConcurrency` can only lower it further. See [What determines how many tasks run at once](/docs/guides/parallel-workspaces#concurrency).
+
+By default the primary repository is a workspace too, and it's the first to be assigned a task, so it gets switched to task branches while a workflow runs. If you want to keep developing in the primary repository at the same time, you can have the workflow use only replicas. See [Keep developing while a workflow runs](/docs/guides/parallel-workspaces#keep-main-repo). When a workspace has uncommitted changes, CodeDAG doesn't overwrite them. The task stops at `on-hold` until you commit or stash the changes and then recover it.
+
+Workspaces isolate only files. Local resources such as databases, ports, and cache directories are still shared by all the workspaces. When tasks need them, you have to keep the workspaces out of each other's way, for example by using different ports or different test databases.
+
+## Task branches, the integration branch, and the base [#branches]
+
+A workflow has several tasks that change code, and some of them run at the same time. You need to be able to look at each task's changes separately and roll them back separately, yet bring them all together in the end, and the combined result shouldn't reach your main branch before you've checked it. So in the default isolated-branches mode, each task's changes are committed on its own **task branch**. All task branches start from the same commit, which is called the **base**. In the end, the results that pass review are merged into an **integration branch**. CodeDAG doesn't commit to your main branch. When and how the results get [merged into the main branch](/docs/guides/finish-and-merge#merge) is up to you.
+
+Take the [diamond workflow](/docs/concepts/how-it-works#workflow) `spec-to-code` from How CodeDAG Works as an example. Its tasks and dependencies look like this:
+
+export const diamondChart = `flowchart LR
+  t1["Task 1<br/>Draft the interface contract"] --> t2["Task 2<br/>Write tests from the contract"]
+  t1 --> t3["Task 3<br/>Implement the contract"]
+  t2 --> t4["Task 4<br/>Make the tests pass"]
+  t3 --> t4`;
+
+<Tabs items={['Diagram', 'Code']}>
+  <Tab value="Diagram">
+    <Mermaid chart={diamondChart} />
+  </Tab>
+  <Tab value="Code">
+    <DynamicCodeBlock lang="mermaid" code={diamondChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+The corresponding branches are shown below. Each task branch starts from the base, first merges in the accepted upstream results, and then commits the task's own changes. At the end, everything is merged into the integration branch, and `main` doesn't change at all.
+
+export const branchesChart = `%%{init: {"themeVariables": {"commitLabelFontSize": "12px"}}}%%
+gitGraph
+  commit id: "Base"
+  branch "cdg/spec-to-code/t1-draft-the-interface-contract"
+  commit id: "Task 1 changes"
+  checkout main
+  branch "cdg/spec-to-code/t2-write-tests-from-the-contract"
+  merge "cdg/spec-to-code/t1-draft-the-interface-contract" id: "Task 2 merges upstream"
+  commit id: "Task 2 changes"
+  checkout main
+  branch "cdg/spec-to-code/t3-implement-the-contract"
+  merge "cdg/spec-to-code/t1-draft-the-interface-contract" id: "Task 3 merges upstream"
+  commit id: "Task 3 changes"
+  checkout main
+  branch "cdg/spec-to-code/t4-make-the-tests-pass"
+  merge "cdg/spec-to-code/t2-write-tests-from-the-contract" id: "Task 4 merges task 2"
+  merge "cdg/spec-to-code/t3-implement-the-contract" id: "Task 4 merges task 3"
+  commit id: "Task 4 changes"
+  checkout main
+  branch "cdg/spec-to-code/integration"
+  merge "cdg/spec-to-code/t4-make-the-tests-pass" id: "Merge into integration"`;
+
+<Tabs items={['Diagram', 'Code']}>
+  <Tab value="Diagram">
+    <Mermaid chart={branchesChart} />
+  </Tab>
+  <Tab value="Code">
+    <DynamicCodeBlock lang="mermaid" code={branchesChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+The base is fixed when the workflow starts running, not when you submit it. If you set [`baseRef`](/docs/reference/workflow-file#base-ref), the base is the commit it points to at that moment. If you don't, it's the commit checked out in the primary repository at that moment.
+
+After all tasks have been reviewed, CodeDAG checks out the integration branch in the primary repository and merges the results into it. So when the workflow finishes, the primary repository is left on the integration branch and isn't switched back to the branch you were on. If the next workflow doesn't set `baseRef` and you haven't switched back to the main branch either, it starts from the results on this integration branch.
+
+## Merges and conflicts at join nodes [#merge-and-conflicts]
+
+When a task depends on several parallel upstream tasks, their results sit on separate task branches. Before the task starts, they have to be merged, and any conflicts have to be resolved first. A task like this is called a join node.
+
+There are two common designs for who does this step. One is manual: whoever writes the workflow adds a node before each join node whose only job is to merge the branches and resolve conflicts. The other is automatic: the orchestration engine does it before the join node starts. CodeDAG uses the second. Here's the same diamond workflow under each design:
+
+export const mergeCompareChart = `%%{init: {"flowchart": {"padding": 10, "rankSpacing": 32}}}%%
+flowchart TB
+  subgraph manual["Manual: add a merge node"]
+    direction LR
+    m1["Task 1<br/>Draft the<br/>interface contract"] --> m2["Task 2<br/>Write tests from<br/>the contract"]
+    m1 --> m3["Task 3<br/>Implement<br/>the contract"]
+    m2 --> m4["Task 4<br/>Merge branches,<br/>resolve conflicts"]
+    m3 --> m4
+    m4 --> m5["Task 5<br/>Make the<br/>tests pass"]
+  end
+  subgraph auto["Automatic: by CodeDAG"]
+    direction LR
+    t1["Task 1<br/>Draft the<br/>interface contract"] --> t2["Task 2<br/>Write tests from<br/>the contract"]
+    t1 --> t3["Task 3<br/>Implement<br/>the contract"]
+    subgraph t4["Task 4"]
+      direction LR
+      tm(["CodeDAG merges<br/>automatically and<br/>resolves conflicts"]) --> tw["Make the<br/>tests pass"]
+    end
+    t2 --> tm
+    t3 --> tm
+  end
+  manual ~~~ auto
+  style tm stroke-dasharray: 5 5`;
+
+<Tabs items={['Diagram', 'Code']}>
+  <Tab value="Diagram">
+    <Mermaid chart={mergeCompareChart} />
+  </Tab>
+  <Tab value="Code">
+    <DynamicCodeBlock lang="mermaid" code={mergeCompareChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+Under the manual design, a workflow has to include merge tasks on top of its development tasks, and the more it branches, the more tedious that gets. CodeDAG hands this job to the engine. Before a join node starts, the engine **automatically merges** the accepted results from every upstream task into the join node's branch. That's the dashed box inside task 4 in the diagram. So in a CodeDAG workflow, you write only the development tasks and the dependencies between them, and no separate merge tasks.
+
+When a merge runs into conflicts, CodeDAG starts a separate agent session just to resolve them, for up to three rounds. That session can see the title and prompt of each upstream task and merges according to what each one intended. It doesn't do the join node's own work. If the conflicts are still unresolved after three rounds, the task stops at `on-hold` until you finish the merge in its workspace and then recover the task. For the steps, see [Merge conflicts](/docs/troubleshooting/troubleshooting#hold-merge-conflict) in Troubleshooting.
+
+The merge into the integration branch after all tasks have been reviewed is the same kind of automatic merge, and conflicts are handled the same way. The only difference is that if they're still unresolved after three rounds, it's the whole workflow that stops at `on-hold`.
+
+## When a result isn't good enough [#fallback]
+
+When a task's result is unusable, you want to roll back just that one task. Its changes are all on its own task branch, so rolling it back doesn't drag any other task along. That leaves only two things to settle: where to roll back to, and whether to keep the original result. CodeDAG has an answer for each:
+
+- **Clean baseline:** The commit where the upstream results have already been merged and the task hasn't started its own work. Rolling the task branch back to this point throws away only the task's own changes, and the results merged in from upstream are still there.
+- **Snapshot branch:** A branch created before the rollback as a record, holding the task's changes as they were at the time. Those changes don't flow downstream, and you can still restore them later.
+
+The ways to handle changes during review are all combinations of these two: whether to keep a snapshot (`--code snapshot` or `--code discard`), and whether to start a fresh session after the rollback and rework the task (`rework`). For how to choose, see [Choose an action based on your assessment](/docs/guides/review-tasks#choose-action). For how to restore changes, see [Restore some of the changes from a snapshot](/docs/reference/branches-and-files#restore-from-snapshot).
+
+## Execution modes [#execution-modes]
+
+The point of giving every task its own workspace and its own task branch is to isolate tasks that change code at the same time: when one task compiles or runs tests, it doesn't pick up another task's half-finished code. Tasks such as writing docs, translating, or doing research don't compile or run tests, so they aren't exposed to that kind of interference. Preparing replicas, creating branches, merging, and committing for them is just extra overhead.
+
+So CodeDAG lets each workflow choose whether it wants this isolation. That choice is called the **execution mode**, and you set it with [`executionMode`](/docs/reference/workflow-file#execution-mode) in the workflow file. The default is **isolated-branches mode** (`isolated-branches`), which is what the preceding sections describe. The other is **shared-workspace mode** (`shared-workspace`), in which all tasks run directly in the same workspace, with no branches, no merges, and no commits. It's the mode the [quickstart](/docs/get-started/quickstart) uses.
+
+In shared-workspace mode, all tasks run on the primary repository's current branch by default, and the results are left in the workspace as uncommitted changes for you to check and commit yourself. This mode needs no replicas, and the number of tasks that run concurrently is determined by `maxConcurrency` alone.
+
+The price of skipping isolation is that you can no longer trace or roll back changes task by task. CodeDAG no longer distinguishes which changes belong to which task, and task branches, automatic merges, snapshots, discarding, and rework don't exist in this mode. Writes aren't isolated anymore either. For what happens when tasks running at the same time change the same file, see [What if two parallel tasks change the same file?](/docs/guides/designing-tasks-and-prompts#same-file). So work that changes code and runs tests is still better suited to the default isolated-branches mode.

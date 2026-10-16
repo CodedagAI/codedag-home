@@ -1,0 +1,214 @@
+---
+title: Review Tasks and Workflows
+description: When a task or workflow stops and waits for your review, check the result, choose a review action, and give a decision on the whole workflow.
+icon: UserCheck
+---
+
+When a task or workflow stops at a [review gate](/docs/concepts/review-gates#review-gate), the process waits until you give a decision, and anything downstream that depends on it waits too. Your options go beyond accepting the result or turning it down. If the result is mostly usable, you can fix a few things yourself or have the original session keep working on it. If it went in the wrong direction, you can have a fresh session redo the task from scratch. And even when you really don't want a result, its changes are saved to a snapshot by default, so you can still restore them later.
+
+The examples on this page all use a workflow named `feature`. Task 1 writes the interface contract for a new function, `sub`. Tasks 2 and 3 both depend on task 1: one implements the function, and the other writes its tests.
+
+## When your review is needed
+
+By default, tasks and workflows are auto-accepted when they finish, and the process doesn't stop. It stops at a gate and waits for you in only three cases:
+
+- **The task-level gate is closed.** When a task's review setting is `none`, the task stops at `done` when it finishes. The setting can come from the task's `autoAccepted`, the workflow's `taskAutoAccepted`, the project settings, or `--task-auto-accepted none` at submission.
+- **The task left no changes.** In isolated-branches mode, an agent task that finishes without changing a single file stops and waits for you to confirm, even when its gate is open.
+- **The workflow-level gate is closed.** When a workflow sets `dagAutoAccepted: none`, the whole workflow stops and waits for you once every task has a decision and the results have been merged into the integration branch. See [Review the whole workflow: dag review](#dag-review).
+
+`cdg dag status{:sh}` shows which task is waiting for you. Here's the output of `cdg dag status feature{:sh}`. Task 1 sets `autoAccepted: none` and has finished, so it's stopped at `[done] [done]`. Tasks 2 and 3, which depend on it, are stopped at `[pending] [blocked]`, waiting for a decision on it. A task that stopped because it left no changes also has `— zero output, awaiting manual review` at the end of its line.
+
+```bash title="Terminal"
+[TZ: -04:00] 2026-09-30 11:07:25
+
+Workflow: .codedag/dags/feature.yaml
+  Phase: 📤 submitted
+  Queue Position: 1
+  Status: 🔘 pending
+  Substatus: blocked
+
+Submitted Tasks (3):
+  🔵 [done]        [done]  Task 1: Write the interface contract
+  🔘 [pending]     [blocked]  Task 2: Implement the sub function
+  🔘 [pending]     [blocked]  Task 3: Write tests for sub
+
+Progress: 1/3 tasks completed (33%)
+```
+
+If you submitted with [`--attach`](/docs/guides/run-and-monitor#attach), the terminal following the logs stops at this point and shows the review menu right there.
+
+## Check the result before you review [#check-results]
+
+Before you review a task, look at the changes it left and at its own account of its work. The changes are in the task's workspace, and the account is at the end of the task's log. If you still have questions, you can enter the task's session and ask. The steps below apply to the default isolated-branches mode. For how to check results in shared-workspace mode, see [How does review differ in shared-workspace mode?](#shared-workspace).
+
+While a task is stopped at its gate, its workspace is still on its task branch. The output of `cdg task status 1 -w feature{:sh}` tells you where to look. `Workspace:` is the directory the task ran in, `Branch:` is its task branch, and `Base Commit:` is its [clean baseline](/docs/concepts/workspaces-and-branches#fallback), the commit that already has the upstream results merged in but none of the task's own work.
+
+CodeDAG commits a task's uncommitted changes to the task branch only when you accept the task. So if the task agent didn't commit anything itself, `git status` and `git diff` in this workspace show all of the task's changes. If it did commit, compare against `Base Commit` to see everything at once, with no upstream results mixed in:
+
+```bash title="Terminal"
+git -C <Workspace> diff <Base Commit>
+```
+
+To find out what the task did and why, look at the end of its log. A task agent usually summarizes its work before it finishes:
+
+```bash title="Terminal"
+cdg task logs 1 -w feature -n 50
+```
+
+If you still have questions after that, run `cdg task view 1 -w feature{:sh}` to enter the task's session and ask it directly. For how to enter and exit, see [Enter a session, make changes, and exit](/docs/guides/intervene-and-control#task-view).
+
+## Choose an action based on your assessment [#choose-action]
+
+Review actions fall into two groups. `accept`, `cancel`, and `defer` give a final decision: the task enters `reviewed` and ends there. `revise` (revise it yourself), `request-changes`, and `rework` give no decision: work on the task continues, and the task comes back to the gate when the changes are done. Choose according to your assessment of the result:
+
+| Your assessment of the result | Action | What happens next |
+|---|---|---|
+| You're satisfied with it | `accept` | The task ends, and its result goes downstream |
+| It's mostly usable, and you want to fix a few things yourself | Edit directly in the workspace, then `accept` | Your edits are committed together with the agent's changes, and the result goes downstream |
+| It's mostly usable, and you want the agent to keep working on it | `request-changes` | The original session keeps working on the existing result, and the task returns to the gate when it's done |
+| It went in the wrong direction, and you want to start over | `rework` | The current result is saved to a snapshot, a fresh session redoes the task from the clean baseline, and the task returns to the gate when it's done |
+| You don't want this result | `cancel` | The task ends, its changes don't go downstream, and you choose what happens to the downstream tasks |
+| You want to skip this step for now | `defer` | Same as `cancel`, except that by default the downstream tasks are deferred along with it |
+
+The command takes the form `cdg task review <action> <task-id> -w <workflow>{:sh}`. You can also leave out `review`, as in `cdg task accept 1 -w feature{:sh}`.
+
+### Use the result as is: accept
+
+`accept` accepts the result. The task enters `reviewed`, and the downstream tasks that depend on it can start and build on that result.
+
+```bash title="Terminal"
+cdg task review accept 1 -w feature
+```
+
+When you accept a task, CodeDAG commits any uncommitted changes in its workspace to the task branch. The commit message defaults to the task title. If you add a review note with `-m`, the note also serves as the commit message. Accepting is a final decision and can't be changed afterward. For the reason, see [Review decisions can't be changed](/docs/concepts/review-gates#no-undo). If you find a problem with the result only after you've accepted it, see [You find a problem after a task already has a review decision](/docs/troubleshooting/troubleshooting#after-conclusion) for what you can do.
+
+### Edit the result yourself
+
+While a task is stopped at its gate, you can edit files directly in its workspace and then run `accept`. Your edits are committed to the task branch together with the task agent's changes. Keep the workspace on the task branch while you edit, because CodeDAG checks this when it accepts the task.
+
+You don't need to run `revise` first. The task is already stopped at `done`, so `revise` wouldn't change anything. Use it only when you want to save the agent's changes to a snapshot, or discard them outright, and then write the result from scratch yourself. In that case, add `--code snapshot` or `--code discard` (for what each value means, see [`--code`](/docs/reference/cli/review#code)):
+
+```bash title="Terminal"
+cdg task review revise 1 -w feature --code snapshot
+```
+
+### Have it keep working on the existing result: request-changes [#request-changes]
+
+When a result is mostly usable but not quite there, use `request-changes` to tell the original session what to change and have it keep working on the existing result. When it's done, the task returns to the gate.
+
+```bash title="Terminal"
+cdg task review request-changes 1 -w feature -m "Keep the existing function signature and the description of the return value. Add a description of what sub does when a or b isn't a number, and give two example calls."
+```
+
+The text you pass with `-m` goes to the task agent as is, so write it the way you'd write a prompt: say what to keep, what to change and how, and what counts as done. Without `-m`, CodeDAG sends a built-in request that has the agent reread the original task, find what it hasn't satisfied yet, and keep working. That's useful when you know the result isn't good enough but can't point to a specific problem.
+
+After you request changes, the task goes back to `working`. Before the agent starts, CodeDAG commits the current changes to the task branch by default, so you can later use `git diff` to see just what the new round changed. To skip that commit, add `--code none`.
+
+When the changes are finished, the task becomes `done` again and is reviewed once more under its original review setting. If the gate is closed, the task stops and waits for you again, and you can keep requesting changes until you're satisfied. If the gate is open and the task had stopped only because it left no changes, it's auto-accepted this time, now that it has left some.
+
+If you'd rather work through the changes with the agent in a back-and-forth, you can also enter its session and tell it directly. For how to choose between the two, see [Choose how to observe and make changes](/docs/guides/intervene-and-control#choose-intervention).
+
+### Start over from scratch: rework
+
+`rework` saves the current result to a snapshot branch, rolls the task branch back to its clean baseline from before the task began, and starts a fresh session to redo the task. Your feedback is passed to the new session as well.
+
+```bash title="Terminal"
+cdg task review rework 2 -w feature -m "The previous version also changed existing functions along the way. This time, add only sub, handle its arguments as the interface contract specifies, and don't touch any other function."
+```
+
+The clean baseline keeps the results merged in from upstream tasks, so only this task's own changes are rolled back. For what that means, see [When a result isn't good enough](/docs/concepts/workspaces-and-branches#fallback). The new session receives the original prompt plus all the feedback you've given on this task. Once the rework starts, `cdg task view{:sh}` enters the new session.
+
+The previous result stays on the snapshot branch, where you can compare against it or restore the parts that are useful. See [Restore some of the changes from a snapshot](/docs/reference/branches-and-files#restore-from-snapshot). If you're sure you don't need to keep it, add `--code discard` to discard it outright.
+
+Unlike `request-changes`, `rework` isn't influenced by the previous approach or conversation. It suits cases where the direction was wrong and starting over beats patching the existing result. A rework doesn't use any additional CodeDAG credits. See [Rework at key nodes instead of rerunning everything](/docs/account/cost-control#rework). `rework` is available only in isolated-branches mode.
+
+### Drop the task: cancel [#cancel]
+
+`cancel` ends the task without passing its changes downstream. When you cancel, you also decide what happens to the downstream tasks that depend on it.
+
+```bash title="Terminal"
+# Cancel task 1 along with tasks 2 and 3, which depend on it
+cdg task review cancel 1 -w feature --downstream cascade
+```
+
+If the task has changes, by default CodeDAG first saves them to a snapshot branch with a name like `cdg/<workflow-name>/snapshots/t<task-id>-<title>-<time>`, and then rolls the task branch back to the clean baseline. So after you cancel, your repository has one more branch like this, and if you change your mind later, you can still restore the changes from it. See [Restore some of the changes from a snapshot](/docs/reference/branches-and-files#restore-from-snapshot). If you're sure you don't need them, add `--code discard`. The changes are then discarded, and no snapshot branch is created.
+
+Use `--downstream` to say what happens to the downstream tasks:
+
+- `proceed`: The downstream tasks run as usual, as if this task didn't exist. They get the results of the canceled task's upstream tasks, without the canceled task's own changes.
+- `hold`: The downstream tasks that directly depend on it stop at `on-hold` and wait for your decision. If you still want them to run, release them with `cdg task recover --below 1 -w feature{:sh}`. If you don't, cancel or defer them in the same way. See [Downstream tasks or workflows put on hold](/docs/troubleshooting/troubleshooting#downstream-hold).
+- `cascade`: Every downstream task that depends on it, directly or indirectly, is canceled along with it and doesn't run.
+
+If you omit `--downstream` and other tasks depend on this one, the command asks you to choose in the terminal. Where there's no interactive terminal, such as in a script or when an agent runs the command, it fails without changing anything, so set the option explicitly there.
+
+### Set the task aside for now: defer
+
+`defer` means you're skipping this step for now and will deal with it later. It treats the code the same way `cancel` does: the changes are saved to a snapshot branch by default and aren't passed downstream. The difference is that without `--downstream`, it defaults to `cascade`, and all the downstream tasks that depend on it are deferred along with it. To defer just this one task and let the downstream tasks run as usual, set `--downstream proceed` explicitly.
+
+Apart from that default, deferring and canceling have the same effect in this run. What differs is the decision that's recorded: `deferred` means the work is still to be done later, and `cancelled` means you don't want it. To pick up the deferred work later, write it into a new workflow. See [Run only a few of the tasks](/docs/guides/finish-and-merge#continue-remaining).
+
+## When a task isn't stopped at a gate [#not-at-gate]
+
+Review actions aren't only for tasks that have finished and stopped at a gate. You can also review these kinds of tasks directly:
+
+- **A killed or paused task:** You don't have to recover it first. You can accept the result it has so far, end it, or use `request-changes` to have it carry on with your request. If you run `revise` on it, it returns to `done` and waits for you to finish your edits and give a decision.
+- **A task that's still running:** Add `-k` to the review command to kill the task first and then review it, or add `-p` to wait until it finishes its current step and then review it. See [`-k` and `-p`](/docs/reference/cli/review#stop-before-review). If you only want to adjust its direction, you can also enter its session and tell it directly. See [Choose how to observe and make changes](/docs/guides/intervene-and-control#choose-intervention).
+- **A task put on hold before it started:** A task that stopped while CodeDAG was preparing to start it, for example because its workspace isn't clean or its fixed branch name is already taken, has no result to review yet. You can still end it directly with `cancel` or `defer`. You don't have to clean anything up first, and CodeDAG doesn't touch the changes in that workspace. `accept`, `revise`, `request-changes`, and `rework` are rejected for these tasks. Deal with the cause and recover the task first. See [A task or workflow is on hold](/docs/troubleshooting/troubleshooting#on-hold).
+
+## Review several tasks at once
+
+A review command can take several task IDs, or you can use a task selector to pick a group of tasks by their dependencies. All of them get the same action and the same options. Both commands below select tasks 2 and 3:
+
+```bash title="Terminal"
+cdg task accept 2 3 -w feature
+# --below 1 selects all of task 1's downstream tasks, not task 1 itself
+cdg task accept --below 1 -w feature
+```
+
+In review commands, every selector except `--only` takes just one task ID. If some of the selected tasks already have a decision, the command skips them and first asks whether to go ahead with the rest. If the tasks picked by a selector include some that haven't started running, `accept` also asks whether to record them as accepted without running them, and the default is not to accept them. It doesn't ask this about tasks you name one by one. With no interactive terminal to answer in, either question makes the command fail, so add `-y` once you've confirmed that this is what you want. For the full selector syntax, see [Task selectors](/docs/reference/cli#task-selectors).
+
+## Review the whole workflow: dag review [#dag-review]
+
+A workflow-level review gives a decision on the results as a whole. After you run `accept`, `cancel`, or `defer`, the workflow enters `reviewed` and leaves the queue, and only then do the workflows behind it start. For how it relates to task-level review, see [Review gates](/docs/concepts/review-gates#review-gate).
+
+A workflow that sets `dagAutoAccepted: none` stops at the gate once every task has a decision and the results have been merged into the integration branch. `cdg status{:sh}` shows it as `[done] [done]`, and in `cdg dag status{:sh}` all the tasks are listed under `Reviewed Tasks`. The integration branch already holds the merged results, so check them there before you give a decision. The output of `cdg dag status{:sh}` includes `Integration Workspace:` (the directory where the integration branch is checked out), `Integration Branch:`, and `Base Commit:` for the workflow's base. Use them to compare the full set of changes, as described in [Check the results on the integration branch](/docs/guides/finish-and-merge#inspect).
+
+| Command | Results on the integration branch | Later workflows in the queue, when `--downstream` is omitted |
+|---|---|---|
+| `cdg dag review accept feature{:sh}` | The merged results are kept | Start as usual |
+| `cdg dag review cancel feature{:sh}` | The branch returns to this workflow's base, and by default the full set of results is saved to a snapshot branch first | If there are later workflows, you're asked to choose in the terminal |
+| `cdg dag review defer feature{:sh}` | Same as `cancel` | All deferred along with it |
+
+You can leave out `review` in all three commands, as in `cdg dag accept feature{:sh}`. Here, `--downstream` applies to every workflow behind this one in the queue. `proceed` lets them start as usual. `hold` stops them at `on-hold` until you release them with `cdg dag recover <workflow>{:sh}`. `cascade` gives them the same decision, and they don't run.
+
+<Callout type="warn">Without `--downstream`, `cdg dag review defer{:sh}` defers every workflow behind it in the queue along with it, and none of them run. To defer just this one workflow, set `--downstream proceed` explicitly.</Callout>
+
+Shared-workspace mode has no integration branch. For how workflow-level review differs there, see [How does review differ in shared-workspace mode?](#shared-workspace).
+
+You don't have to wait for the workflow-level gate to use `dag review`. It can end a run at any time. Tasks that already have a decision keep it. Tasks that have run but have no decision yet get the same decision as the workflow, so `cdg dag review accept{:sh}`, for example, accepts them. Tasks that haven't started don't run and get no review result. If tasks are still running, add `-k` to kill them first, or add `-p` to wait until they finish their current step. See [`-k` and `-p`](/docs/reference/cli/review#stop-before-review).
+
+## Common questions
+
+### What if a task that already has a decision still needs changes?
+
+Once a decision is given, it can't be changed within that run. What you can still fix is the code, not the review decision. Wait for the run to end, deal with the task's changes in Git, and then write the part that needs redoing into a new workflow. For how, see [You find a problem after a task already has a review decision](/docs/troubleshooting/troubleshooting#after-conclusion).
+
+### The task stopped at on-hold after I requested changes
+
+When a `request-changes` or `rework` request can't be delivered to the task agent, the task stops at `on-hold`, and the `Reason:` line of `cdg task status 1 -w feature{:sh}` shows `continuation-dispatch-failed`. Run `cdg task recover 1 -w feature{:sh}`, and CodeDAG delivers the same request again. You don't need to make it a second time. For other reasons, see [Agent session problems](/docs/troubleshooting/troubleshooting#hold-agent-session).
+
+### How does review differ in shared-workspace mode? [#shared-workspace]
+
+Shared-workspace mode has no task branches. All tasks write files directly in the same workspace, which is the primary repository by default. So a review only decides how the process continues and doesn't touch any files:
+
+- At the task level, you can use `accept`, `cancel`, `defer`, `revise`, and `request-changes`, but not `rework`. `--code` isn't allowed at either the task level or the workflow level.
+- A task that left no changes doesn't stop and wait for you to confirm. It's auto-accepted as usual. If the workspace didn't change while the task ran, the task's line in `cdg dag status{:sh}` is marked `— zero output` at the end, and a warning is written to the task log as well. If another task, or you, changed the workspace while it ran, the mark doesn't appear. To reliably stop tasks that produce nothing, use isolated-branches mode, or set `taskAutoAccepted: none` and review each task manually.
+- Canceling or deferring a task doesn't take back the files it wrote, and downstream tasks still see them. To undo them, deal with the changes in the workspace yourself using Git.
+- Before a review, `git status` in the workspace shows the changes from all tasks, with no way to tell them apart by task. You can check them one by one against the output files agreed on in the prompts.
+- There's no integration branch, so a workflow-level review likewise gives only a decision about the process. The files stay in the workspace for you to check and then commit or undo yourself.
+
+## Related
+
+- [Review Gates and Auto-Accept](/docs/concepts/review-gates): Where the review gates are, how to set auto-accept, and how the two kinds of review actions differ.
+- [Finish, Merge, and Clean Up](/docs/guides/finish-and-merge): After a workflow's review is finished, how to check the integration branch, merge into the main branch, and run the workflow again.
+- [Review](/docs/reference/cli/review): Every option of the review commands, with defaults and the combinations allowed.

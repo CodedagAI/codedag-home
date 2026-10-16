@@ -1,0 +1,99 @@
+---
+title: 状态含义
+description: 阶段、状态、子状态与审核结果各表示什么，看到它们时该继续等待还是动手处理。
+icon: CircleDot
+---
+
+`cdg status{:sh}`、`cdg dag status{:sh}` 和 `cdg task status{:sh}` 用阶段、状态、子状态和审核结果描述工作流与任务当前的情况。`blocked`、`working` 和 `draining` 通常只需要等待；`on-hold`、`paused`、`killed`，以及停在 `done` 等你审核的任务不会自己继续，要你处理，做法见[需要处理时](#what-to-do)。
+
+## 阶段 [#phases]
+
+[阶段](/zh/docs/concepts/how-it-works#phases)表示工作流或任务是否已经提交、是否已经审核，按 `planning`、`submitted`、`reviewed` 的顺序前进。看板按阶段把工作流和任务分组显示。
+
+| 阶段 | 含义 |
+|---|---|
+| `planning`（计划中） | 还没有提交，不会执行。写好还没提交的工作流处在这个阶段；清除审核记录之后，工作流和任务也回到这里，可以重新提交。 |
+| `submitted`（已提交） | 已经提交，还没有最终审核结论。工作流在队列中排队、执行或等待审核。只有这个阶段的工作流和任务才有状态与子状态。 |
+| `reviewed`（已审核） | 已经有了最终审核结论，不再执行。工作流离开队列；任务的结果能否交给下游，由它的[审核结果](#review-results)决定。 |
+
+任务和工作流各有自己的阶段。任务随工作流一起提交，但逐个审核，所以工作流还处在 `submitted` 时，其中已经审核过的任务就处在 `reviewed`，`cdg dag status{:sh}` 把它们列在 `Reviewed Tasks` 一组。
+
+`reviewed` 只说明审核有了结论，不说明结果已经进入主分支：隔离分支模式下，接受的结果留在集成分支 `cdg/<工作流名>/integration` 上；共享工作区模式下，结果是工作区里还没提交的改动。合入主分支由你来做，见[收口、合入主分支与清理](/zh/docs/guides/finish-and-merge)。
+
+## 任务的状态与子状态 [#task-status]
+
+任务提交之后、审核之前，它此刻的情况由[状态和子状态](/zh/docs/concepts/how-it-works#status)表示，看板上成对显示，例如 `[pending] [blocked]`，前一个是状态，后一个是子状态。一共有七种组合：
+
+| 状态 | 子状态 | 含义 |
+|---|---|---|
+| `pending`（等待中） | `blocked`（等待上游） | 还没开始，条件满足后会自动开始。它在等依赖的上游任务全部完成并通过审核；或者上游都已通过审核，但同时执行的任务已经达到并发上限，例如隔离分支模式下暂时没有空闲的工作区。工作流还在队列中排队时，它的任务也都是这个组合。 |
+| `pending` | `on-hold`（搁置） | 被搁置，要你处理后才能继续，原因显示在 `cdg task status{:sh}` 的 `Reason:` 行。它可能发生在开始之前，例如工作区有未提交的改动、合并上游结果的冲突没能自动解决；也可能发生在执行途中，例如 Claude Code 的会话因 API 错误停止，这时任务同样回到 `pending`。审核上游时选择了搁置下游，下游也会停在这里。 |
+| `in-progress`（执行中） | `working` | 任务 Agent 正在执行。Agent 在会话里等你批准某个操作时，任务也显示为 `working`。 |
+| `in-progress` | `draining`（排空） | 任务被暂停，但 CodeDAG 不打断正在工作的任务 Agent，等它当前这一轮工作结束后，任务变为 `paused`。在此之前，Agent 仍可能修改文件。 |
+| `stopped`（已停止） | `paused` | 被暂停，停在原处，不会自己继续。对还没开始的任务执行 `kill`，结果也是 `paused`。 |
+| `stopped` | `killed` | 被中断。任务 Agent 当前的输出被立即打断，会话保留下来，之后可以在原会话中继续。 |
+| `done`（已完成） | `done` | 执行完成，等待审核。默认自动接受，任务随即进入 `reviewed`，这个组合一闪而过。任务的[审核策略](/zh/docs/reference/workflow-file#auto-accept-values)为 `none` 时，它停在这里等你审核；隔离分支模式下的任务如果没有留下任何改动，即使设了自动接受也会停在这里，`cdg dag status{:sh}` 在这一行末尾标注 `zero output, awaiting manual review`。共享工作区模式下这样的任务照常自动接受，只标注 `zero output`。 |
+
+## 工作流的状态与子状态 [#workflow-status]
+
+工作流的状态概括它所有还没审核的任务：只要还有任务在执行，工作流就是 `in-progress`；没有任务在执行时，才会显示为 `pending`、`stopped` 或 `done`。所以想知道整个工作流是否已经停下，先看它的状态是不是 `in-progress`。
+
+### 部分任务被暂停或中断 [#partly-stopped]
+
+下面三个子状态只有工作流才有，出现在你只暂停、中断或恢复了其中一部分任务的时候。它们的状态都是 `in-progress`，表示工作流还没有完全停下：
+
+| 状态 | 子状态 | 含义 |
+|---|---|---|
+| `in-progress` | `draining-with-working` | 部分任务被暂停，正在收尾；其他任务仍在正常执行。 |
+| `in-progress` | `paused-with-active` | 部分任务已经暂停，其他任务仍在执行或收尾。 |
+| `in-progress` | `killed-with-active` | 部分任务已被中断，其他任务仍在执行或收尾。 |
+
+被暂停或中断的任务不会自己继续，其余任务照常执行，它们的下游也会照常开始。等到没有任务还在执行，工作流变为 `[stopped] [paused]` 或 `[stopped] [killed]`，并一直停在那里，排在它后面的工作流也要等你恢复或审核它。想让整个工作流停下，对工作流使用 `cdg dag pause{:sh}` 或 `cdg dag kill{:sh}`，两者的区别见[控制命令语法与适用状态](/zh/docs/reference/cli/control#syntax)。
+
+### 与任务同名的子状态 [#shared-substatus]
+
+其余子状态与任务的子状态同名，含义也相同，只是说的是工作流中的任务：例如 `[stopped] [paused]` 表示没有任务在执行，且至少有一个任务被暂停。其中几种组合在工作流上有额外的含义：
+
+- `[pending] [blocked]`：没有任务在执行，还有任务在等待开始。刚提交、在队列里排队的工作流就是这个组合。执行途中，如果剩下的任务都在等一个停在 `done`、等你审核的上游，工作流同样显示为它，这时它不会自己继续。
+- `[pending] [on-hold]`：没有任务在执行，且至少有一个任务被搁置；也可能是工作流本身被搁置，例如 CodeDAG 额度不足而无法开始，或者全部任务结束后合并到集成分支时出现了没能自动解决的冲突。工作流本身的搁置原因显示在 `cdg dag status{:sh}` 的 `Reason:` 行，`cdg status{:sh}` 也会在工作流文件名后面的括号里列出它。
+- `[done] [done]`：没有任务在等待开始、执行或停着，但审核不一定结束了。其中可能有任务停在 `done` 等你审核；所有任务都审核过、整个工作流的审核策略又是 `none`（`dagAutoAccepted: none`）时，工作流停在这里，等你对整个工作流给出结论。
+
+工作流的子状态只能反映一类任务。执行中的任务优先于搁置的任务，所以工作流显示 `[in-progress] [working]` 时，仍可能有任务停在 `on-hold`；同理，`[stopped] [paused]` 的工作流里也可能有被搁置的任务。每个任务的实际情况，以 `cdg dag status{:sh}` 中各任务的那一行为准。
+
+## done 与 reviewed 有什么区别 [#done-vs-reviewed]
+
+`done` 是状态，表示任务 Agent 做完了，结果还没有被认可；`reviewed` 是阶段，表示审核有了结论。两者之间隔着一道[审核门禁](/zh/docs/concepts/review-gates#review-gate)：默认情况下它自动通过，所以 `done` 往往一闪而过；任务或工作流停在 `done`，说明它在等你给出结论。在此之前，依赖这个任务的下游任务不会开始，`[done] [done]` 的工作流也仍在队列中，排在后面的工作流不会开始。
+
+在 `cdg dag status{:sh}` 里，两者出现在不同的分组：处在 `done` 的任务仍在 `Submitted Tasks` 一组，显示为 `[done] [done]`；进入 `reviewed` 的任务移到 `Reviewed Tasks` 一组，只显示审核结果。
+
+## 审核结果 [#review-results]
+
+进入 `reviewed` 的任务和工作流都带有一个审核结果，记录最终的结论：接受的结果可以继续使用，取消或推迟的结果不会交给下游。
+
+| 结果 | 含义 |
+|---|---|
+| `accepted`（已接受） | 用 `accept` 接受了结果。任务的结果交给下游；隔离分支模式下，工作流的结果留在集成分支上。 |
+| `auto-accepted`（自动接受） | 按自动接受的设置，由 CodeDAG 自动接受，效果与 `accepted` 相同。 |
+| `cancelled`（已取消） | 用 `cancel` 取消，不要这个结果。隔离分支模式下，被取消的任务结果不会交给下游，也不会合并到集成分支；被取消的是工作流时，集成分支回到本次工作流的起点。 |
+| `deferred`（已推迟） | 用 `defer` 推迟，这一步这次先不完成，留到以后处理。对结果的处理与 `cancelled` 相同。 |
+
+审核时如果选择级联处理下游（`--downstream cascade`），直接或间接依赖它、还没开始的下游任务，或者队列中排在后面的工作流，会得到同样的 `cancelled` 或 `deferred`，即使它们从来没有执行过。
+
+对整个工作流给出结论时，已经开始执行、还没审核的任务随工作流得到同样的结果；还没开始的任务没有审核结果：它们随工作流一起进入 `reviewed`，自身从未被单独审核，`cdg dag status{:sh}` 把它们列在 `Unreviewed Tasks` 一组，`cdg task status{:sh}` 的 `Disposition:` 行显示 `unreviewed`，两处都保留它们停下时的状态与子状态。
+
+取消或推迟时，任务已经做出的改动怎样处理，在隔离分支模式下由审核时的 `--code` 选项决定，可以存进快照分支、提交或丢弃；共享工作区模式下没有任务分支，改动留在工作区里，下游照样看得到，由你自己处理。选项的取值与默认值见 [`--code`](/zh/docs/reference/cli/review#code)。
+
+审核结果不能直接改成另一个结果。想改变决定或重新执行，要先清除工作流的审核记录，让它回到 `planning`，再重新提交，见[清除审核记录与重新提交](/zh/docs/reference/cli/review#clear-and-resubmit)。
+
+## 需要处理时 [#what-to-do]
+
+`blocked`、`working` 和 `draining` 通常只需要等待，它们会自己进入下一个状态。下面几种情况要你处理，否则任务、工作流乃至排在后面的工作流会一直停着：
+
+| 你看到的情况 | 怎么处理 |
+|---|---|
+| 任务或工作流处在 `on-hold` | 先用 `cdg task status <任务 ID> -w <工作流>{:sh}` 查看 `Reason:` 行，工作流本身被搁置时看 `cdg dag status{:sh}` 的 `Reason:` 行。按原因处理后，执行 `cdg task recover{:sh}` 或 `cdg dag recover{:sh}`。各种原因的处理步骤见[任务或工作流停在 on-hold](/zh/docs/troubleshooting/troubleshooting#on-hold)。 |
+| 任务处在 `paused` 或 `killed`，或工作流处在 `stopped` 或某个 `-with-active` 组合 | 用 `unpause` 或 `recover` 让停下的任务继续；不再需要它们时，也可以用 `cancel` 或 `defer` 直接结束。命令写法见[控制与干预](/zh/docs/reference/cli/control)，几种操作怎样选择见[干预与控制](/zh/docs/guides/intervene-and-control)。 |
+| 任务停在 `done`，或工作流停在 `[done] [done]` 等待结论 | 检查结果后，用 `cdg task review{:sh}` 或 `cdg dag review{:sh}` 给出结论，见[审核任务与工作流](/zh/docs/guides/review-tasks)。任务为什么停在这里，见[任务停在 done 不继续](/zh/docs/troubleshooting/troubleshooting#stuck-in-done)。 |
+| 任务或工作流长时间停在 `blocked` | 看它在等谁：任务看它依赖的上游，排队的工作流看队首的工作流。它们停在 `done`、`on-hold` 或 `stopped` 时，处理好它们，等待的一方会自动继续；排队的工作流怎样排查，见[队列里后面的工作流不开始](/zh/docs/troubleshooting/troubleshooting#queue-waiting)。隔离分支模式下，停在 `done` 等审核的任务还占着自己的工作区，也会让别的任务等不到空闲的工作区。 |
+| 任务一直是 `working`，日志却很久没有新输出 | 不一定是卡住了：Agent 可能派出了子 Agent 在后台工作，也可能在会话里等你批准某个操作。判断方法见[怎样判断它是不是卡住了](/zh/docs/guides/run-and-monitor#is-it-stuck)。 |
+| 子状态显示为 `working (stale owner)` | 任务仍记录为执行中，但执行它的进程已经不在了，例如机器重启之后。`cdg status{:sh}` 的队列视图不显示每个任务，这时只在工作流那一行下面给出 `Diagnostic:` 行。状态类命令只查看，不会重新拉起调度，要按 `Diagnostic:` 行的提示恢复，任务才会在原来的会话中继续，见[机器重启或进程崩溃之后](/zh/docs/troubleshooting/troubleshooting#after-restart)。 |

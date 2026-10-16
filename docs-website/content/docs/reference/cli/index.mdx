@@ -1,0 +1,150 @@
+---
+title: CLI Overview
+description: Look up CodeDAG commands by operation, and learn the syntax that all commands share for workflows, task IDs, and task selectors.
+icon: Terminal
+---
+
+## Commands by operation [#commands]
+
+Commands under `cdg dag{:sh}` act on workflows, and commands under `cdg task{:sh}` act on the tasks in a workflow. The remaining root commands initialize a project, show the queue, release branch names, and manage the plugin and your account.
+
+| What you want to do | Command | Details |
+|---|---|---|
+| Initialize a project and register workspaces | `cdg init{:sh}` | [Initialize a Project](/docs/reference/cli/init) |
+| Validate a workflow file | `cdg dag validate{:sh}` | [Validate and Submit](/docs/reference/cli/validate-and-submit#validate) |
+| Submit a workflow and queue it to run | `cdg dag submit{:sh}` | [Validate and Submit](/docs/reference/cli/validate-and-submit#submit) |
+| Show the project's workflow queue, along with its `planning` and `reviewed` workflows | `cdg status{:sh}`, equivalent to `cdg dag ls{:sh}` and `cdg dag list{:sh}` | [Status and Logs](/docs/reference/cli/status-and-logs#cdg-status) |
+| Show the status of each task in a workflow | `cdg dag status{:sh}`, or `cdg task ls{:sh}`, which can also be written `cdg task list{:sh}` | [Status and Logs](/docs/reference/cli/status-and-logs#dag-status) |
+| Show the detailed status of specific tasks | `cdg task status{:sh}` | [Status and Logs](/docs/reference/cli/status-and-logs#task-status) |
+| Read logs | `cdg dag logs{:sh}` (whole workflow), `cdg task logs{:sh}` (single task) | [Status and Logs](/docs/reference/cli/status-and-logs#logs) |
+| Pause execution, or let it continue after a pause | `cdg dag pause{:sh}`, `cdg dag unpause{:sh}`; `cdg task pause{:sh}`, `cdg task unpause{:sh}` | [Control and Intervene](/docs/reference/cli/control#syntax) |
+| Kill running tasks immediately | `cdg dag kill{:sh}`, `cdg task kill{:sh}` | [Control and Intervene](/docs/reference/cli/control#syntax) |
+| Recover execution that was killed or paused, or that stopped at `on-hold` | `cdg dag recover{:sh}`, `cdg task recover{:sh}` | [Control and Intervene](/docs/reference/cli/control#syntax) |
+| Enter a task agent's session | `cdg task view{:sh}` | [Control and Intervene](/docs/reference/cli/control#task-view) |
+| Review tasks | `cdg task review <action>{:sh}`, where the action is `accept`, `cancel`, `defer`, `revise`, `request-changes`, or `rework`. You can leave out `review` as a shorthand, as in `cdg task accept{:sh}` | [Review](/docs/reference/cli/review) |
+| Review a whole workflow | `cdg dag review <action>{:sh}`, where the action is `accept`, `cancel`, or `defer`. You can leave out `review` as a shorthand, as in `cdg dag accept{:sh}` | [Review](/docs/reference/cli/review) |
+| Clear the review so that you can resubmit | `cdg dag review clear{:sh}`, which has no shorthand. `cdg task review clear{:sh}` clears only an individual task's review and doesn't let you resubmit a workflow whose review is finished | [Review](/docs/reference/cli/review#clear-and-resubmit) |
+| Release a fixed branch name that CodeDAG is holding | `cdg branch release{:sh}` | [Control and Intervene](/docs/reference/cli/control#branch-release) |
+| Manage the CodeDAG Guide plugin | `cdg plugin install{:sh}`, `cdg plugin status{:sh}`, `cdg plugin update{:sh}`, `cdg plugin uninstall{:sh}` | [Plugin](/docs/reference/cli/plugin) |
+| Sign in, sign out, and check your account | `cdg auth login{:sh}`, `cdg auth logout{:sh}`, `cdg auth status{:sh}` | [Auth](/docs/reference/cli/auth) |
+
+For when to pause, kill, or recover, see [Intervene and Control](/docs/guides/intervene-and-control). For how to choose among the review actions, see [Choose an action based on your assessment](/docs/guides/review-tasks#choose-action).
+
+`cdg` and `codedag` are two names for the same command-line tool, and the docs always use `cdg`. Add `--help` to any command to see all of its arguments and options, for example `cdg task pause --help{:sh}`.
+
+You can also use `cdg help <command...>{:sh}`. Give the command names one level at a time to reach a subcommand at any depth, for example `cdg help dag review clear{:sh}`. The command groups `dag`, `task`, `dag review`, `task review`, `plugin`, `branch`, and `auth` each have a `help` of their own as well, so `cdg dag help review clear{:sh}` prints the same help. When a name you give doesn't exist at that level, as in `cdg help dag foo{:sh}`, the command prints the help for the level it did reach to stderr and exits with code 1.
+
+## Specify a workflow [#specify-workflow]
+
+In a command, you can give a workflow as a name or as a path. Either way, it must resolve to a `.yaml`, `.yml`, or `.json` file in the primary repository's `.codedag/dags/` directory, subdirectories included. If it points to a file anywhere else or with any other extension, the command refuses to run. For everyday use, the name is the simplest form. For example, write `feature` for `.codedag/dags/feature.yaml`.
+
+| Form | Example | When to use |
+|---|---|---|
+| Name without an extension | `feature` | The most common form. Looks for `feature.yaml`, `feature.yml`, and `feature.json` in that order and uses the first file that exists. Searches only the top level of `.codedag/dags/`. |
+| File name | `feature.json` | When a directory has files with the same name and different extensions. The extension selects one of them. |
+| Path starting with `.codedag/dags/` | `.codedag/dags/team/feature.yaml` | When the workflow is in a subdirectory. Always resolved from the root of the primary repository, regardless of the current directory. The extension can be omitted here too. |
+| Path relative to the current directory | `./feature.yaml`, `../.codedag/dags/feature.yaml` | When you're already in `.codedag/dags/` or a subdirectory of the primary repository and want shell completion to fill in the path. |
+| Absolute path | `/Users/me/project/.codedag/dags/feature.yaml` | When you write a fixed path in a script. |
+
+Names and paths that start with `.codedag/dags/` are always resolved from the primary repository, so they work the same whether you run the command in the primary repository, in any registered replica workspace, or in any subdirectory of either. Every other relative form that contains a `/`, including those that start with `./` or `../`, is resolved from the current directory. So `team/feature` is rejected at the root of the primary repository, and a workflow in a subdirectory has to be written as `.codedag/dags/team/feature`. In a replica workspace, a relative path such as `./.codedag/dags/feature.yaml` points into the replica's own directory and is rejected as well. Use the name or the form that starts with `.codedag/dags/` instead.
+
+Whichever form you use, the command itself has to run inside the project, that is, within the primary repository or a registered workspace. Outside the project, the command can't find the project the workflow belongs to, even with a correct absolute path.
+
+Two files in the same directory that differ only in extension, such as `feature.yaml` and `feature.yml`, share one log file and one set of branch names, so they aren't suitable for holding two different workflows. See [File location and format](/docs/reference/workflow-file#file-location).
+
+### Positional argument and `-w` [#workflow-option]
+
+Commands under `cdg dag{:sh}` take the workflow as a positional argument. Commands under `cdg task{:sh}` reserve the positional arguments for task IDs and take the workflow with `-w` instead. `-w`, `--workflow-file`, and `--dag` are three spellings of the same option, and its value follows the same rules as the table above.
+
+```bash title="Terminal"
+cdg dag status feature
+cdg task status 2 -w feature
+```
+
+Three commands accept both forms. `cdg dag status{:sh}` and `cdg dag logs{:sh}` take the workflow either as a positional argument or with `-w`. The positional argument of `cdg task ls{:sh}` is itself the workflow, and that command accepts `-w` as well. Each of these commands acts on only one workflow at a time, so give the workflow in just one way: as the positional argument, with `-w`, or with `--dag`. If you give more than one, the command reports an error and prints no status or logs, even when they all point to the same workflow.
+
+The validate, submit, control, and review commands under `cdg dag{:sh}` accept several workflows at once, separated by spaces, for example `cdg dag validate feature docs{:sh}`. A single `cdg task{:sh}` command, by contrast, acts on the tasks in only one workflow.
+
+When you omit the workflow, most commands act on the queue head, that is, the workflow at the front of the [queue](/docs/concepts/how-it-works#queue). It's the only workflow running at any given time. `cdg dag validate{:sh}`, `cdg dag submit{:sh}`, and `cdg dag review clear{:sh}`, however, require you to name the workflow. For whether a given command lets you omit the workflow, and which workflow it then targets, go by the page for that command. When the queue holds several workflows, the queue head isn't necessarily the one you submitted most recently, so in scripts and when an agent runs the commands, it's safer to name the workflow explicitly.
+
+## Specify one or more tasks [#task-ids]
+
+Task commands identify a task by the value of `tasks[].id` in the workflow file (see [`id`](/docs/reference/workflow-file#tasks-id)). It's a positive integer and has nothing to do with the task's title or its position in the list. The same ID refers to different tasks in different workflows, so the command also needs `-w` to say which workflow. When `-w` is omitted, the command uses the queue head.
+
+Separate multiple IDs with spaces, for example `cdg task status 2 3 -w feature{:sh}`. An ID is valid only if it consists of digits and its value is at least 1. Forms such as `2,3`, `1.5`, `+2`, `2abc`, and `0` all make the command report `Invalid task ID` and exit with code 1 without doing anything. When a command has several IDs and one of them is invalid, the whole command fails, and the valid ones aren't processed either.
+
+Task commands differ in how many tasks they accept. None of them except `cdg task ls{:sh}` has a default task. If you omit the task, the command reports an error instead of acting on every task.
+
+| Command | How to specify tasks |
+|---|---|
+| `cdg task pause{:sh}`, `cdg task unpause{:sh}`, `cdg task kill{:sh}`, `cdg task recover{:sh}` | One or more IDs, or [task selectors](#task-selectors) |
+| Every `cdg task review{:sh}` action and its shorthand, and `cdg task review clear{:sh}` | One or more IDs, or task selectors |
+| `cdg task status{:sh}` | One or more IDs. Selectors aren't supported |
+| `cdg task logs{:sh}`, `cdg task view{:sh}` | One ID. `cdg task view{:sh}` can also [take a session ID instead](/docs/reference/cli/control#task-view) |
+| `cdg task ls{:sh}` | No task. Lists the tasks of the whole workflow |
+
+## Task selectors [#task-selectors]
+
+A task selector picks a group of tasks at once by their dependencies, so you don't have to list IDs one by one. The examples below use `feature`, a workflow with five tasks, to show which tasks each selector picks. Tasks 2 and 3 both depend on task 1, task 4 depends on tasks 2 and 3, and task 5 depends on task 4.
+
+export const selectorExampleChart = `flowchart LR
+  t1["1 Write the<br/>interface contract"] --> t2["2 Implement<br/>the interface"]
+  t1 --> t3["3 Write the tests"]
+  t2 --> t4["4 Run the tests<br/>and fix failures"]
+  t3 --> t4
+  t4 --> t5["5 Update<br/>the docs"]`;
+
+<Tabs items={['Diagram', 'Code']}>
+  <Tab value="Diagram">
+    <Mermaid chart={selectorExampleChart} />
+  </Tab>
+  <Tab value="Code">
+    <DynamicCodeBlock lang="mermaid" code={selectorExampleChart}
+      options={{
+        themes: {
+          light: 'catppuccin-latte',
+          dark: 'catppuccin-mocha',
+        },
+      }}
+    />
+  </Tab>
+</Tabs>
+
+| Option | Tasks selected | Includes the specified task | Example and tasks selected |
+|---|---|---|---|
+| `-o`, `--only` | Only the specified tasks | Yes | `--only 2 3` → 2, 3 |
+| `-u`, `--upto` | The specified task and all of its upstream tasks | Yes | `--upto 4` → 1, 2, 3, 4 |
+| `-a`, `--above` | All upstream tasks of the specified task | No | `--above 4` → 1, 2, 3 |
+| `-d`, `--downfrom` (alias `--from`) | The specified task and all of its downstream tasks | Yes | `--downfrom 2` → 2, 4, 5 |
+| `-b`, `--below` | All downstream tasks of the specified task | No | `--below 2` → 4, 5 |
+| `-t`, `--through` | The specified task and all of its upstream and downstream tasks | Yes | `--through 2` → 1, 2, 4, 5 |
+
+Upstream and downstream tasks are traced through `dependencies` level by level, so indirect dependencies count too. Task 5 depends on task 2 indirectly, through task 4, so `--below 2` includes task 5. A task that sits alongside the specified task, with no dependency between the two, is neither upstream nor downstream, so `--through 2` doesn't include task 3.
+
+Task IDs written directly after the command are shorthand for `--only`, so `cdg task pause 2 3{:sh}` is the same as `cdg task pause --only 2 3{:sh}`. IDs written this way can't be combined with any selector, including `--only` itself.
+
+How many IDs a selector takes depends on the command. In the task pause, unpause, kill, and recover commands, every selector can take several IDs, and the result is the union. For example, `--upto 2 3` selects 1, 2, and 3. In the task review commands, including `cdg task review clear{:sh}`, each selector other than `--only` takes only one ID.
+
+To select a stretch of tasks in the middle of a workflow, combine two selectors to get their intersection: one from `--downfrom` or `--below`, and the other from `--upto` or `--above`. With any other combination, such as `--only` together with `--upto`, or three selectors at once, the command reports an error and doesn't run.
+
+```bash title="Terminal"
+# From task 2 down, as far as task 4: selects 2 and 4
+cdg task pause --downfrom 2 --upto 4 -w feature
+# The stretch between task 1 and task 5: selects 2, 3, and 4
+cdg task pause --below 1 --above 5 -w feature
+```
+
+Selectors pick tasks by their dependencies alone and don't look at what state the tasks are currently in. Whether the action can be applied to each selected task is still decided task by task, according to each command's own preconditions. For example, `cdg task pause{:sh}` skips tasks whose review is finished. For each command's preconditions, see [Control command syntax and applicable states](/docs/reference/cli/control#syntax) and [Review](/docs/reference/cli/review).
+
+## Common batch operations [#batch-examples]
+
+The commands below use the same `feature` workflow: tasks 2 and 3 depend on task 1, task 4 depends on tasks 2 and 3, and task 5 depends on task 4. The last example also uses a workflow named `docs`.
+
+| What you want to do | Command | Scope |
+|---|---|---|
+| Pause several tasks at once | `cdg task pause 2 3 -w feature{:sh}` | Tasks 2 and 3 |
+| Accept tasks 1 through 4 together when they're all waiting for review | `cdg task accept --upto 4 -w feature{:sh}` | Tasks 1, 2, 3, and 4 |
+| Keep all of task 2's downstream tasks from starting for now, while task 2 itself runs as usual | `cdg task pause --below 2 -w feature{:sh}` | Tasks 4 and 5 |
+| Apply the same action to several workflows | `cdg dag pause feature docs{:sh}` | The `feature` and `docs` workflows |
+
+For the other forms of batch control, see [Scope and batch control](/docs/reference/cli/control#control-scope). For each action's options and defaults in batch review, see [Review](/docs/reference/cli/review).

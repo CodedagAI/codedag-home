@@ -1,0 +1,138 @@
+---
+title: Intervene and Control
+description: While a workflow runs, look in on a task, talk to its agent to correct its course, respond to approval requests, and pause, kill, or recover execution.
+icon: SquareTerminal
+---
+
+After you submit a workflow, it runs on its own in the background, but you can step in at any time. To see what a [task agent](/docs/concepts/tasks-and-sessions#task-agent) is doing, give it more instructions, or respond to its approval requests, enter its session with `cdg task view{:sh}`. It's the same kind of session as the Claude Code or Codex you normally open in a terminal. To stop execution, use `pause`, which waits for the task agent to finish what it's doing and then stops it, or `kill`, which interrupts it immediately. A killed task can later resume in its original session with `recover`.
+
+The commands below use `-w <workflow>` to say which workflow a task belongs to. When you leave it out, the command targets the workflow at the head of the queue, which is usually the one that's running. The workflow in the examples is named `feature`. You can also pause, unpause, kill, or recover several tasks at once: list several task IDs after the command, or use a task selector to pick out a group of tasks by their dependencies. For the syntax, see [Scope and batch control](/docs/reference/cli/control#control-scope).
+
+## Choose how to observe and make changes [#choose-intervention]
+
+If you only want to know how things are going, the logs are enough. To see a running task's native session or correct its course, enter its session. And when a task is done and waiting for your review but you want it to keep working on the existing result, request changes.
+
+| What you want to do | What to use | Requirements and characteristics |
+|---|---|---|
+| Look back over a run or follow it as it happens | `cdg task logs <task-id> -w <workflow>{:sh}`, or `cdg dag logs <workflow>{:sh}` for the whole workflow. For usage, see [cdg dag logs and cdg task logs](/docs/reference/cli/status-and-logs#logs) | Read-only, works in any environment, and doesn't affect the task |
+| See the native session while a task runs, and step in at any time to correct its course or respond to an approval request | `cdg task view <task-id> -w <workflow>{:sh}`. See [Enter a session, make changes, and exit](#task-view) | Needs a real interactive terminal, and the task must already have started |
+| Have a task that's done and waiting for review keep working on the existing result | `cdg task review request-changes <task-id> -w <workflow> -m "<requested-changes>"{:sh}`. See [Have it keep working on the existing result: request-changes](/docs/guides/review-tasks#request-changes) | Needs no interactive terminal. You state everything you want in one message, and the task returns to review when the changes are done |
+
+The last two both let the task agent keep making changes. They differ in timing and in how you communicate. Entering the session is for live back-and-forth during a run: you can see every step the agent takes and send several messages in a row, and when you're done, you exit and the task keeps running. Requesting changes is for stating everything at once after the task is done. In isolated-branches mode, CodeDAG by default commits the current changes first and then hands your request to the task agent.
+
+Each can stand in for the other when its own requirements are met. You can enter the session of a task that's waiting for review to ask the agent about its approach or have it make changes directly, and then give your review decision afterward. You can also kill a running task, or wait for it to finish its current step, and then request changes. That second approach needs no interactive terminal, so in environments such as scripts or an agent's shell tool, you can use it to correct the course of a running task. For the syntax, see [Use request-changes on a running task](/docs/reference/cli/review#running-request-changes). When an agent with CodeDAG Guide installed is acting on your behalf, it can also enter a session through tmux. See [What the orchestrating agent does](/docs/get-started/let-your-agent-orchestrate#what-it-does).
+
+## Enter a session, make changes, and exit [#task-view]
+
+Run `cdg task view{:sh}` in a real terminal to enter the task agent's native session, where you can watch what it's doing or send a message to correct its course. When you're done, press Ctrl+C to exit, and the task keeps running.
+
+```bash title="Terminal"
+cdg task view 2 -w feature
+```
+
+What you see inside is Claude Code's or Codex's own interface, the same as when you open it directly in a terminal. Your keystrokes go to the agent unchanged, so you work in it the way you always do: type a message, choose an approval option, or press Esc to interrupt what it's doing and then tell it what you want instead. Ctrl+C is the one exception: it isn't passed to the agent, and it takes you out of the session instead.
+
+This command needs a real interactive terminal. In a script or an agent's shell tool, the display is garbled and keys don't respond. In that case, use the alternative described in [Choose how to observe and make changes](#choose-intervention). The task also has to have started running. A task that hasn't started has no session to enter, and the command prints `Task has not started yet.` and exits. For other cases where you can't get in, see [task view can't connect or doesn't respond](/docs/troubleshooting/troubleshooting#task-view-problems). For the command's other arguments and how it locates the session, see the [command reference](/docs/reference/cli/control#task-view).
+
+Messages you send in the session go straight to the task agent, and CodeDAG doesn't commit the current changes for you first. In isolated-branches mode, the changes made before and after your message are committed together as the task's result when the task ends. If you want a dividing line so that you can later compare what changed before and after the correction, ask the agent in your message to commit first. For example:
+
+```text title="Prompt"
+First commit the current changes, with the commit message "Progress before changing direction". After that, stop modifying files under src/legacy/ and implement the same functionality in a new module instead.
+```
+
+Exit promptly when you're done. While you're attached to the session, CodeDAG doesn't consider the task complete. Even if the agent has finished and stopped to wait for input, the task keeps showing `working`, and the downstream tasks that depend on it don't start. The task ends normally only after you press Ctrl+C and leave.
+
+<Callout type="warn">Press Ctrl+C to leave a session. If you type the agent's own exit command in the session while the task is running (for example, `/exit` in Claude Code), you end the task agent's session itself, and the task stops at `on-hold` right away with the reason `agent-session-ended`. After you reopen the original session with `cdg task recover{:sh}`, the task finishes as usual with its earlier context, and then goes to review or is auto-accepted, depending on its review settings.</Callout>
+
+## Respond to an approval request [#approval]
+
+When a task agent stops to wait for approval, run `cdg task view 2 -w feature{:sh}` to enter its session. Check what it wants to run, approve or deny it with the keys the interface shows, and then press Ctrl+C to exit. The task carries on. When the agent asks you a question and waits for your answer, you handle it the same way.
+
+CodeDAG doesn't show a separate status for waiting on approval: the task is still `working`, but it makes no progress and its log ends at the agent's confirmation prompt. To confirm whether it's waiting for you, see [Is it stuck?](/docs/guides/run-and-monitor#is-it-stuck).
+
+During this run, you have to respond to every approval request one by one this way, because each task's permission mode was fixed at submission. To keep future workflows from stopping on approvals, set a suitable `mode` on the tasks in the workflow file. For the tradeoffs between access levels, see [Decide between unattended and attended runs](/docs/guides/agents-and-permission-modes#unattended-or-attended). Even with full access, Claude Code still insists on asking about a few operations. See [The agent is waiting for your approval or answer](/docs/troubleshooting/troubleshooting#approval-waiting).
+
+## Pause for a while: `pause` and `unpause` [#pause]
+
+`pause` doesn't interrupt a task agent that's working. It waits for the agent to finish what it's doing and then stops it. Tasks that haven't started are paused immediately and don't start. `unpause` lets paused tasks continue.
+
+```bash title="Terminal"
+# Pause the whole workflow
+cdg dag pause feature
+# Pause only task 2 in the feature workflow
+cdg task pause 2 -w feature
+```
+
+For a task that's running, the command shows it entering `draining` (finishing its current step):
+
+```bash title="Terminal"
+Pausing task 2 in .codedag/dags/feature.yaml...
+
+Task draining: [Task 2] Implement the login endpoint
+  Task will pause gracefully after current step completes.
+
+→ Use 'cdg task unpause 2 -w feature' to unpause this task
+→ Use 'cdg task kill 2 -w feature' to kill this task immediately (may cause unintended side effects, requires more complex recovery)
+→ Use 'cdg task logs 2 -w feature -f' to view task logs
+→ Use 'cdg task status 2 -w feature --watch' to view task status
+```
+
+`draining` means the pause has taken effect and CodeDAG is waiting for the task agent to finish its current step. In the meantime, the agent is still working and may still modify files. When it finishes its current turn and stops, the task becomes `paused`. It doesn't go to review, and its downstream tasks don't start.
+
+Use `cdg dag unpause feature{:sh}` or `cdg task unpause 2 -w feature{:sh}` to let paused tasks continue. `unpause` works only on paused tasks. Tasks that are `killed` or `on-hold` need `recover`. What happens after you unpause depends on the state the task is in at that moment:
+
+- **Paused before it started:** The task goes back to waiting and starts as usual once its conditions are met.
+- **Running when it was paused, and it has since finished its turn and stopped at `paused`:** The task is treated as complete. It becomes `done` and goes to review (auto-accepted by default), and its downstream tasks then start.
+- **Still `draining`:** The task goes back to `working` and finishes as usual.
+
+So `pause` fits the times when you want the work in hand finished but nothing further started, for example when you're stepping away for a while or want to deal with something else before the workflow continues. To stop an agent partway and have it resume later, use [`kill`](#kill) and [`recover`](#recover).
+
+## Stop immediately: `kill` [#kill]
+
+`kill` interrupts a working task agent immediately, and the task becomes `killed`. It's the equivalent of pressing Esc in the agent: the reply and the operation in progress are interrupted, but the agent process and the session are both kept, so the task can resume in the same session later.
+
+```bash title="Terminal"
+# Kill task 2 in the feature workflow
+cdg task kill 2 -w feature
+# Kill the whole workflow
+cdg dag kill feature
+```
+
+Tasks that haven't started have no session to interrupt, so `kill` has the same effect on them as pausing: the task becomes `paused` and doesn't start. That's why stopping a whole workflow with `cdg dag kill{:sh}` kills the running tasks and also keeps the tasks that haven't started from starting.
+
+`kill` doesn't delete anything. The session's context is still there, and the changes the agent has already written to the workspace stay where they are. They're neither rolled back nor committed. Keep in mind that the interrupted step may be only half done, for example a command stopped midway or a file only partly edited. Before you continue, you can take a look with `git status` and `git diff` in the task's workspace.
+
+If you only want to see where a killed task stopped, read its log with `cdg task logs 2 -w feature{:sh}`. When you use `cdg task view{:sh}` to enter a killed task's session, the command first explains that entering the session requires recovering the task and asks whether to recover it. The task continues only after you confirm, and if you decline, nothing changes. For details, see the [command reference](/docs/reference/cli/control#task-view).
+
+A killed task doesn't continue on its own. As long as a workflow still has stopped tasks, it can't finish, and the workflows behind it in the queue keep waiting too. The same goes for paused tasks. To get the queue moving again, run `recover` on those tasks, or if you no longer need them, end them with the review commands `cancel` or `defer`. See [When a task isn't stopped at a gate](/docs/guides/review-tasks#not-at-gate).
+
+## Recover stopped tasks: `recover` [#recover]
+
+`recover` lets stopped tasks continue. A killed task resumes in its original session, a paused task continues just as it does with `unpause`, and a task on hold continues once you've dealt with the cause.
+
+```bash title="Terminal"
+# Recover task 2 in the feature workflow
+cdg task recover 2 -w feature
+# Recover every task in the workflow that can be recovered
+cdg dag recover feature
+```
+
+When you recover a killed task, CodeDAG sends the agent the message `continue` in its original session. The agent still has its earlier context and picks up where it was interrupted, without starting over. After you stop a whole workflow with `cdg dag kill{:sh}`, the easiest way to recover all the tasks at once is `cdg dag recover{:sh}`. Recovering doesn't use CodeDAG credits again.
+
+For an `on-hold` task, deal with the cause first. Run `cdg task status 2 -w feature{:sh}`, look at the `Reason:` line in the output, handle the problem it names, and then run `recover`. Exactly what `recover` does depends on the reason. For example, it reopens a session that ended unexpectedly, redelivers requested changes that didn't get through, or retries starting a task that couldn't start. If the cause is still there, the task stops at `on-hold` again. For the steps for each reason, see [A task or workflow is on hold](/docs/troubleshooting/troubleshooting#on-hold).
+
+## Common questions
+
+### Why can't other tasks start after I stop a task?
+
+In isolated-branches mode, a task that has started running keeps the workspace and concurrency slot assigned to it until its review is finished. `pause` and `kill` only stop it from working. They don't release what it holds, so other independent tasks don't start any sooner. For a task like this, the command output notes that it still keeps its workspace and slot. To let other tasks run first, let this task finish and then review it, or end it with `cdg task review cancel{:sh}` or `defer`. See [When a task isn't stopped at a gate](/docs/guides/review-tasks#not-at-gate).
+
+### Pausing or killing reports `Workflow startup billing is being committed`
+
+When a workflow's turn to run has just come and CodeDAG is deducting CodeDAG credits for it, `pause` and `kill` are temporarily rejected with this message. The window usually lasts only a few seconds, though on a poor network connection it can last up to about 3 minutes. Try again a little later.
+
+## Related
+
+- [Review Tasks and Workflows](/docs/guides/review-tasks): Check a task's result after it finishes, request changes, or give a decision.
+- [Troubleshooting](/docs/troubleshooting/troubleshooting): When a task stops at `on-hold` or makes no progress, find the steps to take by symptom.
+- [Control and Intervene](/docs/reference/cli/control): The full syntax and scope of each control command, and the options for when a recovery can't go ahead.
