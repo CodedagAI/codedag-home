@@ -26,7 +26,7 @@ Before it submits a workflow, CodeDAG confirms the following. If any check fails
 2. **The workflow isn't already in the queue.** After you submit a workflow, you can't submit it again until its review is finished and it has left the queue.
 3. **The workflow hasn't already been reviewed.** If its review is finished, you have to clear the review with `cdg dag review clear{:sh}` before you can submit it again. See [Clear the review and resubmit](/docs/reference/cli/review#clear-and-resubmit).
 4. **You're signed in to your CodeDAG account.** If you aren't, the command has you [sign in](/docs/account/login-and-account#sign-in) first and then goes on with the submission.
-5. **You have enough CodeDAG credits.** The credits left in your account have to cover every task in this submission. If you don't have enough credits or have no active subscription, the submission is rejected.
+5. **You have enough CodeDAG credits.** The credits left in your account have to cover every task this submission will run. If you don't have enough credits, or the account has neither a subscription nor any available free credits, the submission is rejected.
 
 When a submission is rejected, use the message in the output to find the matching fix under [Submission rejected](/docs/troubleshooting/troubleshooting#submit-rejected) in Troubleshooting.
 

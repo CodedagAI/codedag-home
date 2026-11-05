@@ -127,7 +127,7 @@ cdg branch release feature/search-api
 
 キューにあるワークフローがまだ使っているブランチと、スナップショットブランチは解放できません。条件の全体は、[`cdg branch release`](/ja/docs/reference/cli/control#branch-release) を参照してください。
 
-タスクがすでに同じ名前のブランチのために `on-hold` で止まっている場合は、占有が解消されてから `cdg task recover{:sh}` で復旧します。調査の手順は[ブランチの問題](/ja/docs/troubleshooting/troubleshooting#hold-branch)を参照してください。古いブランチを処理しても `branch-name-conflict` が表示される場合は、ワークフローファイルで新しい `branchName` に変えるか、`branchName` を削除して、CodeDAG に自動で名前を付けさせます。
+タスクがすでに同じ名前のブランチのために `on-hold` で止まっている場合は、占有が解消されてから `cdg task recover{:sh}` で復旧します。古いブランチを処理しても `branch-name-conflict` が表示される場合は、ワークフローファイルで新しい `branchName` に変えるか、`branchName` を削除して、CodeDAG に自動で名前を付けさせます。
 
 ## ワークフローと共有設定を別に保存する [#save-config]
 

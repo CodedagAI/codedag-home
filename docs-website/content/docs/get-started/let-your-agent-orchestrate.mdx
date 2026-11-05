@@ -19,7 +19,7 @@ For this approach, CodeDAG has to be ready to use, your Claude Code or Codex has
 - The plugin is installed. If you chose to install the plugin when you ran `cdg init{:sh}` in this repository, or you've installed it at the user scope from any repository, this is already done. Otherwise, run `cdg plugin install --scope user{:sh}`. It installs the plugin for the Claude Code and Codex installed on this machine, and the plugin then works in all your repositories.
 - Your session was opened after the plugin was installed. The plugin takes effect only in new sessions. Exit any session that was already open, then resume it with `claude --resume{:sh}` or `codex resume{:sh}`.
 
-If you're not sure, run `cdg plugin status{:sh}` in this repository to check. When both `Plugin installed` and `Enabled` are `true` under the agent you're using, the plugin is installed and enabled. If it shows as not installed, the `Action` line in the output gives the command to install it. For installation scopes and how to update, see [Manage the CodeDAG Guide Plugin](/docs/guides/guide-plugin).
+If you're not sure, run `cdg plugin status{:sh}` in this repository. If the `Action` line under the agent you're using shows `No action needed`, you're ready to go. Otherwise, run the command it gives. For installation scopes and how to update, see [Manage the CodeDAG Guide Plugin](/docs/guides/guide-plugin).
 
 ## A prompt you can paste as is
 

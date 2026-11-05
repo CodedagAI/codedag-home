@@ -61,7 +61,7 @@ cdg init
 
 1. **副本方式（`Select your repository setup method`）：** 按你自己电脑上的情况选，副本登记只在这台电脑上有效，不随 `.codedag` 共享。还没有准备副本时，选 `4. I don't need concurrent tasks, only sequential execution`；之后想让任务并行，再按[并行执行与工作区](/zh/docs/guides/parallel-workspaces)准备副本并重新运行 `cdg init{:sh}`。
 2. **默认 Agent：** Claude Code 和 Codex 都装了才会问，你的选择只影响这台电脑。团队在共享设置里写了 `defaultAgent` 时，团队的那一项标着 `(team default)` 排在第一位；选它，以后团队改了共享设置，你这里也跟着改。
-3. **CodeDAG Guide 插件：** 还没装过插件的 Agent 各问一次是否安装，各个安装范围的区别见[选择安装范围](/zh/docs/guides/guide-plugin#scopes)。
+3. **CodeDAG Guide 插件：** 还没装过插件的 Agent 各问一次是否安装，各个安装范围的区别见[安装范围](/zh/docs/reference/cli/plugin#scopes)。
 
 ### 3. 接受 Claude Code 的完全授权警告
 
@@ -75,7 +75,7 @@ cdg init
 cdg dag validate review-changes
 ```
 
-看到以 `✔ Validation passed:` 开头的输出，就说明这台电脑能运行这个工作流。提示 `is not installed on this machine` 时，工作流用到的 Agent 还没装在你的电脑上，装好它再校验一次即可。
+看到以 `✔ Validation passed:` 开头的输出，就说明这台电脑能运行这个工作流。
 
 ### 已经初始化过这个仓库时 [#already-initialized]
 

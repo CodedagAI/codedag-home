@@ -138,7 +138,7 @@ There are three possible results: passed, passed with warnings, and failed. When
   [dag] Task 2: depends on non-existent task 3
 ```
 
-Validation looks beyond this one file. It also reads the two project settings files, and if a setting in either has an invalid value, validation fails and tells you which setting in which file. For field values, `mode` is checked against the syntax of the agent the task actually uses, while values that are passed to the agent as is, such as `model` and `effort`, aren't checked. For exactly what's checked for each field, see [Workflow File Reference](/docs/reference/workflow-file).
+For field values, `mode` is checked against the syntax of the agent the task actually uses, while values that are passed to the agent as is, such as `model` and `effort`, aren't checked. For exactly what's checked for each field, see [Workflow File Reference](/docs/reference/workflow-file).
 
 Warnings don't fail validation, but each one is worth reading. The most common is `unsupported-field`: CodeDAG ignores fields it doesn't recognize in a workflow file, so a misspelled field name isn't an error. It just has no effect. Field names are always camelCase. A snake_case name such as `auto_accepted` is ignored in the same way, and a separate `naming` warning tells you to change it to `autoAccepted`.
 

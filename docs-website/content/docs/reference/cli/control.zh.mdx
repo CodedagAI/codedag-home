@@ -25,9 +25,7 @@ icon: CirclePause
 
 ### 任务或工作流已被搁置、中断时 [#held-or-killed]
 
-- **`killed` 任务不接受 `unpause`：** 这些任务保持原样，命令输出 `Not unpaused` 并提示改用 `cdg task recover{:sh}`，退出码为 1；一次处理多个任务时，它们在结果列表中标为 `killed (not unpaused, use recover)`。
 - **启动前准备停住的任务：** 任务因启动前的准备停在 `on-hold`，或者停住之后又被 `kill` 时，处理好现场后执行 `cdg task recover{:sh}`，CodeDAG 重新做一次准备并启动一个新的 Agent 会话；不想再跑它，用 `cdg task review cancel{:sh}` 或 `defer` 直接结束。Agent 已经起来、但停在完全授权警告或登录引导这类启动界面上被中断的任务，同样可以这样重新启动。
-- **会话还在运行的搁置任务被暂停：** Codex 任务因 Agent 会话的问题停在 `on-hold`、而会话还在运行时，`pause` 让它停在 `paused`，搁置原因照原样保留；暂停期间不管会话里发生什么，任务都停在 `paused`。`unpause` 让它回到原来的搁置状态，解除搁置仍然要用 `cdg task recover{:sh}`。
 - **工作流本身被搁置：** 工作流级的搁置由 `cdg dag recover{:sh}` 解除，原因显示在 `cdg dag status{:sh}` 中工作流的 `Reason:` 行，例如因 CodeDAG 额度不足或需要登录而无法启动时为 `startup-gate-blocked`。原因是 `startup-gate-blocked` 时，在它被解除之前，`cdg task recover{:sh}` 与两个 `unpause` 命令都会拒绝执行；处理完原因后执行 `cdg dag recover{:sh}`，工作流会重新尝试启动，不会重复扣费。各种搁置原因的处理步骤见[任务或工作流停在 on-hold](/zh/docs/troubleshooting/troubleshooting#on-hold)。
 
 ## 指定范围与批量控制 [#control-scope]
@@ -38,7 +36,7 @@ icon: CirclePause
 
 写出的工作流里有找不到、没有提交或状态改不动的，不影响其余工作流：命令为每个这样的工作流输出一条错误，照常处理剩下的，最后以退出码 1 结束。成功摘要会写出成功数与目标总数，例如 `Paused successfully for 1 of 2 workflows:`，只列成功的工作流；全部成功时为 `Paused successfully for all 2 workflows:`，退出码为 0。`unpause` 与 `kill` 的摘要形式相同。
 
-任务级命令一次只处理一个工作流中的任务，这个工作流用 `-w` 指定，省略时为队首工作流。任务本身没有默认值，必须写出：可以写一个或多个任务 ID，也可以用任务选择器按依赖关系圈定一组任务。在这四个命令中，每个选择器都能跟多个任务 ID，结果取并集；具体写法见[指定一个或多个任务](/zh/docs/reference/cli#task-ids)与[任务选择器](/zh/docs/reference/cli#task-selectors)。
+任务级命令一次只处理一个工作流中的任务，这个工作流用 `-w` 指定，省略时为队首工作流。任务本身没有默认值，必须写出：可以写一个或多个任务 ID，也可以用任务选择器按依赖关系圈定一组任务。每个选择器都能跟多个任务 ID，结果取并集；具体写法见[指定一个或多个任务](/zh/docs/reference/cli#task-ids)与[任务选择器](/zh/docs/reference/cli#task-selectors)。
 
 选择器只按依赖关系圈定任务，不看它们当前的状态。圈中的每个任务按自己的状态处理，命令对它适用就改变它，不适用就保持原样，不会因为其中有不适用的任务而中止处理。两个恢复相关的选项另有限制：`--acknowledge-unconfirmed` 每次只能用于一个任务，`--force-owner-release` 只处理停在特定原因的任务，见[恢复受阻时使用的选项](#recovery-options)。
 
@@ -59,7 +57,7 @@ icon: CirclePause
 ### 语法与会话定位
 
 ```bash title="Terminal"
-cdg task view <任务 ID> [-w <工作流>] [--session-id <会话 ID>] [--recover]
+cdg task view <任务 ID> [-w <工作流>] [--session-id <会话 ID>]
 cdg task view --session-id <会话 ID>
 ```
 
@@ -68,9 +66,8 @@ cdg task view --session-id <会话 ID>
 | `<任务 ID>` | 要进入的任务，只能写一个，不支持任务选择器。省略时必须提供 `--session-id`。 |
 | `-w <工作流>` | 任务所在的工作流，省略时为队首工作流。审核已经结束、离开队列的工作流也可以指定，用来重新打开其中任务的会话。 |
 | `--session-id <会话 ID>` | Claude Code 或 Codex 的会话 ID。与任务 ID 一起写时，在重新打开已结束的会话时代替 CodeDAG 记录的会话 ID；单独写时，用它查找所属的任务。 |
-| `--recover` | 任务已经中断、它的 Agent 会话又不在运行时，不经确认直接恢复任务并进入恢复后的会话。任务还没开始、会话仍在运行或者任务已经完成时，它不改变命令的行为。 |
 
-命令进入哪一段会话，取决于任务的情况。任务正在执行，或者停下后会话仍然开着，命令连接到这个正在运行的会话；任务已经完成或审核已经结束、会话也已经结束，命令用 Agent 自己的恢复功能，在任务原来的工作目录中重新打开这段会话，之前的对话都还在。任务还在队列中、会话却已经不在运行时，要先把任务恢复起来才能进入，规则见下面的“使用前提”。
+会话还在运行时，命令直接连上它；会话已经结束时，命令把这段会话重新打开再连上，之前的对话都还在。进入之后任务怎样变化，见[进入之后，任务状态怎样变化](#view-and-task-state)。
 
 重新打开已结束的会话需要会话 ID。CodeDAG 通常会自动记录它；没能记录时，命令会提示你补上 `--session-id`，Codex 任务的日志中也会出现一条无法自动提取会话 ID 的警告。会话 ID 可以从 Agent 自己的记录中找到，例如 Codex 退出时打印的 `codex resume <会话 ID>` 提示。
 
@@ -85,28 +82,23 @@ cdg task view 3 -w feature --session-id <会话 ID>
 cdg task view --session-id <会话 ID>
 ```
 
-这时 CodeDAG 在队列和已审核的工作流中查找使用这个会话的任务。找到的是已经离开队列的任务，就在它原来的工作目录中打开会话；找到的是队列中的活动任务，就按写出任务 ID 时的规则处理，需要恢复时同样先询问。找到多个，命令会要求你补上任务 ID 与 `-w`；一个也没找到，就在当前目录中按这个会话 ID 直接打开。
+这时 CodeDAG 在队列和已审核的工作流中查找使用这个会话的任务。找到的是已经离开队列的任务，就在它原来的工作目录中打开会话；找到的是队列中的活动任务，就按写出任务 ID 时的规则处理。找到多个，命令会要求你补上任务 ID 与 `-w`；一个也没找到，就在当前目录中按这个会话 ID 直接打开。
 
 ### 使用前提
 
 `cdg task view{:sh}` 需要一个真实可交互的终端。它把你的按键原样转给 Agent 的原生界面，在脚本、CI 或 Agent 的命令工具这类没有交互终端的环境里无法正常使用；这时可以改用的做法见[选择观察与修改方式](/zh/docs/guides/intervene-and-control#choose-intervention)。
 
-任务必须已经开始执行。还没开始的任务没有会话，命令输出 `Task has not started yet.` 后结束，不会进入，也不会要求你补上 `--session-id`。还在等待上游的任务、因启动前准备停住的任务，以及从未开始就被暂停或中断的任务，都算在内。
+任务必须已经开始执行，还没开始的任务没有会话可以进入；因启动前准备停住的任务，以及从未开始就被暂停或中断的任务，也算还没开始。
 
-任务已经停下、它的 Agent 会话也不在运行时，要进入会话就得先把任务恢复起来，而恢复会让它接着执行，所以命令会先问你一次。这适用于 `killed`、`paused`、搁置（`on-hold`）的任务，以及状态还是 `working` 或 `draining`、但执行进程已经退出的任务。命令先说明这一点，再以默认 No 的确认询问：
+### 进入之后，任务状态怎样变化 [#view-and-task-state]
 
-```bash title="Terminal"
-Task 3 is killed and its Agent session is not running.
-Entering the session requires recovering the task, which resumes its execution.
-To read what the task has done without resuming it, run 'cdg task logs 3 -w feature'.
-? Recover the task and enter its session? › No / Yes
-```
+进入会话不会让 Agent 做任何事。被中断、暂停或搁置的任务，在你发出消息之前一直保持原状，什么都不说就退出，它还是原来的状态。
 
-选 Yes，命令按 `cdg task recover{:sh}` 的规则恢复任务，等恢复后的会话就绪再连接；选 No，命令输出 `Operation cancelled.` 后结束，任务和队列都保持原样。没有交互终端时命令不显示这个询问，直接报错并以退出码 1 结束，这时要恢复就加 `--recover`。
+你发出消息之后，任务就按执行中的任务处理：Agent 停下即算完成，哪怕你只是问了它一句话，怎样让它继续做完见[想立刻停下：kill](/zh/docs/guides/intervene-and-control#kill)。被暂停的任务例外，Agent 停下后它仍回到 `paused`，要继续时执行 `unpause`。自动接受要等你退出会话后才进行。
 
-先执行过 `cdg task recover{:sh}`、任务显示 `on-hold (agent-recovery-queued)` 时，恢复已经在排队，命令不再询问，等恢复后的会话就绪再进入。
+有两种搁置，在会话里让 Agent 接着做也不会解除，处理完仍要执行 `cdg task recover{:sh}`。一种是 CodeDAG 无法从会话记录判断 Agent 进行到了哪一步，例如记录读不到，或者 Claude Code 的版本过低；另一种是有一条用 `request-changes` 或 `rework` 提出的修改要求没能交给 Agent，它要由 `recover` 重新投递，你在会话里发的消息代替不了它。
 
-搁置（`on-hold`）的任务里有两种不必恢复就能进入：会话还在运行的任务直接连上，进入不会解除搁置，在会话里处理完让它停下的问题后，还要执行 `cdg task recover{:sh}`，任务才会继续；停在 `merge-conflict` 的任务由命令重新打开那段合并冲突会话供你手工处理，任务状态不变。
+停在 `merge-conflict` 的任务，命令打开的是处理合并冲突的那段会话，解决冲突后执行 `cdg task recover{:sh}`。
 
 ## 恢复受阻时使用的选项 [#recovery-options]
 

@@ -42,7 +42,7 @@ cdg dag submit [选项] <工作流...>
 
 | 工作流现在 | 能否提交 | 怎么做 |
 |---|---|---|
-| 还没提交过，或者审核记录已被清除（`planning`） | 可以 | 直接用 `cdg dag submit <工作流>{:sh}` 提交。提交之前用 `cdg task review{:sh}` 审核过其中的任务时例外，要先清除这些审核记录，见[还没提交的工作流中的任务审核记录](/zh/docs/reference/cli/review#unsubmitted-task-reviews) |
+| 还没提交过，或者审核记录已被清除（`planning`） | 可以 | 直接用 `cdg dag submit <工作流>{:sh}` 提交。提交之前用 `cdg task review{:sh}` 审核过的任务这次不执行，见[提交之前审核其中的任务](/zh/docs/reference/cli/review#unsubmitted-task-reviews) |
 | 仍在队列中（`submitted`），无论在排队、执行中、被停下还是等待审核 | 不能，同一个工作流在队列中只能有一份 | 等它审核结束；想按修改后的文件重来，见[修改已提交的工作流](#modify-submitted) |
 | 审核已经结束（`reviewed`） | 不能直接提交 | 先清除审核记录，再提交，见[修改已提交的工作流](#modify-submitted) |
 
@@ -62,7 +62,7 @@ cdg dag submit [选项] <工作流...>
 
 所以在这类环境里提交，先用 `cdg dag validate{:sh}` 看过警告、确认不影响执行，再加 `-y` 提交，结果才可预期。
 
-有一条警告要单独留意：任务的 [`branchName`](/zh/docs/reference/workflow-file#tasks-branch-name) 与已有的分支同名时，校验给出 `branch-name-conflict`。不处理就提交时（加 `-y`，或者在询问中选择继续），工作流照常入队，但执行到这个任务时任务会停在 `on-hold`（`branch-name-conflict`）。警告写明同名分支在哪里、怎样处理：工作区里的本地分支由你删除或改名，被 CodeDAG 的同步仓库占着的用 [cdg branch release](/zh/docs/reference/cli/control#branch-release) 释放，完整的做法见[使用指定的任务分支名](/zh/docs/reference/branches-and-files#branch-name)。
+有一条警告要单独留意：任务的 [`branchName`](/zh/docs/reference/workflow-file#tasks-branch-name) 与已有的分支同名时，校验给出 `branch-name-conflict`。不处理就提交时（加 `-y`，或者在询问中选择继续），工作流照常入队，但执行到这个任务时任务会停在 `on-hold`（`branch-name-conflict`）。处理办法见[使用指定的任务分支名](/zh/docs/reference/branches-and-files#branch-name)。
 
 ## 只对这一次提交调整审核设置 [#auto-accept-options]
 
@@ -91,7 +91,7 @@ cdg dag submit feature --task-auto-accepted none --dag-auto-accepted none
 cdg dag submit api-docs release-notes
 ```
 
-这批工作流要么全部提交，要么一个都不提交。其中任何一个校验出错、已经在队列中或者审核已经结束，又或者这批工作流的任务总数超出了剩余额度，整条命令都不会提交任何工作流。只有警告时，命令一次列出所有工作流的警告，只询问一次；`-y` 对全部工作流生效。
+这批工作流要么全部提交，要么一个都不提交。其中任何一个校验出错、已经在队列中或者审核已经结束，又或者这批工作流要执行的任务总数超出了剩余额度，整条命令都不会提交任何工作流。唯一的例外是全部任务都已审核过的工作流：它没有要执行的任务，不提交，其余工作流照常提交，见[提交之前审核其中的任务](/zh/docs/reference/cli/review#unsubmitted-task-reviews)。只有警告时，命令一次列出所有工作流的警告，只询问一次；`-y` 对全部工作流生效。
 
 `--task-auto-accepted`、`--dag-auto-accepted` 同样作用于这条命令中的每个工作流。要给不同的工作流不同的审核设置，就分几条命令提交。
 
@@ -116,7 +116,7 @@ cdg dag submit feature
 
 第一步决定原来的结果怎样处理。在隔离分支模式下取消时，集成分支回到这次工作流的起点，原来的结果默认先存进一条快照分支，以后还能从中取回；确定不需要时，加上 `--code discard` 直接丢弃。这几个选项的取值与默认值，以及接受或推迟工作流时的写法，见[审核](/zh/docs/reference/cli/review)。
 
-重新提交总是运行整个工作流，是一次新的执行，开始执行时按全部任务数重新消耗 CodeDAG 额度；新的执行从哪个提交开始、分支怎样命名，见[想再运行一次](/zh/docs/guides/finish-and-merge#run-again)。只想补做或重做其中几个任务时，把它们写成一个新的工作流单独提交，见[只补做其中几个任务](/zh/docs/guides/finish-and-merge#continue-remaining)。
+重新提交是一次新的执行，开始执行时按这次要执行的任务数重新消耗 CodeDAG 额度。新的执行从哪个提交开始、分支怎样命名，见[想再运行一次](/zh/docs/guides/finish-and-merge#run-again)。只想补做或重做其中几个任务时，可以先审核不需要重做的任务再提交，也可以把要做的任务写成一个新的工作流单独提交。这两种做法见[只补做其中几个任务](/zh/docs/guides/finish-and-merge#continue-remaining)。
 
 ## 提交后跟随日志 [#attach]
 
@@ -130,7 +130,7 @@ cdg dag submit api-docs --attach
 
 跟随期间，有任务或整个工作流需要你审核时，终端会停下日志，显示审核菜单，你可以当场给出结论，用法见[想在提交的终端里跟着看](/zh/docs/guides/run-and-monitor#attach)。
 
-工作流本身被搁置时，跟随随即结束：终端输出 `Workflow entered on-hold: <工作流路径>`，其后的 `Reason:` 行给出搁置的原因，命令以退出状态 1 结束。工作流还在排队、没有开始执行时被搁置也是如此，例如审核前一个工作流时用了 `--downstream hold`。各种原因的处理步骤见[任务或工作流停在 on-hold](/zh/docs/troubleshooting/troubleshooting#on-hold)。
+工作流本身被搁置时，跟随随即结束，命令以退出状态 1 结束。工作流还在排队、没有开始执行时被搁置也是如此，例如审核前一个工作流时用了 `--downstream hold`。各种原因的处理步骤见[任务或工作流停在 on-hold](/zh/docs/troubleshooting/troubleshooting#on-hold)。
 
 一次提交多个工作流并加上 `--attach` 时，终端按队列顺序依次跟随它们，一个结束后接着跟随下一个。其中某个工作流被 `Ctrl+\` 中断、停在 `on-hold`，或者你在它的审核菜单里按 Esc 跳过了审核，跟随就此结束；排在它后面的工作流仍在队列中，要等它恢复或审核结束之后才会开始。
 

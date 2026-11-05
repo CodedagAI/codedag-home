@@ -22,7 +22,7 @@ The task agents are the Claude Code or Codex on your own machine, and their usag
 
 ## Estimate a workflow [#estimate]
 
-For CodeDAG credits, you only need to count the tasks. When the workflow starts running, 1 credit is deducted for each task in the workflow file. The number is fixed the moment the run starts. How long the tasks take, how many times work is redone along the way, and how many tasks actually finish in the end don't change it. Resubmitting is a new run, and when it starts running, it's charged again by that run's task count. For the rules, see [When credits are charged](/docs/account/credits-and-subscription#when-charged).
+CodeDAG credits are based on the number of tasks this run will execute, at 1 credit per task, deducted when the workflow starts running. How long the tasks take after that, how many times work is redone along the way, and how many tasks actually finish in the end don't change the amount. Resubmitting is a new run, charged again for the number of tasks that run will execute. For the details, see [When credits are charged](/docs/account/credits-and-subscription#when-charged).
 
 When several workflows go into the queue one after another, estimate from the sum of their task counts. At each submission, CodeDAG only checks whether you have enough credits for that submission. It doesn't reserve them. Workflows earlier in the queue start first and use up credits first, so a later one may stop for lack of credits when its turn comes.
 
@@ -81,7 +81,7 @@ As a rule of thumb, searching against a checklist, tidying up formatting, applyi
 
 Concurrency doesn't change CodeDAG credits, and it hardly changes total agent usage either. What it changes is how fast that usage is spent: tasks that run at the same time are separate sessions that all draw on the same account's limit.
 
-The higher the concurrency, the faster you use up a window's limit, and when it runs out, all the tasks that are running stop together. If the whole workflow needs more usage than one window provides, lower `maxConcurrency` to spread the same usage over a longer time. That makes you less likely to hit a short-window limit, such as the 5-hour one, partway through. The tradeoff is that the workflow takes longer to run, and your weekly limit doesn't get any larger. With an API key, higher concurrency also makes you more likely to hit rate limits on requests or tokens per minute.
+The higher the concurrency, the faster you use up a window's limit, and when it runs out, all the tasks that are running stop together. If the whole workflow needs more usage than one window provides, lower `maxConcurrency` to spread the same usage over a longer time. That makes you less likely to hit a short-window limit, such as the 5-hour one, partway through. The tradeoff is that the workflow takes longer to run, and your weekly limit doesn't get any larger.
 
 Mixing Claude Code and Codex spreads usage across two independent limits. When one of them hits its limit, the other's tasks keep running as usual. See [The two usage limits are independent](/docs/guides/mixing-agents#usage-limits).
 

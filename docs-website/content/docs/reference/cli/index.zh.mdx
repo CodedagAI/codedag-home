@@ -32,7 +32,7 @@ icon: Terminal
 
 `cdg` 与 `codedag` 是同一个命令行工具的两个名字，文档中一律写作 `cdg`。在任何命令后加 `--help` 都能看到它的完整参数，例如 `cdg task pause --help{:sh}`。
 
-也可以用 `cdg help <命令...>{:sh}`：把命令名逐级写出，就能定位到任意一层子命令，例如 `cdg help dag review clear{:sh}`。`dag`、`task`、`dag review`、`task review`、`plugin`、`branch`、`auth` 这几个命令组下也各有 `help`，所以 `cdg dag help review clear{:sh}` 输出的是同一份帮助。写出的名字在那一级下不存在时，例如 `cdg help dag foo{:sh}`，命令把已经定位到的那一级帮助输出到 stderr，退出状态为 1。
+也可以用 `cdg help <命令...>{:sh}`：把命令名逐级写出，就能定位到任意一层子命令，例如 `cdg help dag review clear{:sh}`。`dag`、`task`、`dag review`、`task review`、`plugin`、`branch`、`auth` 这几个命令组下也各有 `help`，所以 `cdg dag help review clear{:sh}` 输出的是同一份帮助。
 
 ## 指定工作流 [#specify-workflow]
 
@@ -71,7 +71,7 @@ cdg task status 2 -w feature
 
 任务命令用工作流文件中 `tasks[].id` 的值指定任务（见 [`id`](/zh/docs/reference/workflow-file#tasks-id)）。它是一个正整数，与任务标题以及任务在列表中的位置都无关。同一个 ID 在不同工作流中指的是不同任务，所以命令中还要用 `-w` 指明工作流，省略时为队首工作流。
 
-多个 ID 用空格分隔，例如 `cdg task status 2 3 -w feature{:sh}`。只有由数字组成、数值不小于 1 的写法合法；`2,3`、`1.5`、`+2`、`2abc`、`0` 这类写法都会让命令报 `Invalid task ID`，以退出状态 1 结束，不做任何事。一条命令里有多个 ID 时，其中一个写错，整条命令就报错，写对的那几个也不会被处理。
+多个 ID 用空格分隔，例如 `cdg task status 2 3 -w feature{:sh}`。
 
 各任务命令接受的任务数量不同。除 `cdg task ls{:sh}` 外，它们都没有默认任务：省略任务时命令会报错，而不会作用于全部任务。
 
@@ -123,7 +123,7 @@ export const selectorExampleChart = `flowchart LR
 
 写在命令后面的任务 ID 就是 `--only` 的简写，因此 `cdg task pause 2 3{:sh}` 与 `cdg task pause --only 2 3{:sh}` 相同。直接写出的 ID 不能再与任何选择器同时使用，包括 `--only` 本身。
 
-一个选择器能跟几个 ID，取决于命令。在任务的暂停、继续、中断与恢复命令中，每个选择器都可以跟多个 ID，结果取并集，例如 `--upto 2 3` 选中 1、2、3；在任务的审核命令中，包括 `cdg task review clear{:sh}`，除 `--only` 外的选择器每个只接受一个 ID。
+每个选择器都可以跟多个 ID，结果取并集，例如 `--upto 2 3` 选中 1、2、3。
 
 需要圈出中间的一段任务时，可以组合两个选择器取交集：一个取自 `--downfrom` 或 `--below`，另一个取自 `--upto` 或 `--above`。其他组合，例如 `--only` 搭配 `--upto`，或同时使用三个选择器，命令都会报错而不执行。
 

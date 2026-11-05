@@ -154,11 +154,7 @@ tasks:
 
 ## 混用前的准备 [#prerequisites]
 
-混用前要确认两件事：这个项目没有被限制成只能用一家，两家读得到同一套项目规则。
-
-项目默认不限制用哪几家 Agent，初始化之后才装上的那一家，不用改任何设置就能写进任务和 `mergeConflictAgent`。只有项目设置里写了 `availableAgents` 时，可用的 Agent 才受它限制，这个字段表示你或团队有意设下的限制。工作流用到被它挡住的 Agent 时，校验会报错，并指出这个字段写在哪个文件：按提示把要用的 Agent 加进那个文件的 `availableAgents`，不再需要这道限制时把整个字段删掉，见项目设置的 [`availableAgents`](/zh/docs/reference/settings#available-agents)。
-
-另一件事是，两家读取的项目规则文件不同。Codex 读 `AGENTS.md`；Claude Code 以 `CLAUDE.md` 为准，项目里有 `CLAUDE.md` 时不会直接读 `AGENTS.md`。想让两家遵守同一套规则，常见的做法是把规则写在 `AGENTS.md` 里，再在 `CLAUDE.md` 中用 `@AGENTS.md` 引用它，细节见 Claude Code 的[记忆文档](https://code.claude.com/docs/en/memory#agents-md)和 Codex 的 [AGENTS.md 文档](https://learn.chatgpt.com/docs/agent-configuration/agents-md)。
+项目默认两家 Agent 都能用，初始化之后才装上的那一家，不用改任何设置就能写进任务和 `mergeConflictAgent`；只有项目设置里写了 [`availableAgents`](/zh/docs/reference/settings#available-agents) 时，可用的 Agent 才受它限制。
 
 ## 合并冲突交给谁 [#merge-conflicts]
 

@@ -12,8 +12,6 @@ icon: ShieldCheck
 
 写了 `mode` 的任务，最好同时写明 `agent`。两家的 `mode` 写法不同，校验时按任务实际使用的 Agent 检查；默认 Agent 通常记在每台机器自己的本机设置里，同一个工作流文件拿到默认 Agent 不同的机器上，没写 `agent` 的任务就会换一家执行，按原来那家写的 `mode` 通常也就无法通过校验。
 
-项目设置里写了 [`availableAgents`](/zh/docs/reference/settings#available-agents) 时，任务只能用其中列出的 Agent；用到列表之外的那一家，校验会报错，并指出这个字段在哪个文件。
-
 ## 选模型与推理力度 [#model-and-effort]
 
 `model` 指定模型，`effort` 指定推理力度，CodeDAG 把两者原样交给 Agent；不写时，任务使用 Agent 自己配置的默认模型和推理力度。大多数任务可以不写。想控制成本或质量时，一般让机械性的任务用较省的配置，把强模型和较高的推理力度留给审查、综合这类需要判断的任务，成本上的考虑见[按任务选模型](/zh/docs/account/cost-control#model-per-task)。
@@ -181,7 +179,7 @@ tasks:
 
 `approve-for-me` 让 Codex 在 workspace-write 沙箱里工作，需要越出沙箱时照常提出审批请求，但每个请求交给 Codex 自己的自动审查判断，不会停下来等人，所以这一档也能无人值守。被拒绝的操作不执行，Agent 收到拒绝后自行调整，换一种做法接着往下做。这个简写要独占整个 `mode`，不能再跟 `sandbox`、`search` 这些键混写。
 
-同一个回合里被自动审查连续拒绝几次之后，Codex 会中断这个回合，任务停在 `on-hold`，原因是 `agent-lifecycle-state-unavailable`。`cdg task status <任务 ID> -w <工作流>{:sh}` 的诊断里带着 Codex 给出的中断说明，按说明里写的原因处理之后，用 `cdg task recover <任务 ID> -w <工作流>{:sh}` 让任务继续，见[Agent 会话问题](/zh/docs/troubleshooting/troubleshooting#hold-agent-session)。
+同一个回合里被自动审查连续拒绝几次之后，Codex 会中断这个回合，任务停在 `on-hold`，处理见[Agent 会话问题](/zh/docs/troubleshooting/troubleshooting#hold-agent-session)。
 
 键值写法中，`ask-for-approval` 决定什么时候请求批准，`sandbox` 决定命令能读写哪些位置，`approvals_reviewer` 决定审批请求交给谁判断，全部键和取值见[权限模式语法](/zh/docs/reference/workflow-file#mode-codex)。写了范围外的取值，`cdg dag validate{:sh}` 就会报错，不会等到任务启动才失败。
 

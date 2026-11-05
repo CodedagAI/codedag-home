@@ -339,8 +339,6 @@ When both tasks finish, CodeDAG auto-accepts them and merges the two task branch
 ✔ Workflow auto-accepted: .codedag/dags/two-small-changes.yaml
 ```
 
-If the two tasks changed the same code, the merge into the integration branch produces a conflict, and CodeDAG first hands it to an agent to resolve. If it's still unresolved after three rounds, the workflow stops at `on-hold` and waits for you, and the line above doesn't appear. To resolve it, see [Merge conflicts](/docs/troubleshooting/troubleshooting#hold-merge-conflict).
-
 After the workflow finishes, the primary repository is left on the integration branch, and `git branch --show-current{:sh}` prints `cdg/two-small-changes/integration`. Start by looking at the commits the integration branch has that `main` doesn't:
 
 ```bash title="Terminal"
@@ -372,7 +370,7 @@ git checkout main
 
 Pushing is up to you: CodeDAG itself never pushes to your remote repository or pulls from it. The last command puts the primary repository back on `main`, and it also determines where the next workflow starts. When a workflow starts running, it takes the commit checked out in the primary repository as its base, so if the primary repository is still on the integration branch or on this new branch, the next workflow builds on this run's result. See [Task branches, the integration branch, and the base](/docs/concepts/workspaces-and-branches#branches).
 
-If you don't need code review, as in a personal project, you can also merge locally: run `git checkout main{:sh}` to switch back to the main branch, then run `git merge cdg/two-small-changes/integration{:sh}`. If `main` has no new commits in the meantime, this is a fast-forward merge. For other ways to merge, see [Merge into the main branch](/docs/guides/finish-and-merge#merge).
+If you don't need code review, as in a personal project, you can also merge locally: run `git checkout main{:sh}` to switch back to the main branch, then run `git merge cdg/two-small-changes/integration{:sh}`. For other ways to merge, see [Merge into the main branch](/docs/guides/finish-and-merge#merge).
 
 ## What happened in your repository
 

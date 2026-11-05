@@ -13,7 +13,7 @@ You can create replicas with git worktree or with git clone, but a project can u
 Clones are for projects where worktrees aren't a good fit, such as projects with submodules, for which the [Git documentation](https://git-scm.com/docs/git-worktree#_bugs) advises against multiple worktree checkouts. Clones differ from worktrees in two ways:
 
 - **A task branch stays in the clone that ran the task.** Each clone has its own branches. CodeDAG passes task results between clones, but when a task runs in a clone, its task branch isn't visible in the primary repository.
-- **Each workspace gains a remote named `codedag-mirror`.** It appears in the primary repository and in every clone once a workflow starts running. It points to a sync repository that CodeDAG maintains on your machine to pass branches between clones, and it has nothing to do with your own remote repository. Leave it as it is. Changing its URL makes tasks stop at `on-hold`. To fix that, see [Sync repository unavailable](/docs/troubleshooting/troubleshooting#mirror-unavailable).
+- **Each workspace gains a remote named `codedag-mirror`.** It appears in the primary repository and in every clone once a workflow starts running. It points to a sync repository that CodeDAG maintains on your machine to pass branches between clones, and it has nothing to do with your own remote repository, so leave it as it is.
 
 ## Set up replicas [#prepare-replicas]
 
@@ -65,9 +65,9 @@ cdg init --primary-workdir /Users/you/my-app --replica-workdirs /Users/you/my-ap
 
 Each run replaces the whole set of registered replicas with the list you give, so include every replica you still want to use. For the other options, see the [options in Initialize a Project](/docs/reference/cli/init#options).
 
-The concurrency limit, `maxConcurrency`, has to keep up with the number of workspaces, or tasks won't actually run at the same time. The first time you initialize, `cdg init{:sh}` sets it to 1 plus the number of replicas. If the project was already initialized and you kept its local settings, for example after running the quickstart, `cdg init{:sh}` notices that the concurrency limit there is lower than the number of workspaces and asks `Update maxConcurrency to 3?`. The default is Yes, so press Enter. When you run it non-interactively, it prints a warning instead of asking. Add `--max-concurrency 3` to the command to write the value directly. For how existing files are handled when you reinitialize, see [Reinitialize and keep existing configuration](/docs/reference/cli/init#reinitialize).
+The concurrency limit, `maxConcurrency`, has to keep up with the number of workspaces, or tasks won't actually run at the same time. The first time you initialize, `cdg init{:sh}` sets it to 1 plus the number of replicas. If the project was already initialized and you kept its local settings, for example after running the quickstart, `cdg init{:sh}` notices that the concurrency limit there is lower than the number of workspaces and asks `Update maxConcurrency to 3?`. The default is Yes, so press Enter. For how existing files are handled when you reinitialize, see [Reinitialize and keep existing configuration](/docs/reference/cli/init#reinitialize).
 
-To remove a replica, delete it with `git worktree remove{:sh}` first, then run `cdg init{:sh}` again to update the registration. A deleted directory that's still registered doesn't stop a workflow. For each missing directory the workflow would use, validation gives a warning that says the workflow will run in the remaining workspaces and suggests reinitializing. Confirm the warnings when you submit. Validation reports an error only when every workspace directory the workflow would use is gone. A workflow that's already submitted stops at `on-hold` in that case. Run `cdg init{:sh}` again, then let it continue with `cdg dag recover{:sh}`.
+To remove a replica, delete it with `git worktree remove{:sh}` first, then run `cdg init{:sh}` again to update the registration.
 
 ## What determines how many tasks run at once [#concurrency]
 
@@ -129,11 +129,9 @@ You can also do the reverse: keep one replica for yourself and let the primary r
 
 ## Run commands from a replica directory [#run-from-replica]
 
-Whichever registered workspace you run `cdg` in, it acts on the same project. Workflow names resolve to the primary repository's `.codedag/dags/`, submissions go into the same queue, and you see the same status. Which workspace a task runs in and which commit it starts from depend only on the workflow's configuration, not on the directory you run the command from. When you submit from a replica, the command prints an extra notice that begins with `Warning: You submitted this workflow from a registered replica/worktree.` to remind you of exactly that.
+Whichever registered workspace you run `cdg` in, it acts on the same project. Workflow names resolve to the primary repository's `.codedag/dags/`, submissions go into the same queue, and you see the same status. Which workspace a task runs in and which commit it starts from depend only on the workflow's configuration, not on the directory you run the command from.
 
 Replicas have no `.codedag/` directory, so edit workflow files in the primary repository's `.codedag/dags/`. A replica that isn't registered yet doesn't belong to any project, and commands you run in it report `Cannot find initialized CodeDAG project.` Go back to the primary repository and run `cdg init{:sh}` again, as described in [Register the replicas with CodeDAG](#register).
-
-`cdg init{:sh}` acts on the same project too. If you run it in a registered replica, it still initializes the project that the replica belongs to, and the replica doesn't get a `.codedag/` of its own. See [Where to run it](/docs/reference/cli/init#where-to-run).
 
 ## Common questions
 

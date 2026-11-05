@@ -339,8 +339,6 @@ git worktree list
 ✔ Workflow auto-accepted: .codedag/dags/two-small-changes.yaml
 ```
 
-如果两个任务改到了同一处代码，合并到集成分支时会发生冲突，CodeDAG 会先交给 Agent 解决；三轮仍未解决时，工作流停在 `on-hold` 等你处理，而不会出现上面这一行，处理方法见[合并冲突](/zh/docs/troubleshooting/troubleshooting#hold-merge-conflict)。
-
 工作流结束后，主仓库停在集成分支上，`git branch --show-current{:sh}` 会显示 `cdg/two-small-changes/integration`。先看集成分支比 `main` 多了哪些提交：
 
 ```bash title="Terminal"
@@ -372,7 +370,7 @@ git checkout main
 
 推送要由你来做，CodeDAG 自己从不向你的远程仓库推送，也不从中拉取。最后一条命令让主仓库回到 `main`，它还决定了下一个工作流从哪里开始：工作流以开始执行时主仓库检出的提交为起点，主仓库还停在集成分支或这条新分支上时，下一个工作流会接着这次的结果做，见[任务分支、集成分支与起点](/zh/docs/concepts/workspaces-and-branches#branches)。
 
-不需要代码审查时，比如在个人项目里，也可以在本地直接合入：运行 `git checkout main{:sh}` 切回主分支，再运行 `git merge cdg/two-small-changes/integration{:sh}`。`main` 在这期间没有新的提交时，这是一次快进合并。其他合入方式见[合入主分支](/zh/docs/guides/finish-and-merge#merge)。
+不需要代码审查时，比如在个人项目里，也可以在本地直接合入：运行 `git checkout main{:sh}` 切回主分支，再运行 `git merge cdg/two-small-changes/integration{:sh}`。其他合入方式见[合入主分支](/zh/docs/guides/finish-and-merge#merge)。
 
 ## 你的仓库里发生了什么
 

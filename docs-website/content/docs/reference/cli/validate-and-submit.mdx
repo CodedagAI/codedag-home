@@ -42,7 +42,7 @@ Whether a workflow can be submitted depends on its current [phase](/docs/concept
 
 | Workflow's current state | Can it be submitted? | What to do |
 |---|---|---|
-| Never submitted, or its review has been cleared (`planning`) | Yes | Submit it directly with `cdg dag submit <workflow>{:sh}`. The exception is when you reviewed some of its tasks with `cdg task review{:sh}` before submitting. In that case, clear those review records first. See [Task review records in a workflow that hasn't been submitted](/docs/reference/cli/review#unsubmitted-task-reviews) |
+| Never submitted, or its review has been cleared (`planning`) | Yes | Submit it directly with `cdg dag submit <workflow>{:sh}`. Any tasks you reviewed with `cdg task review{:sh}` before submitting don't run this time. See [Review tasks before you submit](/docs/reference/cli/review#unsubmitted-task-reviews) |
 | Still in the queue (`submitted`), whether it's waiting in the queue, running, stopped, or waiting for review | No. The queue can hold only one copy of a workflow | Wait until its review is finished. To start over with the modified file, see [Modify a submitted workflow](#modify-submitted) |
 | Review finished (`reviewed`) | Not directly | Clear the review first, and then submit. See [Modify a submitted workflow](#modify-submitted) |
 
@@ -62,7 +62,7 @@ Whether a workflow can be submitted depends on its current [phase](/docs/concept
 
 So for a predictable result when you submit in these environments, first read the warnings with `cdg dag validate{:sh}`, confirm that they don't affect the run, and then submit with `-y`.
 
-One warning deserves separate attention. When a task's [`branchName`](/docs/reference/workflow-file#tasks-branch-name) is the same as the name of an existing branch, validation gives a `branch-name-conflict` warning. If you submit without dealing with it (by adding `-y`, or by choosing to continue when asked), the workflow is queued as usual, but the task stops at `on-hold` (`branch-name-conflict`) when the workflow reaches it. The warning says where the same-named branch is and how to deal with it: you delete or rename a local branch in a workspace yourself, and you release a name held by CodeDAG's sync repository with [`cdg branch release`](/docs/reference/cli/control#branch-release). For the full procedure, see [Use a fixed task branch name](/docs/reference/branches-and-files#branch-name).
+One warning deserves separate attention. When a task's [`branchName`](/docs/reference/workflow-file#tasks-branch-name) is the same as the name of an existing branch, validation gives a `branch-name-conflict` warning. If you submit without dealing with it (by adding `-y`, or by choosing to continue when asked), the workflow is queued as usual, but the task stops at `on-hold` (`branch-name-conflict`) when the workflow reaches it. For how to deal with it, see [Use a fixed task branch name](/docs/reference/branches-and-files#branch-name).
 
 ## Adjust review settings for a single submission [#auto-accept-options]
 
@@ -91,7 +91,7 @@ One command can submit several workflows. They enter the queue in the order you 
 cdg dag submit api-docs release-notes
 ```
 
-A batch is all or nothing: either every workflow is submitted or none is. If any one of them fails validation, is already in the queue, or has a finished review, or if the batch's total task count exceeds your remaining credits, the command doesn't submit any workflow. With only warnings, the command lists the warnings for all the workflows together and asks just once. `-y` applies to all of them.
+A batch is all or nothing: either every workflow is submitted or none is. If any one of them fails validation, is already in the queue, or has a finished review, or if the total number of tasks the batch will run exceeds your remaining credits, the command doesn't submit any workflow. The one exception is a workflow whose tasks have all been reviewed: it has nothing to run, so it isn't submitted, and the other workflows are submitted as usual. See [Review tasks before you submit](/docs/reference/cli/review#unsubmitted-task-reviews). With only warnings, the command lists the warnings for all the workflows together and asks just once. `-y` applies to all of them.
 
 `--task-auto-accepted` and `--dag-auto-accepted` likewise apply to every workflow in the command. To give different workflows different review settings, submit them in separate commands.
 
@@ -116,7 +116,7 @@ cdg dag submit feature
 
 The first step decides what happens to the original results. When you cancel in isolated-branches mode, the integration branch returns to this workflow's base, and by default the original results are saved to a snapshot branch first, so you can still restore them later. If you're sure you don't need them, add `--code discard` to discard them outright. For these options' values and defaults, and for the syntax when you accept or defer the workflow instead, see [Review](/docs/reference/cli/review).
 
-Resubmitting always runs the whole workflow as a new run, which uses CodeDAG credits again for every task when it starts running. For which commit the new run starts from and how its branches are named, see [Run the workflow again](/docs/guides/finish-and-merge#run-again). If you only want to run a few tasks that were left undone, or redo a few, write them as a new workflow and submit it separately. See [Run only a few of the tasks](/docs/guides/finish-and-merge#continue-remaining).
+Resubmitting is a new run: when it starts running, it uses CodeDAG credits again for the tasks this run will execute. For which commit the new run starts from and how its branches are named, see [Run the workflow again](/docs/guides/finish-and-merge#run-again). If you only want to run a few tasks that were left undone, or redo a few, you can review the tasks that don't need redoing before you submit, or write the tasks you want to run as a new workflow and submit it separately. For both approaches, see [Run only a few of the tasks](/docs/guides/finish-and-merge#continue-remaining).
 
 ## Follow the logs after you submit [#attach]
 
@@ -130,7 +130,7 @@ The terminal shows the same output as `cdg dag logs <workflow> -f{:sh}`, and it'
 
 If a task or the whole workflow needs your review while you're following, the terminal stops the logs and shows the review menu, and you can give your decision on the spot. For how to use it, see [Follow along in the terminal you submit from](/docs/guides/run-and-monitor#attach).
 
-When the workflow itself is put on hold, following ends right away. The terminal prints `Workflow entered on-hold: <workflow-path>`, the `Reason:` line after it gives the reason for the hold, and the command exits with code 1. The same happens when the workflow is put on hold while it's still waiting in the queue and hasn't started running, for example because the review of the workflow ahead of it used `--downstream hold`. For the steps for each reason, see [A task or workflow is on hold](/docs/troubleshooting/troubleshooting#on-hold).
+When the workflow itself is put on hold, following ends right away, and the command exits with code 1. The same happens when the workflow is put on hold while it's still waiting in the queue and hasn't started running, for example because the review of the workflow ahead of it used `--downstream hold`. For the steps for each reason, see [A task or workflow is on hold](/docs/troubleshooting/troubleshooting#on-hold).
 
 When you submit several workflows at once with `--attach`, the terminal follows them one after another in queue order, moving on to the next when one finishes. If one of them is killed with `Ctrl+\`, stops at `on-hold`, or has its review skipped because you pressed Esc in its review menu, following ends there. The workflows behind it are still in the queue, and they start only after it's recovered or its review is finished.
 

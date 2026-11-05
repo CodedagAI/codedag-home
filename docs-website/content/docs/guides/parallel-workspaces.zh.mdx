@@ -13,7 +13,7 @@ icon: Copy
 clone 留给不适合用 worktree 的项目，例如带 submodule 的项目，[Git 文档](https://git-scm.com/docs/git-worktree#_bugs)不建议对它做多个 worktree 检出。用 clone 时有两点与 worktree 不同：
 
 - **任务分支只留在执行它的那个 clone 里。** 每个 clone 各有自己的分支，CodeDAG 在它们之间传递任务结果，但在某个 clone 里执行的任务，它的任务分支在主仓库里看不到。
-- **工作区里会多出一个名为 `codedag-mirror` 的远程。** 工作流开始执行后，它出现在主仓库和每个 clone 里，指向 CodeDAG 在本机维护的一个同步仓库，用来在各个 clone 之间传递分支，与你的远程仓库无关。保持它原样即可，改动它的地址会让任务停在 `on-hold`，处理办法见[同步仓库不可用](/zh/docs/troubleshooting/troubleshooting#mirror-unavailable)。
+- **工作区里会多出一个名为 `codedag-mirror` 的远程。** 工作流开始执行后，它出现在主仓库和每个 clone 里，指向 CodeDAG 在本机维护的一个同步仓库，用来在各个 clone 之间传递分支，与你的远程仓库无关，保持它原样即可。
 
 ## 准备副本 [#prepare-replicas]
 
@@ -65,9 +65,9 @@ cdg init --primary-workdir /Users/you/my-app --replica-workdirs /Users/you/my-ap
 
 每运行一次，登记的副本都会整体换成这次给出的列表，所以要把仍要使用的副本全部写上。其他选项见[初始化项目的选项](/zh/docs/reference/cli/init#options)。
 
-并发上限 `maxConcurrency` 要跟上工作区数，任务才会真的同时执行。第一次初始化时，`cdg init{:sh}` 把它写成 1 加副本数。项目已经初始化过、保留了原来的本机设置时，比如跑过快速开始，`cdg init{:sh}` 发现其中的并发上限低于工作区数，会问 `Update maxConcurrency to 3?`，默认 Yes，回车即可；非交互方式不询问，只输出警告，在命令里加上 `--max-concurrency 3` 就直接写入。重新初始化时已有文件怎样处理，见[重新初始化与保留已有配置](/zh/docs/reference/cli/init#reinitialize)。
+并发上限 `maxConcurrency` 要跟上工作区数，任务才会真的同时执行。第一次初始化时，`cdg init{:sh}` 把它写成 1 加副本数。项目已经初始化过、保留了原来的本机设置时，比如跑过快速开始，`cdg init{:sh}` 发现其中的并发上限低于工作区数，会问 `Update maxConcurrency to 3?`，默认 Yes，回车即可。重新初始化时已有文件怎样处理，见[重新初始化与保留已有配置](/zh/docs/reference/cli/init#reinitialize)。
 
-移除副本时，先用 `git worktree remove{:sh}` 删除它，再重新运行 `cdg init{:sh}` 更新登记。登记里还留着已经删掉的目录时，工作流不会因此停下：校验为它用得到的每个缺失目录给出一条警告，说明这个工作流会在其余工作区运行，并提示重新初始化，提交时按警告确认即可。只有这个工作流用得到的工作区目录全都不存在了，校验才报错；已经提交的工作流遇到这种情况会停在 `on-hold`，重新运行 `cdg init{:sh}` 之后用 `cdg dag recover{:sh}` 继续。
+移除副本时，先用 `git worktree remove{:sh}` 删除它，再重新运行 `cdg init{:sh}` 更新登记。
 
 ## 同时执行几个任务由什么决定 [#concurrency]
 
@@ -129,11 +129,9 @@ baseRef: main              # 从工作流开始执行时 main 所指的提交出
 
 ## 在副本目录里运行命令 [#run-from-replica]
 
-在任何一个已登记的工作区里运行 `cdg`，操作的都是同一个项目：工作流名字解析到主仓库的 `.codedag/dags/`，提交进的是同一个队列，看到的也是同一份状态。任务在哪个工作区执行、从哪个提交开始，只由工作流的配置决定，与你在哪个目录运行命令无关；在副本里提交时，命令会多打印一段以 `Warning: You submitted this workflow from a registered replica/worktree.` 开头的提示，提醒的正是这一点。
+在任何一个已登记的工作区里运行 `cdg`，操作的都是同一个项目：工作流名字解析到主仓库的 `.codedag/dags/`，提交进的是同一个队列，看到的也是同一份状态。任务在哪个工作区执行、从哪个提交开始，只由工作流的配置决定，与你在哪个目录运行命令无关。
 
 副本里没有 `.codedag/` 目录，工作流文件要到主仓库的 `.codedag/dags/` 下编辑。还没登记的副本不属于任何项目，在里面运行命令会提示 `Cannot find initialized CodeDAG project.`，按[登记到 CodeDAG](#register) 回到主仓库重新运行 `cdg init{:sh}` 即可。
-
-`cdg init{:sh}` 也一样落在同一个项目上：在已登记的副本里运行它，初始化的仍是这个副本所属的项目，副本里不会多出一份 `.codedag/`，见[在哪个目录运行](/zh/docs/reference/cli/init#where-to-run)。
 
 ## 常见问题
 

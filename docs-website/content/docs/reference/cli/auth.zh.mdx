@@ -1,24 +1,35 @@
 ---
 title: 账号
-description: cdg auth login、logout 与 status 的作用和使用前提，以及让 CLI 改用另一个账号的做法。
+description: cdg auth login、logout 与 status 的作用、选项和使用前提，以及让 CLI 改用另一个账号的做法。
 icon: KeyRound
 ---
 
-`cdg auth{:sh}` 下有三个命令，分别用来登录 CodeDAG、退出登录和查看当前账号。它们可以在任何目录中运行，不需要位于项目内；登录状态按电脑保存，同一台电脑上的所有项目共用一个登录。除 `--help` 外，只有 `cdg auth status{:sh}` 另有一个选项 [`--local`](#status-local)。为什么需要登录、哪些命令需要登录、登录状态能保持多久，见[登录与账号](/zh/docs/account/login-and-account)。
+`cdg auth{:sh}` 下有三个命令，分别用来登录 CodeDAG、退出登录和查看当前账号。它们可以在任何目录中运行，不需要位于项目内；登录状态按电脑保存，同一台电脑上的所有项目共用一个登录。除 `--help` 外，`cdg auth login{:sh}` 有一个选项 [`--no-browser`](#login-no-browser)，`cdg auth status{:sh}` 有一个选项 [`--local`](#status-local)。为什么需要登录、哪些命令需要登录、登录状态能保持多久，见[登录与账号](/zh/docs/account/login-and-account)。
 
 ## cdg auth login [#login]
 
 ```bash title="Terminal"
-cdg auth login
+cdg auth login [--no-browser]
 ```
 
 这个命令在浏览器中用 Google 账号登录 CodeDAG，并把登录状态保存在这台电脑上。第一次用某个 Google 账号登录时，会同时为它创建 CodeDAG 账号，不需要事先注册。
 
-命令要求能连上 CodeDAG 服务，连不上时会立即失败，不会打开浏览器。登录必须在运行命令的这台电脑上用浏览器完成，所以在 SSH 远程会话、容器或没有图形界面的服务器里无法登录，见[没有桌面浏览器时](/zh/docs/account/login-and-account#no-browser)。打开浏览器后，命令最多等待 5 分钟，超过时间还没有完成登录，命令就以失败结束，重新运行即可。
+登录必须在运行命令的这台电脑上用浏览器完成，所以在 SSH 远程会话、容器或没有图形界面的服务器里无法登录，见[没有桌面浏览器时](/zh/docs/account/login-and-account#no-browser)。打开浏览器或打印出登录地址后，命令最多等待 5 分钟。
 
 已经登录时再次运行，会重新走一遍登录，成功后用新的登录替换这台电脑上原有的登录；这次登录没有完成时，原有的登录保持不变。
 
 平时不必专门运行这个命令：`cdg init{:sh}`、`cdg dag submit{:sh}` 与 `cdg auth status{:sh}` 发现还没有登录时，会先带你完成同样的登录，再继续执行原来的命令。需要单独运行它的，主要是换账号的时候，以及排队中的工作流因为这台电脑没有登录而停在 `on-hold` 的时候。
+
+### --no-browser [#login-no-browser]
+
+`cdg auth login --no-browser{:sh}` 只打印登录地址并等待，不打开浏览器。这个地址在这台电脑上的哪个浏览器里打开都可以，CLI 登录的是你在那个浏览器里确认的账号。下面两种情况适合用它：
+
+- **自动化登录：** 由脚本或 Agent 操作浏览器完成登录时，它们可以直接从命令输出里取得地址，在自己操作的浏览器里打开。
+- **多个 CodeDAG 账号分别登录在不同浏览器里：** 直接在登录着目标账号的浏览器里打开地址，不经过默认浏览器。
+
+地址仍需在运行 CLI 的这台电脑上打开，见[没有桌面浏览器时](/zh/docs/account/login-and-account#no-browser)。
+
+环境变量 `CODEDAG_NO_BROWSER=1` 的作用相同，但对所有会发起登录的命令生效：除了 `cdg auth login{:sh}`，还包括尚未登录时的 `cdg init{:sh}`、`cdg dag submit{:sh}` 与 `cdg auth status{:sh}`，登录完成后原来的命令照常继续。自动化场景里，登录常由这些命令触发，这时用环境变量。它只接受 `1`，不设置或设为空值时照常打开浏览器。
 
 ## cdg auth logout [#logout]
 
@@ -28,8 +39,6 @@ cdg auth logout
 
 这个命令退出这台电脑上的 CLI 登录，并清除本机保存的登录状态。网页控制台和其他电脑上的登录不受影响；退出对排队中的工作流有什么影响，见[退出与切换账号](#switch-account)。
 
-退出不需要联网。连不上 CodeDAG 服务时，命令会给出一条警告，但本机的登录状态仍会被清除。
-
 ## cdg auth status [#status]
 
 ```bash title="Terminal"
@@ -38,23 +47,20 @@ cdg auth status [--local]
 
 不带选项时，这个命令显示当前登录的账号、订阅状态和本周期的额度用量，各项的含义见[查看额度与用量](/zh/docs/account/credits-and-subscription#check-usage)。
 
-这种用法需要登录，并且要能连上 CodeDAG 服务。还没有登录时，它会先带你完成与 `cdg auth login{:sh}` 相同的登录，再显示账号信息。
-
 ### --local [#status-local]
 
 `cdg auth status --local{:sh}` 只按这台电脑上保存的登录凭证回答是否已经登录，不联网，也不会带你进入浏览器登录，适合脚本和 Agent 在运行需要登录的命令之前使用：已登录时退出码为 0，未登录时为 1。它只显示用户 ID，不显示邮箱、订阅和额度；登录已经在服务端失效时，它仍然显示已登录。
 
 ## 退出与切换账号 [#switch-account]
 
-要让这台电脑上的 CLI 改用另一个账号，先退出，再登录另一个 Google 账号，最后确认当前的账号：
+要让这台电脑上的 CLI 改用另一个账号，用另一个 Google 账号重新登录，再确认当前的账号：
 
 ```bash title="Terminal"
-cdg auth logout
 cdg auth login
 cdg auth status
 ```
 
-如果浏览器里的网页控制台（app.codedag.com）还登录着原来的账号，`cdg auth login{:sh}` 会直接沿用它，这时先在网页上退出，再运行登录命令。多台电脑怎样共用一个账号，以及登出的完整规则，见[登出、多台电脑与切换账号](/zh/docs/account/login-and-account#sign-out)。
+浏览器里还登录着原来的账号时，在确认页选择更换账号，见[浏览器已经登录了网页控制台时](/zh/docs/account/login-and-account#confirm-account)。多台电脑怎样共用一个账号，以及登出的完整规则，见[登出、多台电脑与切换账号](/zh/docs/account/login-and-account#sign-out)。
 
 退出和切换账号不影响已经开始执行的工作流。排队中的工作流轮到执行时，这台电脑上的 CLI 必须登录着提交它的账号，否则它会停在 `on-hold`，排在后面的工作流也跟着等待；登录或切回原账号后执行 `cdg dag recover <工作流>{:sh}` 即可继续。
 

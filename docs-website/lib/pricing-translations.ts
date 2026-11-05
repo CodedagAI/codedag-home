@@ -80,7 +80,7 @@ const translations: Record<SupportedLocale, PricingTranslations> = {
         '随时可以取消，当前周期结束时生效',
       ],
       modelNote: '订阅不包含第三方 AI 模型的费用：Claude Code 与 Codex 的用量照常计在你自己的账号上。',
-      taxNote: '适用的税费以结账页为准。',
+      taxNote: '价格不含税。适用的税费在结账时计算。',
       entryNote: {
         waitlist:
           '以上是公测期间的价格。目前只开放 Waitlist 申请，还不能购买。获邀参加内测的用户，内测期间享有免费额度。',
@@ -148,14 +148,26 @@ const translations: Record<SupportedLocale, PricingTranslations> = {
         {
           question: '可以取消吗？能退款吗？',
           answer: [
-            '订阅随时可以取消，在当前付款周期结束时生效，在此之前额度照常可用。已付费用原则上不退款，例外只有重复扣费、计费故障和法律要求退款的情形，细则见',
+            '订阅随时可以取消，在当前付款周期结束时生效，在此之前额度照常可用。在第一次订阅的第一笔付款或任何一笔年付款项后 14 天内申请，可以无理由全额退款，订阅随即结束。细则见',
             { text: '退款政策', href: '/refund' },
             '。',
           ],
         },
         {
           question: '税费怎么算？',
-          answer: ['适用的税费以结账页为准。'],
+          answer: [
+            '价格以美元计，不含税。结账时，你需要选择账单地区：所在的国家或地区；在美国还要填写邮政编码（ZIP code），在加拿大还要选择省或地区。适用的税费据此计算，并在付款前显示。详见',
+            { text: '服务条款', href: '/terms#subscription' },
+            '。',
+          ],
+        },
+        {
+          question: '在任何地区都能订阅吗？',
+          answer: [
+            '还不能。部分国家和地区暂时不能使用付费方案。你在结账时选好账单地区后，页面会告诉你能否从该地区订阅。暂时不能订阅的，免费额度照常可用。想咨询从你所在的地区订阅，可以写信到 ',
+            { email: 'hi' },
+            '。',
+          ],
         },
         {
           question: 'CodeDAG 会上传我的代码吗？',
@@ -211,7 +223,7 @@ const translations: Record<SupportedLocale, PricingTranslations> = {
       ],
       modelNote:
         'A subscription does not cover third-party AI model costs: Claude Code and Codex usage still counts against your own accounts.',
-      taxNote: 'Applicable taxes are determined at checkout.',
+      taxNote: 'Prices exclude tax. Any applicable tax is calculated at checkout.',
       entryNote: {
         waitlist:
           'These are the public beta prices. For now you can only join the waitlist, so there is nothing to buy on this page yet. People invited to the private beta get free credits while the beta runs.',
@@ -288,14 +300,26 @@ const translations: Record<SupportedLocale, PricingTranslations> = {
         {
           question: 'Can I cancel? Can I get a refund?',
           answer: [
-            'You can cancel any time. Cancellation takes effect at the end of the current billing period, and your credits stay usable until then. Payments are generally non-refundable. The only exceptions are duplicate charges, billing system failures, and refunds required by law. See the ',
+            'You can cancel any time. Cancellation takes effect at the end of the current billing period, and your credits stay usable until then. If you ask within 14 days of the first payment of your first subscription or of any yearly payment, you can get a full refund, no reason needed; the subscription then ends. See the ',
             { text: 'refund policy', href: '/refund' },
             ' for details.',
           ],
         },
         {
           question: 'What about taxes?',
-          answer: ['Applicable taxes are determined at checkout.'],
+          answer: [
+            'Prices are in US dollars and exclude tax. At checkout, you choose your billing region: your country or region, plus a ZIP code in the United States or a province or territory in Canada. Any applicable tax is calculated from it and shown before you pay. See the ',
+            { text: 'Terms of Service', href: '/terms#subscription' },
+            ' for details.',
+          ],
+        },
+        {
+          question: 'Can I subscribe from anywhere?',
+          answer: [
+            'Not yet. Paid plans are not available in some countries and regions for now. After you choose your billing region at checkout, the page tells you whether you can subscribe from there. If you cannot yet, your free credits keep working as usual. To ask about subscribing from your region, write to ',
+            { email: 'hi' },
+            '.',
+          ],
         },
         {
           question: 'Does CodeDAG upload my code?',
@@ -351,7 +375,7 @@ const translations: Record<SupportedLocale, PricingTranslations> = {
       ],
       modelNote:
         'サブスクリプションに、サードパーティ AI モデルの料金は含まれません。Claude Code と Codex の利用分は、これまでどおりご自身のアカウントに計上されます。',
-      taxNote: '適用される税金は、決済画面でご確認いただけます。',
+      taxNote: '料金は税抜きです。適用される税金は決済時に計算されます。',
       entryNote: {
         waitlist:
           'これはパブリックベータの料金です。現在はウェイトリストへの登録だけを受け付けており、このページからはまだ購入できません。プライベートベータに招待された方は、ベータ期間中に無料クレジットを利用できます。',
@@ -428,14 +452,26 @@ const translations: Record<SupportedLocale, PricingTranslations> = {
         {
           question: '解約や返金はできますか？',
           answer: [
-            'サブスクリプションはいつでも解約できます。解約後も、現在の請求期間が終わるまではクレジットを通常どおり使えます。お支払い済みの料金は、原則として返金しません。例外は、重複請求、課金の不具合、法令で返金が求められる場合だけです。詳しくは',
+            'サブスクリプションはいつでも解約できます。解約後も、現在の請求期間が終わるまではクレジットを通常どおり使えます。初めてのサブスクリプションの最初のお支払い、または年払いのお支払いから 14 日以内にお申し込みいただければ、理由を問わず全額を返金し、サブスクリプションはその時点で終了します。詳しくは',
             { text: '返金ポリシー', href: '/refund' },
             'をご覧ください。',
           ],
         },
         {
           question: '税金はどうなりますか？',
-          answer: ['適用される税金は、決済画面でご確認いただけます。'],
+          answer: [
+            '料金は米ドル建てで、税抜きです。決済時に請求先地域を選んでいただきます。国または地域に加え、米国の場合は ZIP コード、カナダの場合は州または準州を指定します。適用される税金はこれをもとに計算され、お支払いの前に表示されます。詳しくは',
+            { text: '利用規約', href: '/terms#subscription' },
+            'をご覧ください。',
+          ],
+        },
+        {
+          question: 'どの国や地域からでも登録できますか？',
+          answer: [
+            'まだできません。現在、一部の国と地域では有料プランを利用できません。決済時に請求先地域を選ぶと、その地域からサブスクリプションに登録できるかが表示されます。まだ登録できない場合も、無料クレジットはこれまでどおり使えます。お住まいの地域からの登録についてのお問い合わせは、',
+            { email: 'hi' },
+            ' までご連絡ください。',
+          ],
         },
         {
           question: 'コードはアップロードされますか？',

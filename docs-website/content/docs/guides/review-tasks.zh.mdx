@@ -139,7 +139,7 @@ cdg task review cancel 1 -w feature --downstream cascade
 - `hold`（搁置）：直接依赖它的下游停在 `on-hold`，等你决定。还要执行时，用 `cdg task recover --below 1 -w feature{:sh}` 放开它们；不要了，就同样取消或推迟，见[下游被搁置](/zh/docs/troubleshooting/troubleshooting#downstream-hold)。
 - `cascade`（级联）：直接或间接依赖它的下游任务全部一并取消，不再执行。
 
-不写 `--downstream`、又有下游依赖这个任务时，命令会在终端里让你选择；在脚本里或让 Agent 执行这类没有交互终端的场合，命令不做任何改动就报错，所以要写明这个选项。
+不写 `--downstream`、又有下游依赖这个任务时，命令会在终端里让你选择。
 
 ### 先放一放：defer
 
@@ -157,15 +157,13 @@ cdg task review cancel 1 -w feature --downstream cascade
 
 ## 一次审核多个任务
 
-命令后面可以跟多个任务 ID，也可以用任务选择器按依赖关系圈出一组任务，它们会得到同一个动作和同样的选项。下面两条命令选中的都是任务 2、3：
+命令后面可以跟多个任务 ID，也可以用[任务选择器](/zh/docs/reference/cli#task-selectors)按依赖关系圈出一组任务，它们会得到同一个动作和同样的选项。下面两条命令选中的都是任务 2、3：
 
 ```bash title="Terminal"
 cdg task accept 2 3 -w feature
 # --below 1 选中任务 1 的全部下游，不含任务 1 本身
 cdg task accept --below 1 -w feature
 ```
-
-在审核命令里，除 `--only` 外，每个选择器只能跟一个任务 ID。选中的任务里如果有已经给出结论的，命令会跳过它们，并先询问是否继续处理其余任务。用选择器圈中的任务里有还没开始执行的，`accept` 还会先问你是否不运行就把它们记作已接受，默认不接受；逐个点名的任务不问这一句。没有交互终端作答时，这两种询问都让命令报错，确认过要这样做就加 `-y`。选择器的完整写法见[任务选择器](/zh/docs/reference/cli#task-selectors)。
 
 ## 给整个工作流作审核决定：dag review [#dag-review]
 
@@ -192,10 +190,6 @@ cdg task accept --below 1 -w feature
 ### 已经给出结论的任务，还想再改怎么办
 
 结论给出之后，在这次执行里就不能再改。能补救的是代码结果，不是审核结论：等这次执行结束，用 Git 处理任务的改动，再把要重做的部分写进新的工作流，做法见[任务已经有了审核结论，才发现问题](/zh/docs/troubleshooting/troubleshooting#after-conclusion)。
-
-### 提出修改要求之后，任务停在了 on-hold
-
-`request-changes` 或 `rework` 的要求没能交给任务 Agent 时，任务停在 `on-hold`，`cdg task status 1 -w feature{:sh}` 的 `Reason:` 行显示 `continuation-dispatch-failed`。执行 `cdg task recover 1 -w feature{:sh}`，CodeDAG 会重新投递同一个要求，不必再提一次。其他原因的处理见[Agent 会话问题](/zh/docs/troubleshooting/troubleshooting#hold-agent-session)。
 
 ### 共享工作区模式下审核有什么不同 [#shared-workspace]
 

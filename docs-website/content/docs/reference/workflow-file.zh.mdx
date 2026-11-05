@@ -431,7 +431,7 @@ Codex 任务的 `mode` 二选一：整个 `mode` 只写一个简写，或者写�
 | `search` | `true`、`false` | `true`：开启实时网页搜索；`false`：关闭网页搜索工具。不写时按 Codex 自身的配置，Codex 默认使用缓存的搜索结果 |
 | `network_access` | `true`、`false` | 是否允许 `workspace-write` 沙箱中的命令访问网络。不写时按 Codex 自身的配置，Codex 默认不允许 |
 
-五个键可以任意组合，只有 `network_access` 有附加要求：写它时必须同时写明 `sandbox=workspace-write`。表外的键名、表外的取值和重复的键，都在 `cdg dag validate{:sh}` 和 `cdg dag submit{:sh}` 阶段报错，不会原样交给 Codex。表中列出的是当前版本 Codex 接受的取值，Codex 早期的审批策略 `untrusted` 和已被 Codex 弃用的 `on-failure` 都在其外，写了会得到 `ask-for-approval must be on-request or never, received 'untrusted'` 这样的报错。
+五个键可以任意组合，只有 `network_access` 有附加要求：写它时必须同时写明 `sandbox=workspace-write`。表外的键名、表外的取值和重复的键，都在 `cdg dag validate{:sh}` 和 `cdg dag submit{:sh}` 阶段报错，不会原样交给 Codex。
 
 ```yaml title="yaml"
 # 只允许写入任务所在的工作区，越界时由模型请求批准

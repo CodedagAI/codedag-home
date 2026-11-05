@@ -51,9 +51,9 @@ cdg init
 
 如果还没登录，`cdg init` 会先打开浏览器让你登录。之后它会依次问几个问题：
 
-1. `Select your repository setup method`：选 `4. I don't need concurrent tasks, only sequential execution`。本教程的两个任务先后执行，只用主仓库就够了；并行执行需要的副本工作区，在第二个工作流里再准备。如果这个仓库已经有 worktree 或 clone 副本，也可以对应选 1 或 2。
+1. `Select your repository setup method`：选 `4. I don't need concurrent tasks, only sequential execution`。本教程的两个任务先后执行，只用主仓库就够了；并行执行需要的副本工作区，在第二个工作流里再准备。
 2. `Which agent would you like to set as the default for this project?`：只有 Claude Code 和 Codex 都装了才会问，任选一个即可。默认 Agent 只决定没写 `agent` 字段的任务由谁执行，而本教程的每个任务都写明了。
-3. `Install the CodeDAG plugin for Claude Code?`，以及针对 Codex 的同样问题：本机装了几个 Agent 就问几次，都选 `User-level`，不要选 `Skip`。插件让 Claude Code 和 Codex 学会操作 `cdg`、编写工作流文件，装在 User 范围后你所有的项目都能用；本教程的任务要靠它为你写出可以直接使用的工作流文件。
+3. `Install the CodeDAG plugin for Claude Code?`，以及针对 Codex 的同样问题：对本机还没装插件的 Agent 各问一次，选 `User-level`。插件让 Claude Code 和 Codex 学会操作 `cdg`、编写工作流文件，装在 User 范围后你所有的项目都能用；本教程的任务要靠它为你写出可以直接使用的工作流文件。
 
 完成后会看到类似这样的输出：
 
@@ -70,8 +70,6 @@ cdg init
 ```
 
 初始化在仓库根目录建了一个 `.codedag/` 目录，它本身是一个独立的 Git 仓库：`dags/` 放工作流文件，`settings.jsonc` 和 `local/settings.local.jsonc` 是项目设置。你的项目仓库通过 `.git/info/exclude` 忽略了这个目录，所以 `git status` 里看不到它，你已跟踪的文件也都没有改动。`.codedag/` 为什么要单独成一个仓库，见[边车仓库](/zh/docs/concepts/how-it-works#sidecar-repo)。
-
-接着运行 `cdg plugin status{:sh}` 确认插件已经装好：你要用的每个 Agent 下面，`Plugin installed` 与 `Enabled` 都应为 `true`。显示未安装时，运行 `cdg plugin install --scope user{:sh}` 补装，见[管理 CodeDAG Guide 插件](/zh/docs/guides/guide-plugin)。
 
 ## 2. 写工作流文件
 
@@ -360,7 +358,7 @@ Progress: 0/2 tasks completed (0%)
 - `workflow-review-comments.md`：任务 2 的审查意见。
 - `workflow-review-v2.html`：任务 2 重写后的报告。
 
-如果浏览器没有打开，比如这台电脑没有图形界面，任务会按 prompt 里的兜底要求，在同一目录另写一份同名的 `.md` 文件，可以直接在终端或编辑器里读。
+如果浏览器没有打开，任务会按 prompt 里的兜底要求，在同一目录另写一份同名的 `.md` 文件，可以直接在终端或编辑器里读。
 
 建议先读审查意见，再读重写版。审查意见指出了第一版哪里证据不足或判断有误，带着它读 v2，更容易看出每处改动的依据。
 

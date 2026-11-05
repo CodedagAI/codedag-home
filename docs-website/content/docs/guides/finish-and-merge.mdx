@@ -83,7 +83,7 @@ Resubmitting starts a new run. The run uses the workflow file as it is at the mo
 
 Before you submit, check where the new run will start. Without `baseRef`, it starts from the commit that's checked out in the primary repository at that moment. If the primary repository is still on the previous run's integration branch, or you've already merged the previous results into `main`, the new run builds on the previous results either way, and the tasks work on code that has already been changed. To redo the work from the original code, run `git checkout main` before you merge, or set `baseRef: main` in the workflow file.
 
-If the branches from the previous run still exist, the new run's branch names include the time the run started so that the names don't collide, as in `cdg/add-notes-20260930-105924/integration`. The workflow's name doesn't change, and you still write `add-notes` in commands. A branch name that a task sets with [`branchName`](/docs/reference/workflow-file#tasks-branch-name) isn't changed automatically. If the old branch with that name still exists, the task stops at `on-hold`. For what to do, see [Branch problems](/docs/troubleshooting/troubleshooting#hold-branch).
+If the branches from the previous run still exist, the new run's branch names include the time the run started so that the names don't collide, as in `cdg/add-notes-20260930-105924/integration`. The workflow's name doesn't change, and you still write `add-notes` in commands.
 
 ### Submit under a different file name [#new-file-name]
 
@@ -96,15 +96,29 @@ cdg dag submit add-notes-20261010
 
 A workflow's name comes from its file name, so the new file is a different workflow. You can submit it before the previous run's review is finished, and if the previous run is still in the queue, the new one waits behind it. The records of each run are kept separately too. You can still check the status and review results of earlier runs with `cdg dag status <workflow-name>{:sh}`, this run's branches are all under `cdg/add-notes-20261010/`, and its logs are written to its own file. The cost is one more workflow file, one more set of branches, and one more log file for every run. For how to clean up the branches and logs, see [Clean up branches and workspaces](#cleanup).
 
-The rules for the base and for charging are the same as when you clear the review and resubmit. If a task sets `branchName`, the new file still has the same branch name, and the task likewise stops at `on-hold` if the old branch still exists.
+The rules for the base and for charging are the same as when you clear the review and resubmit.
 
 ### Run only a few of the tasks [#continue-remaining]
 
-Resubmitting always runs the whole workflow. When you only need to run a few tasks that were left undone, or redo a few, write them into a new workflow file and submit it separately. It uses credits for those few tasks only, which costs less than running the whole workflow again.
+When you only need to run a few tasks that were left undone, or redo a few, you don't have to run the whole workflow again. You can have just those tasks run, so credits are used for those tasks only. There are two ways to do this: in the original workflow, review the tasks you don't need to redo first and then resubmit, or write the tasks you need into a new workflow.
 
-The new workflow has to start from the results that were already accepted. Without `baseRef`, it builds on those results as long as the primary repository is still on the previous workflow's integration branch, or you've merged the results into `main` and switched back to it. You can also say so explicitly with `baseRef: cdg/<workflow-name>/integration`. The original upstream tasks aren't in the new workflow, so you can't list them in `dependencies`. Their results are already in the base, so just name the files to read in the prompt.
+**In the original workflow, review the tasks you don't need to redo first.** After the workflow's review is finished, clear its review, settle the tasks you don't need to redo with `cdg task review accept{:sh}`, and then submit. In the following example, tasks 2 and 3 depend on task 1. You've already kept task 1's result, so this time you redo only tasks 2 and 3:
 
-If the workflow is still running but has become hard to continue partway through, first keep the results that are already done by following the steps in [A workflow is partway through and hard to continue](/docs/troubleshooting/troubleshooting#start-over). Then carry on in the same way.
+```bash title="Terminal"
+cdg dag review clear feature
+# Task 1 doesn't run this time
+cdg task review accept 1 -w feature
+# Only tasks 2 and 3 run, using credits for 2 tasks
+cdg dag submit feature
+```
+
+A task you accept before submitting doesn't run this time, while the tasks that depend on it start as usual. This way you keep the original workflow file and its dependencies, you don't have to copy any tasks, and the workflow's name stays the same. Tasks you don't want to do this time can also be settled in advance with `cancel` or `defer`. For how their downstream tasks are handled in that case, see [Review tasks before you submit](/docs/reference/cli/review#unsubmitted-task-reviews).
+
+**Write a new workflow.** Write the tasks you need into a new workflow file and submit it separately. The original upstream tasks aren't in the new workflow, so you can't list them in `dependencies`. But their results are already in the base, so you only need to name the files to read in the prompt. The new workflow is a different workflow, so you can submit it without waiting for the original workflow's review to finish.
+
+Either way, this run has to start from the results that were already accepted. That's because accepting a task before you submit only keeps it from running this time. It doesn't bring in the result from its previous run. Without `baseRef`, the run starts from the commit that's checked out in the primary repository at that moment. So if the primary repository is still on the previous run's integration branch, or you've merged the results into `main` and switched back to it, this run builds on those results. You can also set `baseRef: cdg/<workflow-name>/integration` to start from the integration branch explicitly. Conversely, if the base is still the original `main`, the tasks you run can't see the upstream results that were already accepted.
+
+If the workflow is still running but has become hard to continue partway through, first keep the results that are already done (for the steps, see [A workflow is partway through and hard to continue](/docs/troubleshooting/troubleshooting#start-over)), and then carry on as described above.
 
 ## Clean up branches and workspaces [#cleanup]
 
@@ -127,7 +141,7 @@ git branch --list 'cdg/<workflow-name>/*'
 git branch --list 'cdg/<workflow-name>/*' --format='%(refname:short)' | xargs git branch -D
 ```
 
-A workflow that has been run again also has the set of branches with the time in their names. List them with `git branch --list 'cdg/<workflow-name>-*/*'{:sh}` and, once you've confirmed the list, delete them the same way. When your replicas are clones, delete the branches of tasks that ran in a clone from inside that clone. The `codedag-mirror` remote is maintained by CodeDAG, so leave it as it is. If a branch in it is holding a fixed branch name, release it with `cdg branch release <branch-name>{:sh}`.
+A workflow that has been run again also has the set of branches with the time in their names. List them with `git branch --list 'cdg/<workflow-name>-*/*'{:sh}` and, once you've confirmed the list, delete them the same way. When your replicas are clones, delete the branches of tasks that ran in a clone from inside that clone. The `codedag-mirror` remote is maintained by CodeDAG, so leave it as it is.
 
 <Callout type="warn">Snapshot branches hold the changes of canceled, deferred, or reworked tasks as they were at the time, and once you delete a snapshot branch, those changes can't be restored. Before you delete, make sure there's nothing in them that you still want to keep.</Callout>
 

@@ -154,11 +154,7 @@ A task that sets `mode` but not `agent` goes to the project's default agent, so 
 
 ## Before you mix agents [#prerequisites]
 
-Confirm two things before you mix agents: the project isn't restricted to a single agent, and both agents can read the same set of project rules.
-
-By default, a project doesn't restrict which agents you can use. An agent that you installed only after initialization can go into tasks and `mergeConflictAgent` without any change to the settings. The available agents are restricted only when project settings define `availableAgents`, which means you or your team set the restriction on purpose. When a workflow uses an agent that the field excludes, validation reports an error and tells you which file the field is in. Add the agent you want to `availableAgents` in that file as the message says, or delete the whole field if you no longer need the restriction. See [`availableAgents`](/docs/reference/settings#available-agents) in Project Settings.
-
-Second, the two agents read different project rule files. Codex reads `AGENTS.md`. Claude Code goes by `CLAUDE.md`, and when a project has a `CLAUDE.md`, it doesn't read `AGENTS.md` directly. To have both follow the same rules, a common approach is to write the rules in `AGENTS.md` and import that file from `CLAUDE.md` with `@AGENTS.md`. For details, see Claude Code's [memory documentation](https://code.claude.com/docs/en/memory#agents-md) and Codex's [AGENTS.md documentation](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
+By default, a project can use both agents. An agent that you installed only after initialization can go into tasks and `mergeConflictAgent` without any change to the settings. The available agents are restricted only when project settings define [`availableAgents`](/docs/reference/settings#available-agents).
 
 ## Who resolves merge conflicts [#merge-conflicts]
 

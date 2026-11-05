@@ -339,8 +339,6 @@ git worktree list
 ✔ Workflow auto-accepted: .codedag/dags/two-small-changes.yaml
 ```
 
-2 つのタスクが同じ箇所のコードを変更していた場合は、統合ブランチへのマージでコンフリクトが発生します。CodeDAG は、まずエージェントに解決を任せます。3 回試みても解決しなかった場合は、上の行は表示されず、ワークフローは `on-hold` で止まって対処を待ちます。対処方法は、[マージコンフリクト](/ja/docs/troubleshooting/troubleshooting#hold-merge-conflict)を参照してください。
-
 ワークフローが終了すると、プライマリリポジトリは統合ブランチをチェックアウトした状態になっており、`git branch --show-current{:sh}` を実行すると `cdg/two-small-changes/integration` と表示されます。まず、統合ブランチにあって `main` にはないコミットを確認します。
 
 ```bash title="Terminal"
@@ -372,7 +370,7 @@ git checkout main
 
 プッシュは自分で行います。CodeDAG がリモートリポジトリにプッシュしたり、リモートリポジトリからプルしたりすることは一切ありません。最後のコマンドはプライマリリポジトリを `main` に戻すもので、次のワークフローがどこから始まるかも、これで決まります。ワークフローは、実行開始時にプライマリリポジトリでチェックアウトされているコミットをベースにします。プライマリリポジトリが統合ブランチやこの新しいブランチのままだと、次のワークフローは今回の結果の続きから作業することになります。詳しくは[タスクブランチ、統合ブランチ、ベース](/ja/docs/concepts/workspaces-and-branches#branches)を参照してください。
 
-個人プロジェクトなどでコードレビューが不要な場合は、ローカルで直接マージすることもできます。`git checkout main{:sh}` でメインブランチに戻り、続けて `git merge cdg/two-small-changes/integration{:sh}` を実行します。この間に `main` に新しいコミットがなければ、fast-forward マージになります。ほかのマージ方法は、[メインブランチにマージする](/ja/docs/guides/finish-and-merge#merge)を参照してください。
+個人プロジェクトなどでコードレビューが不要な場合は、ローカルで直接マージすることもできます。`git checkout main{:sh}` でメインブランチに戻り、続けて `git merge cdg/two-small-changes/integration{:sh}` を実行します。ほかのマージ方法は、[メインブランチにマージする](/ja/docs/guides/finish-and-merge#merge)を参照してください。
 
 ## リポジトリで何が起きたのか
 

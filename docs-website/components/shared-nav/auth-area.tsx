@@ -46,8 +46,9 @@ export interface AuthAreaProps {
   /**
    * 替换未登录时第二个按钮的目标、文案与样式（公开站按主页模式传入：
    * 内测时指向 Waitlist，正式开放后指向 App 账号入口；className 让它与
-   * 站内其他主按钮同一套样式）。不传时为 Get Started → appUrl + "/signup"，
-   * 样式为扁平品牌色（bg-brand，两站都定义了这个变量）。
+   * 站内其他主按钮同一套样式）。不传时为 Get Started → appUrl + "/login"
+   * （App 唯一的账号入口，新用户与已有用户都从这里登录），样式为扁平
+   * 品牌色（bg-brand，两站都定义了这个变量）。
    */
   secondaryAction?: { href: string; label: string; className?: string };
   className?: string;
@@ -185,7 +186,7 @@ export function AuthArea({
         {t.signIn}
       </a>
       <a
-        href={secondaryAction?.href ?? `${appUrl}/signup`}
+        href={secondaryAction?.href ?? `${appUrl}/login`}
         className={cls(
           secondaryAction?.className ??
             "inline-flex h-8 items-center whitespace-nowrap rounded-lg bg-brand px-3.5 text-sm font-medium text-brand-foreground transition-opacity hover:opacity-90",

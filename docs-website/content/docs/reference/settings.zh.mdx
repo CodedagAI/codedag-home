@@ -21,7 +21,7 @@ icon: Settings
 
 两个文件都是 JSONC 格式，即在标准 JSON 的基础上可以写 `//` 和 `/* */` 注释。其余写法仍要符合 JSON：顶层必须是一个对象，最后一个字段后面不能有逗号。
 
-文件无法解析，或者下文五个字段中有取值不合法的字段时，校验、提交等需要读取项目设置的命令都会失败，不会退回默认配置继续执行。报错指出出错的文件，以及解析出错的行列或取值不合法的原因，每个文件只报第一处。
+文件无法解析，或者下文五个字段中有取值不合法的字段时，校验、提交等需要读取项目设置的命令都会失败，不会退回默认配置继续执行。
 
 字段名写错不影响其余字段生效：字段名区分大小写，CodeDAG 不认识的键会被跳过，`cdg dag validate{:sh}` 和提交时的校验为每个含这种键的文件给出一条 `unsupported-setting` 警告，列出写错的键和全部支持的字段名。警告不会让校验失败，提交时按警告确认一次即可继续。
 
@@ -93,7 +93,7 @@ icon: Settings
 
 ### availableAgents [#available-agents]
 
-`availableAgents` 列出这个项目的工作流可以使用的 Agent：`claude` 表示 Claude Code，`codex` 表示 Codex。校验和提交时，CodeDAG 检查两处 Agent：每个任务实际使用的 Agent（任务写的 `agent`，没写时为[默认 Agent](#default-agent)），以及 [`mergeConflictAgent`](/zh/docs/reference/workflow-file#merge-conflict-agent) 中的 `agent`。它们都必须在这个列表里，否则校验失败。报错会写明限制来自哪个文件，并给出两条处理办法：把这个 Agent 加进那个文件的 `availableAgents`，或者删掉该字段。
+`availableAgents` 列出这个项目的工作流可以使用的 Agent：`claude` 表示 Claude Code，`codex` 表示 Codex。校验和提交时，CodeDAG 检查两处 Agent：每个任务实际使用的 Agent（任务写的 `agent`，没写时为[默认 Agent](#default-agent)），以及 [`mergeConflictAgent`](/zh/docs/reference/workflow-file#merge-conflict-agent) 中的 `agent`。它们都必须在这个列表里，否则校验失败。
 
 这个字段只用来有意限制，例如团队约定这个项目只用 Claude Code：
 
@@ -103,7 +103,7 @@ icon: Settings
 }
 ```
 
-不写它时，全部受支持的 Agent 都可以使用，新安装的 Agent 直接就能用。不想再限制时，删掉这个字段：空数组会报错 `availableAgents must list at least one agent; remove the field to allow all supported agents`，列表里出现 `claude`、`codex` 以外的值同样报错。
+不写它时，全部受支持的 Agent 都可以使用，新安装的 Agent 直接就能用。不想再限制时，删掉这个字段，不要留一个空数组。
 
 这个列表与这台电脑装了哪几家 Agent 无关。校验和提交另有一项独立的安装检查：工作流实际用到的 Agent 命令不在 PATH 中时，报 `agent-not-installed` 错误，见[提交被拒绝](/zh/docs/troubleshooting/troubleshooting#submit-rejected)。
 
@@ -111,7 +111,7 @@ icon: Settings
 
 `defaultAgent` 是项目的默认 Agent，取值为 `claude` 或 `codex`。没写 `agent` 的任务交给它执行，这些任务的 `mode` 也按它的写法校验；工作流没写 [`mergeConflictAgent`](/zh/docs/reference/workflow-file#merge-conflict-agent) 时，全部任务结束后合并到集成分支如果出现冲突，也由它来解决。
 
-两个文件都没写时，默认 Agent 是 `codex`；写了 `claude`、`codex` 以外的值时报错，取值本身不区分大小写，首尾的空白会被忽略。这样得到的 Agent 不在 [`availableAgents`](#available-agents) 中时，改用 `availableAgents` 的第一项，例如只允许 `claude` 的项目，不写 `defaultAgent` 时默认 Agent 就是 Claude Code。
+两个文件都没写时，默认 Agent 是 `codex`。这样得到的 Agent 不在 [`availableAgents`](#available-agents) 中时，改用 `availableAgents` 的第一项，例如只允许 `claude` 的项目，不写 `defaultAgent` 时默认 Agent 就是 Claude Code。
 
 `cdg init{:sh}` 怎样确定默认 Agent、何时把它写进本机设置，见[默认 Agent 怎样确定](/zh/docs/reference/cli/init#default-agent)。之后想换，修改本机设置里的这个字段：
 

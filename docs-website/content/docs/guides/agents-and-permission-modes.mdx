@@ -12,8 +12,6 @@ Set `agent` to `claude` to run the task with Claude Code, or to `codex` to run i
 
 A task that sets `mode` should set `agent` explicitly too. The two agents use different `mode` syntax, and validation checks `mode` against the agent the task actually uses. The default agent is usually stored in each machine's own local settings. On a machine with a different default agent, a task without `agent` in the same workflow file is run by the other agent, and a `mode` written for the original one usually fails validation.
 
-If project settings define [`availableAgents`](/docs/reference/settings#available-agents), tasks can use only the agents it lists. If a task uses the one that isn't on the list, validation reports an error and tells you which file the field is in.
-
 ## Choose a model and reasoning effort [#model-and-effort]
 
 `model` sets the model and `effort` sets the reasoning effort. CodeDAG passes both to the agent as is. When you omit them, the task uses the default model and reasoning effort configured in the agent itself. Most tasks don't need either field. When you want to control cost or quality, the usual approach is to give mechanical tasks a cheaper configuration and save strong models and higher reasoning effort for tasks that call for judgment, such as review and synthesis. For the cost side, see [Choose a model per task](/docs/account/cost-control#model-per-task).
@@ -181,7 +179,7 @@ tasks:
 
 `approve-for-me` has Codex work inside the workspace-write sandbox and raise an approval request as usual when it needs to go outside it. But each request goes to Codex's own automatic review for a decision instead of waiting for a person, so this level can run unattended too. A denied operation doesn't run. After the denial, the agent adjusts on its own and carries on with a different approach. This shorthand has to be the entire `mode` value and can't be combined with keys such as `sandbox` or `search`.
 
-After automatic review denies several requests in a row within the same turn, Codex interrupts the turn, and the task stops at `on-hold` with the reason `agent-lifecycle-state-unavailable`. The diagnostic in `cdg task status <task-id> -w <workflow>{:sh}` includes the explanation Codex gave for the interruption. Deal with the cause it states, then run `cdg task recover <task-id> -w <workflow>{:sh}` to let the task continue. See [Agent session problems](/docs/troubleshooting/troubleshooting#hold-agent-session).
+After automatic review denies several requests in a row within the same turn, Codex interrupts the turn, and the task stops at `on-hold`. For what to do, see [Agent session problems](/docs/troubleshooting/troubleshooting#hold-agent-session).
 
 In the key-value form, `ask-for-approval` sets when Codex requests approval, `sandbox` sets which locations commands can read and write, and `approvals_reviewer` sets who decides approval requests. For all keys and values, see [Permission mode syntax](/docs/reference/workflow-file#mode-codex). If you write a value outside the allowed set, `cdg dag validate{:sh}` reports an error right away, instead of leaving the task to fail when it starts.
 

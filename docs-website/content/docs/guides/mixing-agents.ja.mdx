@@ -154,11 +154,7 @@ tasks:
 
 ## 組み合わせる前の準備 [#prerequisites]
 
-組み合わせる前に、2 つのことを確認します。プロジェクトで使えるエージェントが一方だけに制限されていないことと、2 つのエージェントが同じプロジェクトルールを読めることです。
-
-プロジェクトは、デフォルトでは使えるエージェントを制限しません。初期化のあとでインストールしたエージェントも、設定を何も変えずに、タスクや `mergeConflictAgent` に書けます。使えるエージェントが制限されるのは、プロジェクト設定に `availableAgents` を書いている場合だけです。このフィールドは、自分またはチームが意図して設けた制限を表します。このフィールドによって使えなくなっているエージェントをワークフローが使っていると、検証でエラーになり、このフィールドがどのファイルに書かれているかが示されます。メッセージに従って、使いたいエージェントをそのファイルの `availableAgents` に追加してください。制限そのものが不要になった場合は、フィールドごと削除します。プロジェクト設定の [`availableAgents`](/ja/docs/reference/settings#available-agents) を参照してください。
-
-もう 1 つは、2 つのエージェントが読み込むプロジェクトルールのファイルが異なることです。Codex は `AGENTS.md` を読みます。Claude Code は `CLAUDE.md` に従い、プロジェクトに `CLAUDE.md` がある場合は `AGENTS.md` を直接は読みません。両方に同じルールを守らせるには、ルールを `AGENTS.md` に書き、`CLAUDE.md` から `@AGENTS.md` で参照するのが一般的です。詳しくは、Claude Code の[メモリのドキュメント](https://code.claude.com/docs/en/memory#agents-md)と Codex の [AGENTS.md のドキュメント](https://learn.chatgpt.com/docs/agent-configuration/agents-md)を参照してください。
+プロジェクトでは、デフォルトで 2 つのエージェントのどちらも使えます。初期化のあとでインストールしたエージェントも、設定を何も変えずに、タスクや `mergeConflictAgent` に書けます。使えるエージェントが制限されるのは、プロジェクト設定に [`availableAgents`](/ja/docs/reference/settings#available-agents) を書いている場合だけです。
 
 ## マージコンフリクトを誰が解決するか [#merge-conflicts]
 

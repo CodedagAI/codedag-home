@@ -1,6 +1,6 @@
 ---
 title: 登录与账号
-description: 使用 CodeDAG 为什么需要登录、怎样登录和登出，以及 CodeDAG 服务会收到你的哪些数据。
+description: 使用 CodeDAG 为什么需要登录、怎样登录、登出和切换账号，以及 CodeDAG 服务会收到你的哪些数据。
 icon: KeyRound
 ---
 
@@ -26,11 +26,11 @@ CodeDAG 按任务数消耗 CodeDAG 额度，登录用来确认是哪个账号在
 cdg auth login
 ```
 
-命令会在这台电脑上打开浏览器，目前只支持用 Google 账号登录。第一次用某个 Google 账号登录时，CodeDAG 会同时为它创建账号，新账号注册即送免费额度，数量和有效期见[免费额度](/zh/docs/account/credits-and-subscription#free-credits)。如果这个浏览器已经登录了 CodeDAG 网页控制台，登录会直接沿用网页上的账号。
+命令会在这台电脑上打开浏览器，目前只支持用 Google 账号登录。第一次用某个 Google 账号登录时，CodeDAG 会同时为它创建账号，新账号注册即送免费额度，数量和有效期见[免费额度](/zh/docs/account/credits-and-subscription#free-credits)。
 
-### 登录没有完成时 [#sign-in-failed]
+### 浏览器已经登录了网页控制台时 [#confirm-account]
 
-登录超时、在浏览器里取消，或者连不上 CodeDAG 服务时，重新运行一次即可。如果这次登录是由 `cdg init{:sh}` 或 `cdg dag submit{:sh}` 触发的，原命令也会随之退出，不会创建 `.codedag`，也不会把工作流加入队列。反复失败时，按故障排除中的[登录问题](/zh/docs/troubleshooting/troubleshooting#sign-in-problems)排查。
+浏览器里已经登录着 CodeDAG 网页控制台时，CLI 登录会先让你确认要使用的账号。可以继续使用页面显示的账号，也可以选 Use a different account 换一个 Google 账号，不用重新运行命令。
 
 ### 没有桌面浏览器时 [#no-browser]
 
@@ -38,7 +38,7 @@ cdg auth login
 
 原因在于登录的方式：你在浏览器里完成登录后，浏览器要把结果交回这台电脑上正在等待的 CLI，所以浏览器和 CLI 必须在同一台电脑上。下面两种变通办法都行不通：
 
-- **把登录链接拿到另一台电脑上打开。** 那台电脑上的浏览器找不到等待结果的 CLI，登录完成不了。
+- **把登录链接拿到另一台电脑上打开。** 用 `--no-browser` 打印出来的地址也一样：那台电脑上的浏览器找不到等待结果的 CLI，登录完成不了。
 - **在另一台电脑上登录，再把凭证复制过来。** 复制出去的凭证一旦被使用，这个账号在所有电脑上的 CLI 登录都会被作废。
 
 在远程服务器这类没有浏览器的环境里登录和使用 CodeDAG，已列入后续版本的规划。
@@ -59,7 +59,7 @@ cdg auth logout
 
 每台电脑都要各自登录一次，同一个账号的所有电脑共用一份额度。登录状态不能靠复制凭证在电脑之间共用：复制出去的凭证一旦被再次使用，这个账号在所有电脑上的 CLI 登录都会被作废，需要逐台重新登录。
 
-要换一个账号，先运行 `cdg auth logout{:sh}`，再运行 `cdg auth login{:sh}` 并选择另一个 Google 账号；如果浏览器里的网页控制台还登录着原来的账号，先在网页上退出，否则登录会直接沿用它。
+要换一个账号，运行 `cdg auth login{:sh}` 用另一个 Google 账号登录即可，不必先登出：新的登录成功后会替换这台电脑上原来的登录。浏览器里的网页控制台还登录着原来的账号时，登录会先显示确认页，在那里选 Use a different account，见[浏览器已经登录了网页控制台时](#confirm-account)。
 
 登出和切换账号都不影响已经开始执行的工作流。排队中还没开始的工作流，要等轮到执行时才使用这台电脑的登录状态：那时如果没有登录，或者登录的不是提交它的账号，它会停在 `on-hold`；重新登录或切回原账号后，执行 `cdg dag recover <名字>{:sh}` 即可继续。
 

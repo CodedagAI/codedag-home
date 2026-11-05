@@ -138,7 +138,7 @@ cdg dag validate testing-docs
   [dag] Task 2: depends on non-existent task 3
 ```
 
-校验不只看这一个文件：两个项目设置文件也一起读，其中的设置项取值不合法时，校验直接失败，并指出是哪个文件里的哪一项。字段取值里，`mode` 按任务实际使用的那一家 Agent 的写法检查，`model`、`effort` 这类原样交给 Agent 的取值则不在检查范围内，各字段具体检查什么见[工作流文件参考](/zh/docs/reference/workflow-file)。
+字段取值里，`mode` 按任务实际使用的那一家 Agent 的写法检查，`model`、`effort` 这类原样交给 Agent 的取值则不在检查范围内，各字段具体检查什么见[工作流文件参考](/zh/docs/reference/workflow-file)。
 
 警告不会让校验失败，但值得逐条看一遍。最常见的是 `unsupported-field`：CodeDAG 会忽略工作流文件里不认识的字段，所以拼错的字段名不会报错，只是不起作用。字段名一律用 camelCase，写成 `auto_accepted` 这样的 snake_case 时同样被忽略，另有一条 `naming` 警告提示应改成 `autoAccepted`。
 

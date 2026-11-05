@@ -18,12 +18,16 @@ import {
 import { cn } from '@/lib/cn';
 import { focusRing, textLinkClass } from './ui';
 
-/** 一份政策在某种语言下的正文（content/policies/）；默认语言的文件不带语言后缀 */
-function getPolicy(kind: PolicyKind, lang: string) {
-  const file = lang === i18n.defaultLanguage ? `${kind}.mdx` : `${kind}.${lang}.mdx`;
+/** content/policies/ 下的一个正文文件；没有时返回 404 */
+function getPolicyFile(file: string) {
   const entry = policies.find((item) => item.info.path === file);
   if (!entry) notFound();
   return entry;
+}
+
+/** 一份政策在某种语言下的正文；默认语言的文件不带语言后缀 */
+function getPolicy(kind: PolicyKind, lang: string) {
+  return getPolicyFile(lang === i18n.defaultLanguage ? `${kind}.mdx` : `${kind}.${lang}.mdx`);
 }
 
 /** 三份政策页共用的元数据：标题与描述取自正文的 frontmatter，三种语言各一份 */
@@ -108,6 +112,50 @@ export function PolicyPage({ kind, lang }: { kind: PolicyKind; lang: string }) {
           </div>
         </dl>
 
+        <article className="prose mt-10 max-w-none">
+          <Body components={getMDXComponents()} />
+        </article>
+      </div>
+    </main>
+  );
+}
+
+/**
+ * 日本特定商取引法要求的表记页（`/ja/tokushoho`）：只有日文，其他语言的同一路径返回 404。
+ * 入口只放在日文服务条款的开头与 App 付款页（账单地区为日本时）。它是法定的信息披露，
+ * 不属于三份政策，所以不进政策之间的切换，页首也不写施行日
+ */
+export const JAPAN_DISCLOSURE_FILE = 'tokushoho.ja.mdx';
+
+export function japanDisclosureMetadata(lang: string): Metadata {
+  if (lang !== 'ja') notFound();
+  const page = getPolicyFile(JAPAN_DISCLOSURE_FILE);
+  const canonical = generateAlternates('/tokushoho', 'ja').canonical;
+  const images = shareImage('ja');
+
+  return createMetadata({
+    title: page.title,
+    description: page.description,
+    alternates: { canonical },
+    openGraph: { url: canonical, images },
+    twitter: { images },
+  });
+}
+
+export function JapanDisclosurePage({ lang }: { lang: string }) {
+  if (lang !== 'ja') notFound();
+  const page = getPolicyFile(JAPAN_DISCLOSURE_FILE);
+  const Body = page.body;
+
+  return (
+    <main className="bg-fd-background text-home-ink antialiased">
+      <div className="mx-auto w-full max-w-[760px] px-5 pt-12 pb-20 sm:px-8 sm:pt-16 lg:pb-28">
+        <h1 className="text-[2rem] font-semibold leading-[1.2] tracking-tight sm:text-[2.5rem]">
+          {page.title}
+        </h1>
+        {page.description ? (
+          <p className="mt-4 text-[1.0625rem] leading-[1.7] text-home-muted">{page.description}</p>
+        ) : null}
         <article className="prose mt-10 max-w-none">
           <Body components={getMDXComponents()} />
         </article>

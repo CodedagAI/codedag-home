@@ -61,7 +61,7 @@ cdg init
 
 1. **レプリカの方式（`Select your repository setup method`）：** 自分のコンピューターの状況に合わせて選びます。レプリカの登録はこのコンピューターでだけ有効で、`.codedag` と一緒に共有されることはありません。レプリカをまだ用意していない場合は、`4. I don't need concurrent tasks, only sequential execution` を選びます。あとでタスクを並列に実行したくなったら、[並列実行とワークスペース](/ja/docs/guides/parallel-workspaces)に従ってレプリカを用意し、`cdg init{:sh}` をもう一度実行します。
 2. **デフォルトのエージェント：** Claude Code と Codex の両方がインストールされている場合にだけ尋ねられます。ここでの選択が影響するのは、このコンピューターだけです。チームが共有設定に `defaultAgent` を書いている場合は、チームが指定したエージェントの選択肢に `(team default)` と表示され、先頭に並びます。これを選んでおくと、あとでチームが共有設定を変更したときに、自分の側のデフォルトも一緒に変わります。
-3. **CodeDAG Guide プラグイン：** プラグインをまだインストールしていないエージェントごとに 1 回ずつ、インストールするかどうかを尋ねられます。インストールスコープごとの違いは、[インストールスコープを選ぶ](/ja/docs/guides/guide-plugin#scopes)を参照してください。
+3. **CodeDAG Guide プラグイン：** プラグインをまだインストールしていないエージェントごとに 1 回ずつ、インストールするかどうかを尋ねられます。インストールスコープごとの違いは、[インストールスコープ](/ja/docs/reference/cli/plugin#scopes)を参照してください。
 
 ### 3. Claude Code のフルアクセスの警告に同意する
 
@@ -75,7 +75,7 @@ cdg init
 cdg dag validate review-changes
 ```
 
-`✔ Validation passed:` で始まる出力が表示されれば、このコンピューターでこのワークフローを実行できます。`is not installed on this machine` と表示された場合は、ワークフローが使うエージェントが、このコンピューターにまだインストールされていません。インストールしてから、もう一度検証してください。
+`✔ Validation passed:` で始まる出力が表示されれば、このコンピューターでこのワークフローを実行できます。
 
 ### このリポジトリをすでに初期化している場合 [#already-initialized]
 

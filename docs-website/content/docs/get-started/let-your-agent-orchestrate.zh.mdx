@@ -19,7 +19,7 @@ icon: Bot
 - 插件已安装。在这个仓库里运行 `cdg init{:sh}` 时选择过安装插件，或者以 User 范围装过（在哪个仓库里装的都算），这一步就已完成；否则运行 `cdg plugin install --scope user{:sh}`，为本机装有的 Claude Code 和 Codex 安装插件，对你所有的仓库生效。
 - 会话是在插件装好之后打开的。插件只在新会话中生效，已经开着的会话要先退出，再用 `claude --resume{:sh}` 或 `codex resume{:sh}` 恢复。
 
-拿不准时，在这个仓库里运行 `cdg plugin status{:sh}` 确认：对应 Agent 下的 `Plugin installed` 与 `Enabled` 都为 `true`，说明插件已装好并处于启用状态；显示未安装时，输出里的 `Action` 一行会给出补装命令。安装范围与更新方式见[管理 CodeDAG Guide 插件](/zh/docs/guides/guide-plugin)。
+拿不准时，在这个仓库里运行 `cdg plugin status{:sh}`：对应 Agent 下的 `Action` 显示 `No action needed` 就可以继续，否则照它给出的命令处理。安装范围与更新方式见[管理 CodeDAG Guide 插件](/zh/docs/guides/guide-plugin)。
 
 ## 一段可以直接粘贴的提示词
 

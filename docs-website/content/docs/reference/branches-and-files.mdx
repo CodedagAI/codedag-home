@@ -127,7 +127,7 @@ cdg branch release feature/search-api
 
 Branches still in use by a workflow in the queue, and snapshot branches, can't be released. For the full conditions, see [`cdg branch release`](/docs/reference/cli/control#branch-release).
 
-If a task has already stopped at `on-hold` because of a same-named branch, recover it with `cdg task recover{:sh}` once the name is free. For the troubleshooting steps, see [Branch problems](/docs/troubleshooting/troubleshooting#hold-branch). If you still get `branch-name-conflict` after dealing with the old branch, switch to a new `branchName` in the workflow file, or remove it and let CodeDAG name the branch automatically.
+If a task has already stopped at `on-hold` because of a same-named branch, recover it with `cdg task recover{:sh}` once the name is free. If you still get `branch-name-conflict` after dealing with the old branch, switch to a new `branchName` in the workflow file, or remove it and let CodeDAG name the branch automatically.
 
 ## Save workflows and shared configuration separately [#save-config]
 

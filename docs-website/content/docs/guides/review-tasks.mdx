@@ -139,7 +139,7 @@ Use `--downstream` to say what happens to the downstream tasks:
 - `hold`: The downstream tasks that directly depend on it stop at `on-hold` and wait for your decision. If you still want them to run, release them with `cdg task recover --below 1 -w feature{:sh}`. If you don't, cancel or defer them in the same way. See [Downstream tasks or workflows put on hold](/docs/troubleshooting/troubleshooting#downstream-hold).
 - `cascade`: Every downstream task that depends on it, directly or indirectly, is canceled along with it and doesn't run.
 
-If you omit `--downstream` and other tasks depend on this one, the command asks you to choose in the terminal. Where there's no interactive terminal, such as in a script or when an agent runs the command, it fails without changing anything, so set the option explicitly there.
+If you omit `--downstream` and other tasks depend on this one, the command asks you to choose in the terminal.
 
 ### Set the task aside for now: defer
 
@@ -157,15 +157,13 @@ Review actions aren't only for tasks that have finished and stopped at a gate. Y
 
 ## Review several tasks at once
 
-A review command can take several task IDs, or you can use a task selector to pick a group of tasks by their dependencies. All of them get the same action and the same options. Both commands below select tasks 2 and 3:
+A review command can take several task IDs, or you can use a [task selector](/docs/reference/cli#task-selectors) to pick a group of tasks by their dependencies. All of them get the same action and the same options. Both commands below select tasks 2 and 3:
 
 ```bash title="Terminal"
 cdg task accept 2 3 -w feature
 # --below 1 selects all of task 1's downstream tasks, not task 1 itself
 cdg task accept --below 1 -w feature
 ```
-
-In review commands, every selector except `--only` takes just one task ID. If some of the selected tasks already have a decision, the command skips them and first asks whether to go ahead with the rest. If the tasks picked by a selector include some that haven't started running, `accept` also asks whether to record them as accepted without running them, and the default is not to accept them. It doesn't ask this about tasks you name one by one. With no interactive terminal to answer in, either question makes the command fail, so add `-y` once you've confirmed that this is what you want. For the full selector syntax, see [Task selectors](/docs/reference/cli#task-selectors).
 
 ## Review the whole workflow: dag review [#dag-review]
 
@@ -192,10 +190,6 @@ You don't have to wait for the workflow-level gate to use `dag review`. It can e
 ### What if a task that already has a decision still needs changes?
 
 Once a decision is given, it can't be changed within that run. What you can still fix is the code, not the review decision. Wait for the run to end, deal with the task's changes in Git, and then write the part that needs redoing into a new workflow. For how, see [You find a problem after a task already has a review decision](/docs/troubleshooting/troubleshooting#after-conclusion).
-
-### The task stopped at on-hold after I requested changes
-
-When a `request-changes` or `rework` request can't be delivered to the task agent, the task stops at `on-hold`, and the `Reason:` line of `cdg task status 1 -w feature{:sh}` shows `continuation-dispatch-failed`. Run `cdg task recover 1 -w feature{:sh}`, and CodeDAG delivers the same request again. You don't need to make it a second time. For other reasons, see [Agent session problems](/docs/troubleshooting/troubleshooting#hold-agent-session).
 
 ### How does review differ in shared-workspace mode? [#shared-workspace]
 

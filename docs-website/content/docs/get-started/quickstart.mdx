@@ -51,9 +51,9 @@ cdg init
 
 If you aren't signed in yet, `cdg init` opens your browser so you can sign in first. It then asks a few questions in order:
 
-1. `Select your repository setup method`: Choose `4. I don't need concurrent tasks, only sequential execution`. The two tasks in this tutorial run one after the other, so the primary repository is all you need. Parallel execution needs replica workspaces, and you'll set those up in the second workflow. If this repository already has worktree or clone replicas, you can choose 1 or 2 instead, whichever applies.
+1. `Select your repository setup method`: Choose `4. I don't need concurrent tasks, only sequential execution`. The two tasks in this tutorial run one after the other, so the primary repository is all you need. Parallel execution needs replica workspaces, and you'll set those up in the second workflow.
 2. `Which agent would you like to set as the default for this project?`: This question appears only if both Claude Code and Codex are installed. Choose either one. The default agent only determines which agent runs tasks that don't set the `agent` field, and every task in this tutorial sets it.
-3. `Install the CodeDAG plugin for Claude Code?`, and the same question for Codex: You're asked once for each agent installed on this machine. Choose `User-level` each time, not `Skip`. The plugin teaches Claude Code and Codex how to operate `cdg` and write workflow files, and installing it at the user scope makes it available in all your projects. The tasks in this tutorial rely on it to write ready-to-use workflow files for you.
+3. `Install the CodeDAG plugin for Claude Code?`, and the same question for Codex: You're asked once for each agent on this machine that doesn't have the plugin yet. Choose `User-level`. The plugin teaches Claude Code and Codex how to operate `cdg` and write workflow files, and installing it at the user scope makes it available in all your projects. The tasks in this tutorial rely on it to write ready-to-use workflow files for you.
 
 When it finishes, you see output like this:
 
@@ -70,8 +70,6 @@ When it finishes, you see output like this:
 ```
 
 Initialization creates a `.codedag/` directory at the repository root, and that directory is a separate Git repository. Inside it, `dags/` holds workflow files, and `settings.jsonc` and `local/settings.local.jsonc` are the project settings. Your project repository ignores this directory through `.git/info/exclude`, so it doesn't show up in `git status`, and none of your tracked files change. For why `.codedag/` is a repository of its own, see [Sidecar repository](/docs/concepts/how-it-works#sidecar-repo).
-
-Next, run `cdg plugin status{:sh}` to confirm that the plugin is installed. Under each agent you plan to use, both `Plugin installed` and `Enabled` should be `true`. If the plugin shows as not installed, run `cdg plugin install --scope user{:sh}` to install it. See [Manage the CodeDAG Guide Plugin](/docs/guides/guide-plugin).
 
 ## 2. Write the workflow file
 
@@ -360,7 +358,7 @@ Each report opened in your default browser as soon as it was written: first the 
 - `workflow-review-comments.md`: task 2's review comments.
 - `workflow-review-v2.html`: the report as rewritten by task 2.
 
-If the browser didn't open, for example because this machine has no graphical interface, the task follows the fallback in its prompt and writes a `.md` file with the same name in the same directory. You can read it right in your terminal or editor.
+If the browser didn't open, the task follows the fallback in its prompt and writes a `.md` file with the same name in the same directory. You can read it right in your terminal or editor.
 
 Start with the review comments, then read the rewrite. The comments point out where the first version lacked evidence or got something wrong, and with them in mind, it's easier to see the reason behind each change in v2.
 

@@ -61,7 +61,7 @@ It asks the following questions in order:
 
 1. **Replica setup (`Select your repository setup method`):** Choose according to how things are set up on your own computer. Replica registration applies only to this computer and isn't shared along with `.codedag`. If you haven't set up any replicas yet, choose `4. I don't need concurrent tasks, only sequential execution`. When you later want tasks to run in parallel, set up replicas by following [Run in Parallel with Workspaces](/docs/guides/parallel-workspaces) and run `cdg init{:sh}` again.
 2. **Default agent:** You're asked only if both Claude Code and Codex are installed, and your choice affects only this computer. If the team has set `defaultAgent` in the shared settings, the team's choice is listed first, marked `(team default)`. Choose it, and when the team later changes the shared settings, your default changes along with them.
-3. **CodeDAG Guide plugin:** For each agent that doesn't have the plugin yet, you're asked once whether to install it. For how the installation scopes differ, see [Choose an installation scope](/docs/guides/guide-plugin#scopes).
+3. **CodeDAG Guide plugin:** For each agent that doesn't have the plugin yet, you're asked once whether to install it. For how the installation scopes differ, see [Installation scopes](/docs/reference/cli/plugin#scopes).
 
 ### 3. Accept Claude Code's full-access warning
 
@@ -75,7 +75,7 @@ Pick one of the team's workflows and validate it, replacing `review-changes` in 
 cdg dag validate review-changes
 ```
 
-Output that starts with `✔ Validation passed:` means this computer can run the workflow. If you see `is not installed on this machine`, an agent the workflow uses isn't installed on your computer yet. Install it and validate again.
+Output that starts with `✔ Validation passed:` means this computer can run the workflow.
 
 ### If you've already initialized this repository [#already-initialized]
 

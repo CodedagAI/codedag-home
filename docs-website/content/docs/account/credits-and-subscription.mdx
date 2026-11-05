@@ -1,32 +1,48 @@
 ---
 title: Credits, Subscription, and Charges
-description: How you get CodeDAG credits, when they're deducted, what to do when you run short, and the rules for managing a subscription.
+description: How you get CodeDAG credits, when they're deducted, what to do when you run short, and the subscription's pricing, taxes, and management rules.
 icon: CreditCard
 ---
 
-Using CodeDAG consumes CodeDAG credits. Credits are deducted by task count when a workflow starts running, at 1 credit per task. Submitting a workflow and waiting in the queue cost nothing. Every new account comes with 800 credits, valid for 30 days, with no credit card required. A subscription costs \$12 per month on monthly billing or \$96 per year on yearly billing, and either way you get 800 credits per month. When you don't have enough credits, you can't submit new workflows, and a workflow that's already queued stops when its turn comes and waits for you to restore your credits before it continues. To estimate and reduce what a workflow costs, see [Control Cost](/docs/account/cost-control).
+Using CodeDAG consumes CodeDAG credits. When a workflow starts running, credits are deducted for the tasks this run will execute, at 1 credit per task. Submitting a workflow and waiting in the queue cost nothing. Every new account comes with 800 credits, with no credit card required, valid for 30 days. A subscription costs \$12 per month on monthly billing or \$96 per year on yearly billing, and either way you get 800 credits per month. Prices don't include tax. When you don't have enough credits, you can't submit new workflows, and a workflow that's already queued stops when its turn comes and waits for you to restore your credits before it continues. To estimate and reduce what a workflow costs, see [Control Cost](/docs/account/cost-control).
 
 ## Free credits [#free-credits]
 
-Every new account comes with 800 CodeDAG credits. They're valid for 30 days from the day you sign up, and no credit card is required. CodeDAG creates your account the first time you sign in, and the credits arrive with it. See [Sign in](/docs/account/login-and-account#sign-in). Each account gets free credits only once, and whatever is left after 30 days expires. You can use exactly the same features during the free period as you can with a subscription. The only difference is where the credits come from.
+Every new account comes with 800 CodeDAG credits, and no credit card is required. The credits are valid for 30 days from the moment you sign up. Whatever is left when they expire is forfeited, and each account gets free credits only once. CodeDAG creates your account the first time you sign in, and the credits arrive with it. See [Sign in](/docs/account/login-and-account#sign-in). You can use exactly the same features during the free period as you can with a subscription. The only difference is where the credits come from.
 
-You can subscribe at any time during the free period, without waiting for the free credits to run out. When the subscription takes effect, your remaining free credits are rolled into the first paid period, so that period's total may be more than 800 credits. From then on, the account always has a single credit balance, which resets each subscription period. If you never subscribe, then once the free credits run out or expire, you can't submit new workflows, and workflows already in the queue can't start running. See [Not enough credits or no subscription](#insufficient-credits).
+Accounts invited to the private beta get private beta credits instead: 3,000 credits per month, reset every month counting from the moment they're issued. Credits you don't use in a month don't carry over to the next. Private beta credits can be used until the private beta ends, and the private beta notice gives the exact date. If an account still has no subscription when the private beta ends, its credits are set to 800 and expire 30 days after the private beta ends.
 
-If an account that took part in the private beta has no subscription when the private beta ends, its credits are set to 800 and expire 30 days after the private beta ends. The private beta notice gives the exact end date. To look up the expiration date after the conversion, use the methods in [Check credits and usage](#check-usage).
+As long as you have free credits, you can subscribe at any time, without waiting for them to run out. When the subscription takes effect, any free credits that are neither used up nor expired are rolled into the first paid period, so that period's total is more than 800 credits. That's the end of the free credits: from then on, the account has only the subscription's credits, which reset each subscription period.
+
+### After your free credits run out or expire [#free-credits-used-up]
+
+Once your free credits are used up, have expired, or aren't enough for a submission, new submissions are rejected, and a workflow that's already queued stops at `on-hold` when its turn comes, with no credits deducted. At that point, you need to subscribe to keep using CodeDAG.
+
+If you have private beta credits and this month's credits run short, you can also wait for the next reset instead of subscribing. If the private beta ends before the next reset, that reset never comes, and your credits are set to 800 when the private beta ends.
+
+Once your subscription takes effect or your private beta credits reset, new submissions go through as usual, but you have to recover the queued workflows that were held back yourself. See [Not enough credits or no subscription](#insufficient-credits).
 
 ## Subscription [#subscription]
 
-CodeDAG has a single subscription plan: \$12 per month on monthly billing, or \$96 per year on yearly billing, which works out to \$8 per month and saves 33% compared with monthly billing. Both options give you exactly the same credits: 800 per month, reset once a month. Credits you don't use in a month don't carry over to the next. Prices are also listed on the [pricing page](/pricing).
+CodeDAG has a single subscription plan: \$12 per month on monthly billing, or \$96 per year on yearly billing, which works out to \$8 per month and saves 33% compared with monthly billing. Neither price includes tax; see [Tax and billing regions](#tax-and-regions). Both options give you exactly the same credits: 800 per month, reset once a month. Credits you don't use in a month don't carry over to the next. Prices are also listed on the [pricing page](/pricing).
 
 On monthly billing, credits reset with each renewal. On yearly billing, you pay only once a year, but credits are still issued monthly: counting from the day the subscription starts, they reset every month, to the same 800 credits each time.
 
 A subscription doesn't cover third-party AI model costs. CodeDAG drives the Claude Code or Codex you've installed and signed in to yourself, and their usage counts against your own accounts as usual. See [Control Cost](/docs/account/cost-control).
 
-You subscribe on the Billing page of the web console ([app.codedag.com](https://app.codedag.com)), and Stripe processes the payment. For the rules on switching the billing interval, canceling a subscription, and other changes, see [Subscription details](#subscription-details).
+You subscribe on the Billing page of the web console ([app.codedag.com](https://app.codedag.com)) and pay by credit or debit card. The card number field on the payment page is provided by Stripe, so your card number goes straight to Stripe and never passes through CodeDAG's servers. For the rules on switching the billing interval, canceling a subscription, and other changes, see [Subscription details](#subscription-details).
+
+### Tax and billing regions [#tax-and-regions]
+
+Prices don't include tax. Any applicable tax is calculated and shown on the payment page. Before you pay, you choose your billing region (a country or region). In the US you also enter a ZIP code, and in Canada you also choose a province. CodeDAG uses this to determine whether you can pay and how much tax applies, and renewals use the same billing region.
+
+Payments aren't available yet in some countries and regions. If you choose one of them, the payment page says payments aren't open there yet and doesn't show the card number field, so you can't subscribe. Your free credits still work as usual. If you'd like to subscribe from one of these regions, let us know at <Email user="hi" />.
+
+Once you have a subscription, the Billing page shows your current billing region, and you can't change it there yourself. To change it, email us at <Email user="hi" />.
 
 ## When credits are charged [#when-charged]
 
-Credits are deducted at exactly one moment: when a workflow reaches the head of the queue, right before it actually starts running. The full amount is deducted at once based on the number of tasks in the workflow, at 1 credit per task. Nothing is deducted when you submit or while the workflow waits in the queue, and nothing more is deducted after it starts running.
+Credits are deducted at exactly one moment: when a workflow reaches the head of the queue, right before it actually starts running. The full amount is deducted at once based on the number of tasks this run will execute, at 1 credit per task. Nothing is deducted when you submit or while the workflow waits in the queue, and nothing more is deducted after it starts running.
 
 export const chargeTimelineChart = `%%{init: {"flowchart": {"padding": 10, "nodeSpacing": 30, "rankSpacing": 28}}}%%
 flowchart LR
@@ -53,9 +69,9 @@ flowchart LR
   </Tab>
 </Tabs>
 
-At submission, `cdg dag submit{:sh}` only checks whether your remaining credits are enough. If you submit several workflows at once, it looks at their total task count, and if you don't have enough, none of them is submitted. The check neither deducts credits nor reserves them for the workflow. So a workflow that's canceled before it starts running costs nothing. But other workflows may use up the credits while it waits, including workflows the same account runs in other projects or on other computers, so you may still come up short when its turn arrives. For what happens then, see [Not enough credits or no subscription](#insufficient-credits).
+At submission, `cdg dag submit{:sh}` only checks whether your remaining credits are enough. If you submit several workflows at once, it looks at the total number of tasks they'll execute, and if you don't have enough, none of them is submitted. The check neither deducts credits nor reserves them for the workflow. So a workflow that's canceled before it starts running costs nothing. But other workflows may use up the credits while it waits, including workflows the same account runs in other projects or on other computers, so you may still come up short when its turn arrives. For what happens then, see [Not enough credits or no subscription](#insufficient-credits).
 
-The amount depends only on how many tasks the workflow file contains at submission, not on how many tasks actually run afterward. Tasks that are canceled partway through, and downstream tasks that never run because an upstream task was canceled, are already counted. The flip side is that a run is paid in full the moment it starts. Pausing and unpausing, recovering after a kill, and requesting changes or a rework during review don't cost anything more. A run that's underway also doesn't stop if your credits run out or your subscription expires.
+The amount is fixed at submission: you're charged 1 credit for each task in the workflow that's set to run at that point. Tasks you reviewed with `cdg task review{:sh}` before submitting keep their review results, don't run this time, and aren't counted. See [Review tasks before you submit](/docs/reference/cli/review#unsubmitted-task-reviews). Once the amount is set, it doesn't depend on how many tasks actually run: tasks that are canceled partway through, and downstream tasks that never run because an upstream task was canceled, are already counted. The flip side is that a run is paid in full the moment it starts. Pausing and unpausing, recovering after a kill, and requesting changes or a rework during review don't cost anything more. A run that's underway also doesn't stop if your credits run out or your subscription expires.
 
 Running the same workflow again is a new run, and it's charged again. If you [clear the review and resubmit](/docs/reference/cli/review#clear-and-resubmit) a workflow whose review is already finished, credits are deducted by task count once more when it starts running. If you write the unfinished tasks into a separate workflow and continue from there, you're charged for the number of tasks in that new workflow.
 
@@ -72,8 +88,9 @@ When a submission is rejected, the terminal explains why. When a queued workflow
 | Situation | How to restore your available credits |
 |---|---|
 | Your subscription's credits for the current period are used up | Wait until the reset time shown in the message, or sign up for another account: a new account has its own credits and subscription, which aren't combined with your existing account. There are currently no credit top-up packs to buy, and switching between monthly and yearly billing doesn't give you new credits. |
-| Your subscription has ended or a renewal payment failed, so the account has no active subscription | Subscribe on the Billing page. If a renewal payment failed, update your payment method and complete the payment. |
-| Your free credits are used up or have expired | Subscribe on the Billing page. Once the subscription takes effect, you can submit again. |
+| Your subscription is set to cancel at the end of the period, and the credits for its last period are used up | There's no next reset in this case. Restore the subscription on the Billing page. Your credits reset only after the current period ends and the subscription renews. |
+| Your subscription has ended or a renewal payment failed, and the account has neither an active subscription nor any available free credits | Subscribe on the Billing page. If a renewal payment failed, update your payment method and complete the payment. |
+| Your free credits are used up or have expired | Subscribe on the Billing page. If it's your private beta credits for the month that are used up, you can also wait for the reset. For the details, see [After your free credits run out or expire](#free-credits-used-up). |
 
 After you restore your available credits, a queued workflow that was held back doesn't retry on its own. You have to recover it manually:
 
@@ -91,11 +108,9 @@ On the command line, use `cdg auth status{:sh}` to check the current account's c
 cdg auth status
 ```
 
-The output includes the signed-in account, the subscription status, the credits used and remaining in the current period, and the period's start and end times. The end of the current period is when your credits next reset. The first period after you subscribe includes the free credits that were rolled in, so the total may be more than 800 credits. Times on both the command line and the console are in UTC.
+Both show where your credits come from, how many you've used, how many remain, and when those credits reset or expire. All of these times are in UTC. If the account has neither an active subscription nor available free credits, and its free credits have already ended, both places show when the free credits ended. If the free credits were rolled into a subscription when you subscribed, that time is when they were rolled in, not the date the free period would originally have expired.
 
-While you're using free credits, including credits converted when the private beta ended, `cdg auth status{:sh}` and the console likewise show your remaining credits and their expiration date.
-
-The Usage page of the web console lists the current period's usage and the 20 most recent charge records. Each record corresponds to one workflow that started running, and it lists the time, the task count, and the credits deducted. The workflow column shows the first 12 characters of the hash of the workflow file's contents at submission, not the file name.
+The Usage page of the web console lists the current period's usage and the 20 most recent charge records. Each record corresponds to one workflow that started running, and it lists the time, the task count, and the credits deducted. The task count doesn't include tasks that were reviewed before submission. The workflow column shows the first 12 characters of the hash of the workflow file's contents at submission, not the file name.
 
 ## Subscription details [#subscription-details]
 
@@ -111,7 +126,7 @@ A cancellation takes effect only at the end of the current billing period. Until
 
 ### Refunds [#refunds]
 
-Subscription payments are generally non-refundable. The only exceptions are duplicate charges, billing errors, and refunds required by law. Canceling only stops future renewals; it doesn't refund the current billing period, and if you cancel a yearly subscription partway through, the remaining months aren't refunded pro rata. Credits charged for workflows are a separate matter: they aren't returned automatically when a task fails, but if a problem on CodeDAG's side kept a workflow from running properly, the credits are restored manually once the problem is confirmed. For how to ask and the full rules, see the [Refund Policy](/refund).
+If you ask within 14 days of the first payment of your first subscription or of any yearly payment, such as when you switch to yearly billing or a yearly subscription renews, you can get a full refund, no reason needed. The subscription then ends right away. Other payments are refunded only in the cases set out in the Refund Policy, such as charges made in error. Canceling only stops future renewals. Except in those cases, it doesn't refund the current billing period, and if you cancel a yearly subscription partway through, the remaining months aren't refunded pro rata. For how to ask and the full rules, see the [Refund Policy](/refund).
 
 ### Failed renewal payments
 
@@ -119,7 +134,7 @@ When a renewal payment fails, the subscription is temporarily unavailable, and t
 
 ### Short delay after payment
 
-After you pay, the subscription usually takes a few seconds to take effect. Until then, `cdg dag submit{:sh}` and `cdg auth status{:sh}` may still report that there's no active subscription. Wait a moment and try again.
+After you pay, you're taken back to the Billing page. The subscription usually takes effect within a few seconds, and the page updates on its own. Until then, `cdg dag submit{:sh}` and `cdg auth status{:sh}` still see your previous credits: either your free credits or a message that no credits are available. Wait a moment and try again.
 
 ### Invoices
 
@@ -129,5 +144,7 @@ You can view payment records and invoices in the Stripe customer portal.
 
 - **No credit top-up packs.** Once your subscription's credits for the month are used up, this account has to wait for the next reset.
 - **No shared team credits.** Credits belong to a single account, and there's no credit pool shared by a team or organization. When you use the same account on several computers, they share that one account's own credits.
+- **Payments aren't available in some countries and regions.** Accounts there can still use their free credits as usual. See [Tax and billing regions](#tax-and-regions).
+- **Only credit and debit cards are accepted.** Wallets such as Apple Pay and Google Pay aren't supported yet.
 - **The console is in English only.** Dates are shown in UTC.
 - **The Usage page shows only the 20 most recent charge records.** Usage records can't currently be exported.

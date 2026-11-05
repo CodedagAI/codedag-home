@@ -431,7 +431,7 @@ The key-value form accepts the five keys below. Each key can appear at most once
 | `search` | `true`, `false` | `true`: turns on live web search. `false`: turns off the web search tool. When omitted, Codex's own configuration applies, and by default Codex uses cached search results |
 | `network_access` | `true`, `false` | Whether commands in the `workspace-write` sandbox can access the network. When omitted, Codex's own configuration applies, and by default Codex doesn't allow it |
 
-The five keys can be combined freely. Only `network_access` has an extra requirement: when you set it, you also have to set `sandbox=workspace-write` explicitly. A key name that isn't in the table, a value that isn't in the table, and a repeated key are all reported as errors by `cdg dag validate{:sh}` and `cdg dag submit{:sh}`, and none of them is passed to Codex as is. The table lists the values that the current version of Codex accepts. `untrusted`, an approval policy from earlier versions of Codex, and `on-failure`, which Codex has deprecated, aren't among them. Using either one produces an error such as `ask-for-approval must be on-request or never, received 'untrusted'`.
+The five keys can be combined freely. Only `network_access` has an extra requirement: when you set it, you also have to set `sandbox=workspace-write` explicitly. A key name that isn't in the table, a value that isn't in the table, and a repeated key are all reported as errors by `cdg dag validate{:sh}` and `cdg dag submit{:sh}`, and none of them is passed to Codex as is.
 
 ```yaml title="yaml"
 # Allow writes only to the task's workspace; the model requests approval to go beyond it

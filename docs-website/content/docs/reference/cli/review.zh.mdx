@@ -1,6 +1,6 @@
 ---
 title: 审核
-description: 审核命令的写法、各选项的取值与默认值、允许的组合，以及清除审核记录后重新提交的规则。
+description: 审核命令的写法、各选项的取值与默认值、允许的组合，以及提交前审核任务、清除审核记录后重新提交的规则。
 icon: Table
 ---
 
@@ -29,7 +29,12 @@ cdg dag review clear <工作流>...
 
 任务级的六个动作都可以省去 `review`，例如 `cdg task request-changes 2 -w feature{:sh}`；工作流级的三个动作同样可以简写，例如 `cdg dag accept feature{:sh}`。两个 `clear` 没有简写。
 
-审核动作作用于已经提交、还在队列中的工作流。任务级动作处理其中一个工作流里的任务，工作流用 `-w` 指定，省略时为队首工作流；工作流级动作可以处理队首正在执行的工作流，也可以处理排在后面、还没开始的工作流。对还没提交的工作流执行 `accept`、`cancel` 或 `defer`，命令同样会成功并记下结果，但之后 `cdg dag submit{:sh}` 会拒绝提交这个工作流，要先清除这些审核记录，见[清除审核记录与重新提交](#clear-and-resubmit)。
+审核动作作用于还在队列中的工作流，也可以作用于还没提交的工作流，两者的规则不同：
+
+- **队列中的工作流：** 任务级动作处理其中一个工作流里的任务，工作流用 `-w` 指定，省略时为队首工作流；而工作流级动作可以处理队首正在执行的工作流，也可以处理排在后面、还没开始的工作流。
+- **还没提交的工作流：** 任务级与工作流级的结果不同。
+  - **任务级的 `accept`、`cancel` 或 `defer`：** 给其中一些任务定下结论，提交时这些任务就不执行，见[提交之前审核其中的任务](#unsubmitted-task-reviews)。
+  - **工作流级的 `accept`、`cancel` 或 `defer`：** 整个工作流直接进入 `reviewed`，之后要先清除审核记录才能提交，见[清除审核记录与重新提交](#clear-and-resubmit)。
 
 ## 参数与选项 [#options]
 
@@ -46,7 +51,7 @@ cdg dag review clear <工作流>...
 | `-k`、`--kill` 与 `-p`、`--pause` | 除 `clear` 外的全部动作 | 对象还在执行时先让它停下，见 [-k 与 -p](#stop-before-review) |
 | `-y`、`--yes` | 除 `cdg task review clear{:sh}` 外的全部动作 | 选中的对象里有要跳过的，或者 `accept` 圈进了还没开始的任务时，直接按继续处理，不询问；它不替代 `--downstream`、`-k`、`-p` |
 
-任务和工作流的通用写法见[指定一个或多个任务](/zh/docs/reference/cli#task-ids)、[任务选择器](/zh/docs/reference/cli#task-selectors)与[指定工作流](/zh/docs/reference/cli#specify-workflow)。审核命令的选择器有一处与控制命令不同：除 `--only` 外，每个选择器只能跟一个任务 ID，而 `pause`、`kill` 这些控制命令的选择器可以跟多个。写成 `--upto 2 3` 时，多出来的 `3` 会被当作直接写出的任务 ID，命令因为同时使用了任务 ID 和选择器而报错。
+任务和工作流的通用写法见[指定一个或多个任务](/zh/docs/reference/cli#task-ids)、[任务选择器](/zh/docs/reference/cli#task-selectors)与[指定工作流](/zh/docs/reference/cli#specify-workflow)。
 
 ### --code [#code]
 
@@ -123,7 +128,7 @@ cdg dag review cancel feature -k --downstream proceed
 
 最终动作可以用于还没有结论的任何任务，包括等待上游或搁置的任务、被暂停或中断的任务，以及已经完成的任务。还没开始的任务被取消或推迟后就不再执行，它没有改动，`--code` 对它不起作用。任务正在执行时，要加 `-k` 或 `-p`。
 
-因启动前的准备失败而停住的任务，`cancel` 和 `defer` 可以直接结束，不必先清理现场或执行 `cdg task recover{:sh}`。这类任务停在 `on-hold`，或者停住之后又被中断成 `killed`，原因例如工作区不干净、指定的分支名被占用；它从未运行过，审核不检查它的工作区，也不动其中未提交的修改，`--code` 的默认值和显式取值对它都不起作用。被它占着的工作区同时是集成工作区（典型是单工作区项目的主仓库）时，用 `cdg dag review{:sh}` 结束整个工作流前仍要先把这个工作区清理干净。`accept` 和三个继续动作对停住的任务仍然报错，报错里会给出两条出路：处理现场后 recover，或者改用 `cancel`、`defer`。各种停住原因的处理步骤见[任务或工作流停在 on-hold](/zh/docs/troubleshooting/troubleshooting#on-hold)。
+因启动前的准备失败而停住的任务，`cancel` 和 `defer` 可以直接结束，不必先清理现场或执行 `cdg task recover{:sh}`。这类任务停在 `on-hold`，或者停住之后又被中断成 `killed`，原因例如工作区不干净、指定的分支名被占用；它从未运行过，审核不检查它的工作区，也不动其中未提交的修改，`--code` 的默认值和显式取值对它都不起作用。被它占着的工作区同时是集成工作区（典型是单工作区项目的主仓库）时，用 `cdg dag review{:sh}` 结束整个工作流前仍要先把这个工作区清理干净。`accept` 和三个继续动作对停住的任务仍然报错。各种停住原因的处理步骤见[任务或工作流停在 on-hold](/zh/docs/troubleshooting/troubleshooting#on-hold)。
 
 `accept` 只能配 `commit` 与 `proceed`，因为接受的结果总是提交到任务分支上、交给下游。`request-changes` 默认先把当前改动提交到任务分支，再交给 Agent，这样新一轮改了什么可以单独看出来。
 
@@ -145,7 +150,7 @@ cdg dag review cancel feature -k --downstream proceed
 
 ### 共享工作区模式 [#shared-workspace]
 
-共享工作区模式下没有任务分支和集成分支，审核只决定流程怎样继续，不处理文件。任务级可以使用 `accept`、`cancel`、`defer`、`revise`、`request-changes`，工作流级可以使用 `accept`、`cancel`、`defer`；`rework` 不可用，任何动作都不能加 `--code`，写了会报错。这个报错只看命令点名的工作流：隔离分支模式的工作流级审核以 `--downstream cascade` 级联到共享工作区模式的工作流时，它们照常按这个动作结束，只是没有代码处理。`--downstream`、`-m`、`-k`、`-p` 的用法与默认值不变。
+共享工作区模式下没有任务分支和集成分支，审核只决定流程怎样继续，不处理文件。任务级可以使用 `accept`、`cancel`、`defer`、`revise`、`request-changes`，工作流级可以使用 `accept`、`cancel`、`defer`；`rework` 不可用，任何动作都不能加 `--code`，写了会报错。`--downstream`、`-m`、`-k`、`-p` 的用法与默认值不变。
 
 任务写下的文件都留在工作流执行的工作区里，默认是主仓库；取消或推迟不会撤回这些文件，下游照样看得到，要保留或撤销就在那个工作区里用 Git 自己提交或还原。审核前怎样检查这类改动，见[共享工作区模式下审核有什么不同](/zh/docs/guides/review-tasks#shared-workspace)。
 
@@ -192,9 +197,7 @@ cdg task review request-changes 2 -w feature -p -m "<修改要求>"
 
 `-m` 省略时发送内置要求。两种停下方式的区别见 [-k 与 -p](#stop-before-review)；改之前默认先提交当前改动，默认值与可选值见[任务级组合表](#task-review-options)。什么时候用这种方式、什么时候进入会话直接交流，见[选择观察与修改方式](/zh/docs/guides/intervene-and-control#choose-intervention)。
 
-加 `-k` 时，命令会等一小会儿，确认修改要求已经交到会话里：确认送达后命令才结束；等待期满仍在确认时，命令先结束，交付在后台继续进行。要求最终没能送达时，任务停在 `on-hold`，原因为 `continuation-dispatch-failed`，执行 `cdg task recover 2 -w feature{:sh}` 会重新投递同一个要求。
-
-在修改要求送达之前，这个任务不接受新的审核命令；CodeDAG 正在恢复这个任务时也是如此，命令会提示已有处理在进行中。等它完成再审核即可；任务停在 `on-hold` 时，先执行 `cdg task recover{:sh}`。
+加 `-k` 时，命令会等一小会儿，确认修改要求已经交到会话里：确认送达后命令才结束；等待期满仍在确认时，命令先结束，交付在后台继续进行。
 
 ### 一次审核多个任务 [#batch-review]
 
@@ -215,7 +218,7 @@ cdg task defer --downfrom 4 -w feature
 
 ## 清除审核记录与重新提交 [#clear-and-resubmit]
 
-已经审核结束的工作流要再运行一次，只能以整个工作流为单位：先用 `cdg dag review clear{:sh}` 清除它的审核记录，让它回到 `planning`，再用 `cdg dag submit{:sh}` 提交。两条命令都要写明工作流：
+已经审核结束的工作流要再运行一次，先用 `cdg dag review clear{:sh}` 清除它的审核记录，让它回到 `planning`，再用 `cdg dag submit{:sh}` 提交。两条命令都要写明工作流：
 
 ```bash title="Terminal"
 cdg dag review clear feature
@@ -234,14 +237,36 @@ cdg task review clear <任务> -w <工作流>
 
 `cdg task review clear{:sh}` 只清除选中任务的审核记录：任务回到 `planning`，不会重新执行。在已经审核结束的工作流上，它也不会让工作流可以再次提交，工作流仍然停在 `reviewed`；命令输出会写明这一点，并提示先 `cdg dag review clear{:sh}` 再 `cdg dag submit{:sh}`，也就是按上面的做法清除整个工作流。所以它不能用来单独重跑某个任务。
 
-它只处理不在队列中的工作流，`-w` 没有默认值，必须写明：省略时命令报 `Missing required option '--workflow-file/--dag/-w'`，不读取也不改动任何工作流。选中的任务里还没有结论的会被跳过；任务的写法与其他审核命令相同，选择器除 `--only` 外只能跟一个任务 ID。
+它只处理不在队列中的工作流，`-w` 没有默认值，必须写明。选中的任务里还没有结论的会被跳过；任务的写法与其他审核命令相同。
 
-### 还没提交的工作流中的任务审核记录 [#unsubmitted-task-reviews]
+## 提交之前审核其中的任务 [#unsubmitted-task-reviews]
 
-对还没提交的工作流用 `cdg task review{:sh}` 的 `accept`、`cancel` 或 `defer` 审核过任务之后，只要其中还有审核过的任务，`cdg dag submit{:sh}` 就拒绝提交这个工作流，报错写着 `Workflow has review snapshot state`。要提交，先清除这些任务的审核记录，两条清除命令都可以用：
+还没提交的工作流，可以先用 `cdg task review{:sh}` 的 `accept`、`cancel` 或 `defer` 给其中一些任务定下结论，例如某个任务的工作已经在别处做完，或者这次不打算做。之后照常用 `cdg dag submit{:sh}` 提交：审核过的任务沿用审核结论，这次不执行，也不消耗 CodeDAG 额度；其余任务组成这次执行，开始执行时按它们的数目扣除额度，每个任务 1 点。下面的例子中，任务 2、3 依赖任务 1：
 
-- **`cdg dag review clear <工作流>{:sh}`**：清除这个工作流中全部任务的审核记录，之后可以直接提交。
-- **`cdg task review clear <任务> -w <工作流>{:sh}`**：清除选中任务的审核记录。清除之后工作流中没有审核过的任务了，工作流就可以提交；还有其他审核过的任务时仍然不能提交，命令输出会列出这些任务，并提示用 `cdg dag review clear <工作流>{:sh}` 清除全部任务的审核记录。
+```bash title="Terminal"
+# 任务 1 已经在别处做完，先接受它
+cdg task review accept 1 -w feature
+# 提交时只执行任务 2 和 3
+cdg dag submit feature
+```
+
+审核时选择的下游处理方式照样生效，取值见 [--downstream](#downstream)。它决定依赖这个任务的下游这次是否执行、是否计入额度：
+
+- **`accept`，或者 `cancel`、`defer` 配 `proceed`：** 下游任务照常执行，也算在这次执行里。
+- **`cancel` 或 `defer` 配 `cascade`：** 下游一并得到同样的结论，所以这次不执行，也不消耗额度。
+- **`cancel` 或 `defer` 配 `hold`：** 直接依赖这个任务的下游被搁置。它们还没有审核结论，所以算在这次执行里、照常扣额度。提交后，它们停在 `on-hold`，原因为 `downstream-hold`。要放开这些任务，运行 `cdg task recover <任务 ID>... -w <工作流>{:sh}`，它们就会在同一次执行中运行。
+
+提交之后，这次执行哪些任务、扣多少额度就不再变化：之后修改工作流文件不影响它，在队列中再审核其中的任务，扣费也仍按提交时的范围计算。
+
+有两种情况，提交的结果与上面不同：
+
+- **全部任务都已审核：** 这次没有要执行的任务，命令不登录、不提交，也不消耗额度，正常结束。一次提交多个工作流时，只有这样的工作流不提交，其余照常提交。
+- **审核之后改了任务或依赖关系：** 提交被拒绝。审核结论按审核时的任务与依赖记下，任务 ID 或依赖关系变了之后，结论可能对不上原来的任务。清除审核记录，或者把工作流文件改回去，再提交。只改 prompt、标题这类内容时照常提交。
+
+想让审核过的任务也执行，先清除它们的审核记录，两条清除命令都可以用：
+
+- **`cdg dag review clear <工作流>{:sh}`：** 清除全部任务的审核记录，连同因审核而搁置的下游，之后提交会执行全部任务。
+- **`cdg task review clear <任务> -w <工作流>{:sh}`：** 只清除选中任务的审核记录，提交时这些任务会执行。因为它们而搁置的下游随之放开，同时被其他审核搁置的仍然搁置；工作流里其他任务的审核结论保留，提交时仍不执行。
 
 ## 相关
 

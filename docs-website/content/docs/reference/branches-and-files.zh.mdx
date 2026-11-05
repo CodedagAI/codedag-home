@@ -127,7 +127,7 @@ cdg branch release feature/search-api
 
 队列中的工作流还在用的分支和快照分支不能释放，完整的条件见 [`cdg branch release`](/zh/docs/reference/cli/control#branch-release)。
 
-任务已经因为同名分支停在 `on-hold` 时，占用解除之后用 `cdg task recover{:sh}` 恢复它，排查步骤见[分支问题](/zh/docs/troubleshooting/troubleshooting#hold-branch)。处理过旧分支仍然提示 `branch-name-conflict` 时，在工作流文件里改用一个新的 `branchName`，或者去掉它，让 CodeDAG 自动命名。
+任务已经因为同名分支停在 `on-hold` 时，占用解除之后用 `cdg task recover{:sh}` 恢复它。处理过旧分支仍然提示 `branch-name-conflict` 时，在工作流文件里改用一个新的 `branchName`，或者去掉它，让 CodeDAG 自动命名。
 
 ## 单独保存工作流与共享配置 [#save-config]
 

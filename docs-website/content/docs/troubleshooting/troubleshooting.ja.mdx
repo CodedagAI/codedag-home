@@ -26,6 +26,7 @@ icon: Wrench
 | `cdg init{:sh}` が失敗する、または設定ファイルに誤りがあると表示される | [初期化と設定](#init-and-settings) |
 | ログインに失敗する、または何度もログインし直すよう求められる | [ログインに失敗する、または繰り返しログインを求められる](#sign-in-problems) |
 | CLI、Claude Code、プラグインのいずれかのバージョンが合っていないと表示される | [バージョンに関する問題](#versions) |
+| `cdg plugin status{:sh}` に `update available, local changes` と表示されるが、プラグインは変更していない | [プラグインを変更していないのに、ローカルの変更があると表示される](#plugin-local-changes) |
 | タスクが承認、キャンセル、または見送りになったあとで、結果がおかしいことや、結論を誤ったことに気づいた | [タスクにレビューの結論が出たあとで問題に気づいた](#after-conclusion) |
 | 同じ問題が繰り返し起こるので、新しいワークフローで仕切り直したい | [ワークフローが途中まで進んだが、続けるのが難しい](#start-over) |
 | サポートに問い合わせたい | [サポートを受けるための情報を集める](#get-help) |
@@ -68,7 +69,7 @@ Branch: cdg/feature/t2-ログインapiを実装
 
 ワークフローそのものが保留になることもあります。その場合、理由は `cdg dag status <ワークフロー>{:sh}` の出力の冒頭にある `Reason:` 行に表示されます。たとえば `Reason: DAG startup failed (dag-startup-failed)` です。理由によっては同じように `Diagnostic:` 行が付き、最後に `Docs:` 行が続きます。どのタスクが保留になっているかは、同じ出力の各タスクの行に `[pending] [on-hold]` と表示されているかどうかでわかります。
 
-原因に対処したら、タスクは `cdg task recover <タスク ID> -w <ワークフロー>{:sh}` で、ワークフローは `cdg dag recover <ワークフロー>{:sh}` で復旧します。後者は、そのワークフローにある復旧できるタスクもすべて一緒に復旧します。原因が実際には解消されていなければ、タスクやワークフローは再び `on-hold` で止まります。`cdg task view{:sh}` でセッションに入っても、保留は解除されません。セッションの中で対処を終えたあとも、`recover` を実行する必要があります。
+原因に対処したら、タスクは `cdg task recover <タスク ID> -w <ワークフロー>{:sh}` で、ワークフローは `cdg dag recover <ワークフロー>{:sh}` で復旧します。後者は、そのワークフローにある復旧できるタスクもすべて一緒に復旧します。原因が実際には解消されていなければ、タスクやワークフローは再び `on-hold` で止まります。セッションの中で対処する原因であれば、`cdg task view{:sh}` でセッションに入って対処し、そのままエージェントに作業を続けるよう伝えれば、タスクは続行されます。`recover` を実行する必要はありません。問題に対処しただけで抜けた場合は、抜けたあとで `recover` を実行します。一部の理由による保留は、セッションの中でエージェントに作業を続けさせても解除されません。[セッションに入ったあとのタスクの状態](/ja/docs/reference/cli/control#view-and-task-state)を参照してください。
 
 ### ワークスペースに未コミットの変更または未完了の Git 操作がある [#hold-workspace]
 
@@ -86,12 +87,7 @@ Branch: cdg/feature/t2-ログインapiを実装
 
 ここに挙げる理由はどれも、CodeDAG がワークスペースを必要なブランチに切り替えられなかったことを表します。最初の 2 つの理由では、タスクはまだワークスペースを準備する段階で止まっています。そのため、[ワークスペースに未コミットの変更がある](#hold-workspace)場合と同じように、原因に対処してから復旧することも、`cdg task review cancel{:sh}` または `defer` でそのまま終わらせることもできます。
 
-- `branch-name-conflict`：タスクがワークフローファイルの [`branchName`](/ja/docs/reference/workflow-file#tasks-branch-name) でブランチ名を指定していて、同じ名前のブランチがすでに存在します。最もよくあるのは、`branchName` を書いたワークフローをもう一度実行した場合です。前回の実行で作られたブランチが残っていますが、CodeDAG がそれを新しい実行に使うことはありません。`cdg task status <タスク ID> -w <ワークフロー>{:sh}` の `Diagnostic:` 行に、ブランチ名を何が占有しているかと、それぞれの対処方法が示されます。
-
-  - **ワークスペースにある同じ名前のローカルブランチ：** 診断にワークスペースのパスが示されます。そのブランチを自分で削除するか、`git branch -m` で名前を変えて残します。
-  - **CodeDAG の同期リポジトリが占有しているブランチ名：** clone をレプリカにしている場合、前回の実行で作られたブランチが同期リポジトリにも残っているため、各 clone のローカルブランチを処理するだけでは足りません。プロジェクト内で `cdg branch release <ブランチ名>{:sh}` を実行して解放します。このコマンドは、同期リポジトリからそのブランチを削除し、続いて、各ワークスペースに残っているリモート追跡参照を削除します。
-
-  両方が占有している場合、診断には 2 つとも表示されます。どちらにも対処してから、`cdg task recover{:sh}` を実行します。`cdg branch release{:sh}` は、まだ使われているブランチ名とスナップショットブランチの解放を拒否します。ブランチ名が、キューにあるワークフローの統合ブランチまたはタスクブランチのものである場合は、そのワークフローのレビューが終了するまで待つ必要があります。そのほかのケースは、[cdg branch release](/ja/docs/reference/cli/control#branch-release) を参照してください。同じ名前のブランチについては、投入時の検証でも警告が出ます。警告に従って対処してから投入すれば、タスクがここで止まることはありません。
+- `branch-name-conflict`：タスクがワークフローファイルの [`branchName`](/ja/docs/reference/workflow-file#tasks-branch-name) でブランチ名を指定していて、同じ名前のブランチがすでに存在します。最もよくあるのは、`branchName` を書いたワークフローをもう一度実行した場合です。前回の実行で作られたブランチが残っていますが、CodeDAG がそれを新しい実行に使うことはありません。`cdg task status <タスク ID> -w <ワークフロー>{:sh}` の `Diagnostic:` 行に、ブランチ名を何が占有しているかが示されるので、それに応じて対処します。ワークスペースにある同じ名前のローカルブランチは、自分で削除するか名前を変えます。CodeDAG の同期リポジトリが占有している場合は、[`cdg branch release`](/ja/docs/reference/cli/control#branch-release) で解放します。対処したら、`cdg task recover{:sh}` を実行します。
 
 - `branch-checkout-failed`：タスクブランチのチェックアウトに失敗しました。たとえば、このブランチが別のワークスペースでチェックアウトされている場合です。Git では、同じブランチを 2 か所で同時にチェックアウトすることはできません。そのワークスペースを別のブランチに切り替えてから、`cdg task recover{:sh}` を実行します。
 - `integration-branch-checkout-failed`：統合ブランチ `cdg/<ワークフロー名>/integration` が、別のワークスペースでチェックアウトされています。同じように、そのワークスペースを別のブランチに切り替えてから、`cdg dag recover <ワークフロー>{:sh}` を実行します。
@@ -106,7 +102,6 @@ Branch: cdg/feature/t2-ログインapiを実装
 | `Failed to resolve baseRef '<baseRef の値>' to a unique commit.` | [`baseRef`](/ja/docs/reference/workflow-file#base-ref) がコミットに解決できないか、複数のコミットに対応しています。`baseRef` はワークフローの実行開始時に初めて解決され、CodeDAG がリモートブランチを代わりにフェッチすることもありません。そのため、このコンピューターにまだ存在しないブランチ名や、リモートにしかないブランチを書いた場合や、同じ名前のブランチとタグが両方ある場合は、ここで止まります。 | この名前が、ただ 1 つのコミットに解決されるようにします。たとえば、該当するブランチを作成するかフェッチします。 |
 | `Failed to resolve DAG base commit from HEAD.` | ワークフローに `baseRef` が書かれていないため、ベースの取得元になるワークスペース（通常はプライマリリポジトリ）の `HEAD` をベースにしようとしましたが、そこにはまだコミットが 1 つもありません。たとえば、作成したばかりで、まだ一度もコミットしていないリポジトリです。 | ワークフローは、既存のコミットから始める必要があります。先に、このリポジトリで最初のコミットを作成してください。 |
 | `No available workspace after applying excludeWorkspaces.` | [`excludeWorkspaces`](/ja/docs/reference/workflow-file#exclude-workspaces) が、登録済みのワークスペースをすべて除外しています。このケースは投入時の検証で止められるため、ここで表示されたのであれば、投入のあとで登録済みのワークスペースが減っています。 | `cdg init{:sh}` で、除外されていないワークスペースを少なくとも 1 つ登録します。 |
-| `No workspace is available for this workflow:` で始まる | 除外されていないワークスペースのディレクトリが、どれも存在しなくなっています。該当するディレクトリは、括弧内に一覧表示されます。このケースも検証で止められるため、ディレクトリがなくなったのは投入のあとです。 | `cdg init{:sh}` をもう一度実行して、登録済みのワークスペースを更新します。 |
 | `Merge in progress.`、`Rebase in progress.`、`Cherry-pick in progress.` のいずれか | 統合ワークスペース（通常はプライマリリポジトリ）で、merge、rebase、cherry-pick のいずれかが終わっていません。 | そのワークスペースで完了させるか、`--abort` で中止します。 |
 
 `Diagnostic:` がこれ以外の内容の場合、たとえば Git コマンドのエラーメッセージがそのまま表示されている場合は、その内容に従って対処します。対処したら `cdg dag recover <ワークフロー>{:sh}` を実行します。ワークフローは、もう一度開始を試みます。
@@ -180,12 +175,12 @@ cdg dag submit <ワークフロー>
 
 | `Startup gate failure:` | 原因 | 対処方法 |
 |---|---|---|
-| `insufficient_credits` | 現在の期間の CodeDAG クレジットを使い切っています。 | [クレジット不足またはサブスクリプションがない場合](/ja/docs/account/credits-and-subscription#insufficient-credits)に沿って、使えるクレジットを回復します。 |
-| `no_subscription` | アカウントに有効なサブスクリプションがありません。 | 同上。 |
+| `insufficient_credits` | 現在の期間に残っている CodeDAG クレジットでは、このワークフローの実行を開始するのに足りません。 | `Action:` 行に従って、クレジットのリセットを待つか、サブスクリプションに登録します。[クレジット不足またはサブスクリプションがない場合](/ja/docs/account/credits-and-subscription#insufficient-credits)を参照してください。無料クレジットを使っている場合は、[無料クレジットの使い切りと期限切れ](/ja/docs/account/credits-and-subscription#free-credits-used-up)を参照してください。 |
+| `no_subscription` | アカウントに有効なサブスクリプションも、利用できる無料クレジットもありません。 | Billing ページでサブスクリプションに登録します。[クレジット不足またはサブスクリプションがない場合](/ja/docs/account/credits-and-subscription#insufficient-credits)を参照してください。 |
+| `cli_version_unsupported` | このコンピューターの CodeDAG CLI が、CodeDAG サービスがサポートする最低バージョンより古くなっています。 | CLI をアップグレードし、アップグレード後の CLI で復旧します。[バージョンに関する問題](#versions)を参照してください。 |
 | `login_required` | このコンピューターの CLI がログインしていません。 | `cdg auth login{:sh}` で、このワークフローを投入したアカウントにログインします。 |
 | `account_mismatch` | 現在ログインしているのが、このワークフローを投入したアカウントではありません。 | 元のアカウントに切り替えます。[ログアウト、複数のコンピューター、アカウントの切り替え](/ja/docs/account/login-and-account#sign-out)を参照してください。 |
 | `billing_service_unavailable` | CodeDAG サービスに一時的に接続できません。 | サービスに接続できるようになるのを待ちます。[サービスを利用できない場合](/ja/docs/account/login-and-account#service-unavailable)を参照してください。 |
-| `grant_persist_failed` | クレジットは差し引かれましたが、今回の実行の認可情報をこのコンピューターに保存できませんでした。 | ほかに先に対処することはありません。そのまま復旧します。繰り返し起こる場合は、`Details:` 行に、保存に失敗した具体的な原因が示されています。 |
 
 対処したら `cdg dag recover <ワークフロー>{:sh}` を実行します。ワークフローはもう一度開始を試み、クレジットが二重に差し引かれることはありません。この保留が解除されるまで、`cdg task recover{:sh}` と 2 つの `unpause` コマンドはどれも実行を拒否し、`Workflow is blocked by the startup gate. Run 'cdg dag recover' to resolve it before resuming.` というエラーを出します。このエラーが表示されたら、まず `cdg dag status <ワークフロー>{:sh}` で失敗コードを確認し、上の表に沿って対処してから、ワークフローを復旧します。
 
@@ -234,11 +229,9 @@ cdg dag submit <ワークフロー>
 次の 2 種類の画面は、ユーザー本人が判断する必要があります。CodeDAG は画面を検出するだけで、代わりにキーを押すことはありません。
 
 - **Claude Code のフルアクセスの警告。** `bypassPermissions`（CodeDAG でのエイリアスは `yolo`）で実行するタスクは、このコンピューターでまだこのモードの警告に同意していない場合、`[pending] [on-hold]` で止まります。理由は `agent-bypass-permissions-unaccepted` で、`Diagnostic:` 行に、ターミナルで警告に同意する方法が示されます。警告に同意してタスクを復旧する手順は、[Claude Code のフルアクセスの警告にあらかじめ同意する](/ja/docs/guides/agents-and-permission-modes#accept-bypass-warning)を参照してください。
-- **Codex のログインなど、そのほかの起動画面。** まだログインしていない場合、Codex はログインの案内で止まり、タスクは `[pending] [on-hold]` で止まります。理由は `agent-lifecycle-state-unavailable` です。`Diagnostic:` 行には現在の画面の内容が添えられるので、どの画面で止まっているかを見分けられます。`cdg task view <タスク ID> -w <ワークフロー>{:sh}` でセッションに入り、その中でログインを済ませてから、セッションを抜けて `cdg task recover{:sh}` を実行します。先に `cdg task kill{:sh}` でタスクを止め、ターミナルで `codex{:sh}` を単独で実行して済ませてから、`cdg task recover{:sh}` でタスクを起動し直すこともできます。
+- **Codex のログインなど、そのほかの起動画面。** まだログインしていない場合、Codex はログインの案内で止まり、タスクは `[pending] [on-hold]` で止まります。理由は `agent-lifecycle-state-unavailable` です。`Diagnostic:` 行には現在の画面の内容が添えられるので、どの画面で止まっているかを見分けられます。`cdg task view <タスク ID> -w <ワークフロー>{:sh}` でセッションに入り、その中でログインを済ませてから、セッションを抜けて `cdg task recover{:sh}` を実行します。先に `cdg task kill{:sh}` でタスクを止め、ターミナルで `codex{:sh}` を単独で実行して済ませてから、`cdg task recover{:sh}` でタスクを起動し直すこともできます。再投入する必要はありません。
 
 エージェントは、CodeDAG が検出できない画面で止まることもあります。この場合、タスクに保留の理由は表示されません。タスクが起動の段階で止まり、ログに自分のプロンプトが見当たらないときは、そのワークスペースでこのエージェントを一度手動で起動し、表示された確認画面に応答してから、`cdg task recover{:sh}` を実行します。
-
-起動画面で止まっているタスクを `kill` で強制停止したあとは、止まった原因に対処してから、そのまま `recover` を実行すれば済みます。今回の実行を終わらせて再投入する必要はありません。こうしたタスクには、再開できるセッションがまだありません。そのため `recover` は、タスクを待機に戻し、準備をやり直して、新しいセッションを起動します。出力には `No recoverable Agent session was established; the task will be prepared and started again.` と表示されます。
 
 ## エージェントが許可または回答を待っている [#approval-waiting]
 
@@ -298,14 +291,13 @@ cdg dag recover <ワークフロー>
 |---|---|---|
 | `✗ Validation failed`。その下に `[種類] 説明` の形式の項目が並ぶ | ワークフローファイルに誤りがあります。 | 説明に従って、1 件ずつ修正します。出力の読み方は[「ワークフローファイルを書く」の検証の節](/ja/docs/guides/writing-workflows#validate)、フィールドの書き方は[ワークフローファイルリファレンス](/ja/docs/reference/workflow-file)を参照してください。 |
 | `[unsupported-location]` | ファイルが `.codedag/dags/` ディレクトリの下にありません。 | ファイルを `.codedag/dags/` またはそのサブディレクトリに移動します。[ファイルの置き場所と形式](/ja/docs/reference/workflow-file#file-location)を参照してください。 |
-| `uses unavailable agent` | プロジェクト設定の `availableAgents` が使えるエージェントを制限していて、タスクが指定したエージェントがその中に含まれていません。エラーメッセージに、このフィールドがどの設定ファイルにあるかが示されます。 | エラーメッセージの案内に従って、そのファイルの [`availableAgents`](/ja/docs/reference/settings#available-agents) にこのエージェントを追加するか、フィールドごと削除します。 |
 | `[agent-not-installed]`。説明に `is not installed on this machine` と表示される | タスクが使うエージェントがこのコンピューターにインストールされておらず、`claude` または `codex` コマンドが `PATH` にありません。エラーメッセージの `Used by:` に、そのエージェントを使うタスクが一覧表示されます。分離ブランチモードでマージコンフリクトを処理するエージェントは、`mergeConflictAgent` と表示されます。 | エージェントをインストールし、同じターミナルで直接実行できることを確認します。または、該当するタスクを、インストール済みのエージェントを使うように変更します。そのエージェントがプロジェクトのデフォルトのエージェントでもある場合は、このコンピューターでデフォルトのエージェントを変更する方法も、エラーメッセージに示されます。 |
 | `[workspace-not-found]` | このワークフローが使う登録済みのワークスペースのディレクトリが、存在しなくなっています。すべて存在しない場合はエラーになります。一部だけが存在しない場合は警告になり、ワークフローは残りのワークスペースで通常どおり実行されます。 | `cdg init{:sh}` をもう一度実行して、登録済みのワークスペースを更新します。[CodeDAG に登録する](/ja/docs/guides/parallel-workspaces#register)を参照してください。 |
 | `Submit anyway?` または `Submission cancelled` | 検証は通りましたが警告があり、確認が必要です。 | 警告の内容を確かめてから確認するか、`-y` を付けて自動的に確認します。明示的に指定した `branchName` が既存のブランチと衝突するという警告の場合は、対話型ターミナルがないと、投入がそのままキャンセルされます。 |
 | `[duplicate] Workflow already in queue` | 同じワークフローファイルが、すでにキューにあります。 | 実行が終わり、レビューが終了するのを待ちます。投入済みの実行を変更したい場合は、[投入済みのワークフローを変更する](/ja/docs/reference/cli/validate-and-submit#modify-submitted)を参照してください。 |
 | `is in reviewed phase, not planning` | このワークフローの前回の実行は、すでにレビューが終了しています。 | 案内に従って、先に `cdg dag review clear <ワークフロー>{:sh}` を実行してから投入します。これは新しい実行になり、クレジットが改めて消費されます。 |
-| `Workflow has review snapshot state`。複数のワークフローを一度に投入した場合は `[review-snapshot]` と表示される | ワークフローに、個々のタスクのレビュー記録が残っています。投入する前に、`cdg task review{:sh}` の `accept`、`cancel`、`defer` のいずれかで、その中のタスクをレビューしていた場合です。 | 案内に従って、先に `cdg dag review clear <ワークフロー>{:sh}` を実行してその記録をクリアしてから、投入します。ルールは[まだ投入していないワークフローにあるタスクのレビュー記録](/ja/docs/reference/cli/review#unsubmitted-task-reviews)を参照してください。 |
-| `Not enough credits for this submission.` または `No active paid subscription found for this account.` | クレジットが足りないか、有効なサブスクリプションがありません。 | [クレジット不足またはサブスクリプションがない場合](/ja/docs/account/credits-and-subscription#insufficient-credits)を参照してください。 |
+| `Not enough credits for this submission.` または `This account has no active subscription and no available free credits.` | 残りのクレジットが今回の投入に足りないか、アカウントに有効なサブスクリプションも、利用できる無料クレジットもありません。 | [クレジット不足またはサブスクリプションがない場合](/ja/docs/account/credits-and-subscription#insufficient-credits)を参照してください。無料クレジットを使っている場合は、[無料クレジットの使い切りと期限切れ](/ja/docs/account/credits-and-subscription#free-credits-used-up)を参照してください。 |
+| `This CodeDAG CLI version (<現在のバージョン>) is no longer supported.` | CLI が、CodeDAG サービスがサポートする最低バージョンより古くなっています。 | [バージョンに関する問題](#versions)を参照してください。 |
 | `Sign-in failed:` | 投入にはログインが必要ですが、ログインが完了しませんでした。 | [ログインに失敗する、または繰り返しログインを求められる](#sign-in-problems)を参照してください。 |
 | `Precheck failed:` | 投入の前に CodeDAG サービスでクレジットを確認する際に、エラーが起きました。コロンのあとに、今回の原因が表示されます。 | サービスに接続できない場合や、サービス側でエラーが起きた場合は、サービスを利用できるようになってから、もう一度投入します。[サービスを利用できない場合](/ja/docs/account/login-and-account#service-unavailable)を参照してください。サービス側がリクエストを拒否した場合（たとえば、ワークフローの内容がサービス側の制限を超えている場合）は、そのまま再試行しても結果は変わりません。エラーメッセージに示された、サービス側の原因に対処してから投入します。確認の途中でログインし直す必要が生じ、そのログインが完了しなかった場合は、[ログインに失敗する、または繰り返しログインを求められる](#sign-in-problems)を参照してください。 |
 
@@ -337,37 +329,49 @@ cdg dag recover <ワークフロー>
 - **`Session ID not found. Please provide --session-id` と表示される。** セッションはすでに終了していて、コマンドはそれを開き直そうとしましたが、セッション ID が記録されていません。エージェント自身の記録からセッション ID を探し、`--session-id` で指定します。書き方は [cdg task view](/ja/docs/reference/cli/control#task-view) を参照してください。
 - **`Session socket not found` または `Connection refused` と表示される。** コマンドが、今はタスクのセッションに接続できません。たとえば、タスクが開始されたばかりで、セッションの準備がまだできていない場合です。少し待ってから、もう一度試してください。それでも接続できないときは、`cdg task status{:sh}` でタスクがすでに止まっていないかを確認し、その状態に応じて対処します。
 
-タスクがすでに強制停止されていて、そのセッションも動いていない場合、セッションに入るには、先にタスクを復旧する必要があります。コマンドはまずこの点を説明してから、復旧するかどうかを尋ねます。デフォルトでは復旧せず、Yes を選んだときだけ、復旧して接続します。質問に答えられる対話型ターミナルがない場合（たとえば、エージェントのシェルツールの中で直接実行している場合）、コマンドはエラーを出して終了コード 1 で終了します。この場合に復旧するには、`--recover` を付けます。タスクが何をしたかを確認したいだけなら、`cdg task logs{:sh}` でログを読みます。
-
 セッションから抜けるには Ctrl+C を押します。タスクはそのまま実行を続けます。やり取りが済んだら、早めにセッションから抜けてください。接続したままにしていると、タスクがいつまでも通常の流れで終了できないことがあります。[セッションに入る、修正する、抜ける](/ja/docs/guides/intervene-and-control#task-view)を参照してください。
 
 ## 初期化と設定 [#init-and-settings]
 
 - **`cdg init{:sh}` が `Neither CLI was detected on this machine.` と表示する。** CodeDAG が、現在のターミナルの `PATH` から `claude` も `codex` も見つけられません。先に Claude Code または Codex をインストールし、同じターミナルで直接実行できることを確認してから、`cdg init{:sh}` をもう一度実行します。
 - **`cdg init{:sh}` をもう一度実行すると、`File conflicts detected.` と表示され、既存のファイルをどう扱うかを尋ねられる。** 自分で変更した内容を残したい場合は、残す（Keep）を選びます。初期化テンプレートに戻したい場合は、置き換える（Overwrite）を選びます。`.codedag` リポジトリにコミット済みのファイルは自動的に残され、質問の対象になりません。各選択肢の意味は、[1 つずつ尋ねられるときの 6 つの選択肢](/ja/docs/reference/cli/init#file-conflicts)を参照してください。
-- **clone のレプリカで `cdg init{:sh}` を実行した。** その clone がすでにいずれかのプロジェクトのレプリカとして登録されている場合、CodeDAG はそれを検出し、質問の前にその旨を表示します。そのうえで、そのプロジェクトのプライマリリポジトリを対象に初期化を続け、レプリカに `.codedag/` は作成しません。まだ登録されていない clone は、独立した新しいプロジェクトとして扱われます。これは正常な動作です。レプリカとして使いたい場合は、プライマリリポジトリに戻って `cdg init{:sh}` を実行し、登録します。[どのディレクトリで実行するか](/ja/docs/reference/cli/init#where-to-run)を参照してください。
-- **`Failed to parse project settings file` または `Invalid project settings file` と表示される。** 設定ファイル `.codedag/settings.jsonc` または `.codedag/local/settings.local.jsonc` が正しい JSONC になっていないか、いずれかのフィールドの値が不正です。出力の `Location:` と `Reason:` に従って、ファイルを修正します。設定ファイルでフィールド名のつづりを間違えても、エラーにはならず、そのまま無視されます。設定を変更したのに効果がないときは、まずフィールド名を確認してください。[ファイル形式と、書き間違えた場合の動作](/ja/docs/reference/settings#format)を参照してください。
+- **`Failed to parse project settings file` または `Invalid project settings file` と表示される。** 設定ファイル `.codedag/settings.jsonc` または `.codedag/local/settings.local.jsonc` が正しい JSONC になっていないか、いずれかのフィールドの値が不正です。出力の `Location:` と `Reason:` に従って、ファイルを修正します。フィールド名のつづりを間違えても、この 2 つのエラーにはなりません。CodeDAG は認識できないキーを読み飛ばし、`cdg dag validate{:sh}` と投入時の検証で `unsupported-setting` の警告を出すだけです。設定を変更したのに効果がないときは、まずこの警告が出ていないかを確認してください。[ファイル形式と、書き間違えた場合の動作](/ja/docs/reference/settings#format)を参照してください。
 
 ## ログインに失敗する、または繰り返しログインを求められる [#sign-in-problems]
 
 - **`Sign-in failed:` と表示される、または `cdg auth status{:sh}` が `Failed to show auth status:` と表示する。たとえば、タイムアウトした場合、ブラウザーで認可を拒否した場合、サービスに接続できない場合です。** もう一度実行すれば済みます。`cdg init{:sh}` または `cdg dag submit{:sh}` から始まったログインが失敗した場合は、元のコマンドも終了するため、そのコマンドを実行し直す必要があります。
-- **`Configured URL is not an approved CodeDAG auth endpoint.` と表示される。** 現在のターミナルに、環境変数 `CODEDAG_AUTH_BASE_URL` が設定されています。CLI が接続するのは `https://app.codedag.com` だけで、この変数に値が入っているかぎり、ログインも、ログインが必要なコマンドも、すべてこのエラーで終了します。変数を解除してから（`unset CODEDAG_AUTH_BASE_URL{:sh}`）、もう一度実行してください。
 - **`Failed to save credentials to the local secure storage.` と表示される。** ブラウザーでのログインは完了しましたが、認証情報をこのコンピューターに保存できなかったため、今回のログインは有効になっていません。CodeDAG のグローバルディレクトリ（デフォルトは `~/.codedag`）に書き込めることと、ディスクの空き容量が十分にあることを確認してから、ログインし直してください。
 - **SSH のリモートセッション、コンテナー、GUI のないサーバーでログインできない。** ログインは、`cdg` を実行しているのと同じコンピューターのブラウザーで完了させる必要があるため、こうした環境では現在のところログインできません。[デスクトップのブラウザーがない場合](/ja/docs/account/login-and-account#no-browser)を参照してください。こうした環境への対応は、今後のバージョンの計画に入っています。
 - **しばらくすると、ログインし直すよう求められる。** ログイン状態は、長い間使わないと無効になります。また、認証情報を別のコンピューターにコピーして使うと、このアカウントのログインが、すべてのコンピューターでまとめて無効になります。[ログイン状態の有効期間](/ja/docs/account/login-and-account#credentials)と[ログアウト、複数のコンピューター、アカウントの切り替え](/ja/docs/account/login-and-account#sign-out)を参照してください。
-- **ログインすると、別のアカウントになっている。** ブラウザーの Web コンソールが別のアカウントでログインしたままになっていると、CLI のログインにはそのアカウントがそのまま使われます。[ログアウト、複数のコンピューター、アカウントの切り替え](/ja/docs/account/login-and-account#sign-out)を参照してください。
+- **ログインすると、別のアカウントになっている。** `cdg auth login{:sh}` を実行してログインし直し、アカウントの確認ページでアカウントの切り替えを選びます。[ブラウザーで Web コンソールにログイン済みの場合](/ja/docs/account/login-and-account#confirm-account)を参照してください。
 - **キューで待っているワークフローが、ログイン状態のために `on-hold` で止まった。** [アカウントとクレジットのチェックで止まった](#startup-gate)を参照してください。
 - **CodeDAG サービスを一時的に利用できない。** [サービスを利用できない場合](/ja/docs/account/login-and-account#service-unavailable)を参照してください。
 
 ## バージョンに関する問題 [#versions]
 
-**CodeDAG CLI のバージョンが古い。** CodeDAG サービスは、CLI に最低バージョンの要件を設けています。バージョンが古すぎると、サービスへの接続が必要な操作で、アップグレードするよう案内されます。`brew upgrade codedag{:sh}` でアップグレードしてから、もう一度試してください。[インストールとログイン](/ja/docs/get-started/installation)を参照してください。
+**CodeDAG CLI のバージョンが古い。** CodeDAG サービスは、CLI のサポート対象の最低バージョンを定めています。それより古い CLI は、クレジットの照会、投入、ワークフローの実行開始の時点で止められます。`cdg auth status{:sh}` と `cdg dag submit{:sh}` は `This CodeDAG CLI version (<現在のバージョン>) is no longer supported.` というエラーを出し、同じ行にサポート対象の最低バージョンを示して、終了コード 1 で終了します。ワークフローは投入されません。すでにキューで待っているワークフローは、実行の順番が来たところで `on-hold` で止まり、`Startup gate failure:` は `cli_version_unsupported` になります。すでに実行が始まっているワークフローには影響せず、ステータス、ログ、レビューなど、サービスに接続しないコマンドも通常どおり使えます。
+
+対処方法は CLI のアップグレードです。`brew upgrade codedag{:sh}` でアップグレードし、`cdg --version{:sh}` でバージョンが案内に示された最低バージョン以上であることを確認してから、さきほどのコマンドをもう一度実行します。インストール方法は[インストールとログイン](/ja/docs/get-started/installation)を参照してください。`cli_version_unsupported` で止まったワークフローは、アップグレードした CLI で `cdg dag recover <ワークフロー>{:sh}` を実行して復旧します。アップグレードせずに復旧すると、もう一度止まります。
+
+**CLI のアップグレードを勧められる。** 現在のバージョンはまだサポートされているものの、CodeDAG サービスがアップグレードを勧めている場合、`cdg auth status{:sh}` と `cdg dag submit{:sh}` の出力の最後に `A newer CodeDAG CLI is recommended: <推奨バージョン> (current version: <現在のバージョン>).` という行が加わります。これは通知にすぎず、コマンドは通常どおり完了します。都合のよいときに、同じ方法でアップグレードしてください。
 
 **Claude Code のバージョンが古い。** CodeDAG がサポートする Claude Code の最低バージョンは 2.1.196 です。このコンピューターに Claude Code がインストールされていることを検出すると、`cdg init{:sh}` はそのバージョンを確認します。バージョンが古すぎる場合や、バージョン番号を取得できない場合は警告を出しますが、初期化は通常どおり完了します。この警告を無視すると、問題はタスクの実行時に表面化します。タスクは `on-hold` で止まり、理由は `agent-version-unsupported` で、ログには `Claude CLI <バージョン> is unsupported for reliable lifecycle detection.` と表示されます。`claude update{:sh}` でアップグレードしてから、`cdg task recover{:sh}` を実行します。復旧のときにもバージョンがサポートされていないと表示される場合は、現在のターミナルの `claude` がまだ古いバージョンのままです。
 
 **Claude Code のバージョンが検証済みの範囲より新しい。** CodeDAG は Claude Code 2.1.292 まで検証済みで、それより新しいバージョンでも通常は問題なく動作します。まれに、タスクが完了したかどうかを CodeDAG が判定できず、タスクが `agent-lifecycle-state-unavailable` で止まることがあります。このとき、ログには、バージョンが検証済みの範囲より新しいことが示されます。作業はたいてい完了していて、失われてはいません。[エージェントセッションの問題](#hold-agent-session)にある、この理由の対処方法に沿って対処してください。Claude Code のバージョンを固定するか元に戻す、または CodeDAG をアップグレードする方法もあります。
 
-**CodeDAG Guide プラグインと CLI のバージョンが合っていない。** `cdg plugin status{:sh}` を実行し、出力の `Action:` 行の案内に従って操作します。通常は、そこに示された `cdg plugin update{:sh}` コマンドを実行します。[プラグインを更新する](/ja/docs/guides/guide-plugin#update)を参照してください。プラグインと CLI の互換性のルールは、[バージョンの互換性](/ja/docs/reference/cli/plugin#compatibility)を参照してください。
+**CodeDAG Guide プラグインがより新しい CLI を必要とする。** `cdg init{:sh}` または `cdg dag submit{:sh}` で `Warning: The CodeDAG plugin for` と表示され、そのあとに必要な CLI のバージョンが示された場合は、この節のアップグレード方法で CLI を更新します。警告が出ても初期化や投入は止まりませんが、古い CLI では使えないコマンド、引数、オプションを、エージェントが使う可能性があります。プラグインと CLI のバージョン番号が一致している必要はありません。詳しいルールは[バージョンの互換性](/ja/docs/reference/cli/plugin#compatibility)を参照してください。
+
+## プラグインを変更していないのに、ローカルの変更があると表示される [#plugin-local-changes]
+
+プラグインを変更した覚えがないのに、`cdg plugin status{:sh}` の `Sync` に `update available, local changes` と表示されることがあります。この場合、`cdg plugin update{:sh}` もプラグインを更新しません。ターミナルで実行すると、公開時の内容に戻すかどうかを先に尋ねます。エージェントやスクリプトから実行すると、尋ねずに今の状態を残し、更新をスキップします。
+
+こうなるのは、プラグインが変更されているかどうかを判断するには、インストール済みのプラグインを、エージェントがローカルに保存している marketplace のコピーにある同じバージョンの内容と比べるしかないからです。両者のバージョンが異なると、比べられる同じバージョンがないため、コマンドは変更されているものとして扱います。たとえば、CodeDAG の外で Claude Code の marketplace を更新し、プラグインは更新しなかった場合に、この状況になります。
+
+プラグインを変更していないことが確かであれば、次のコマンドで更新します。コマンドは、インストール済みのプラグインを先にバックアップしてから、公開されている最新の内容に置き換えます。プラグインを変更していなければ、これで失われる内容はありません。
+
+```bash title="Terminal"
+cdg plugin update --reset-local-changes
+```
 
 ## タスクにレビューの結論が出たあとで問題に気づいた [#after-conclusion]
 

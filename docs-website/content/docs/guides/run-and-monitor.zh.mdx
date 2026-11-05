@@ -26,7 +26,7 @@ cdg dag submit api-docs
 2. **这个工作流不在队列中。** 同一个工作流提交之后，在它审核结束、离开队列之前，不能再提交一次。
 3. **这个工作流没有审核结束。** 审核已经结束的工作流，要先用 `cdg dag review clear{:sh}` 清除审核记录，才能再次提交，见[清除审核记录与重新提交](/zh/docs/reference/cli/review#clear-and-resubmit)。
 4. **已经登录 CodeDAG 账号。** 还没登录时，命令会先让你[登录](/zh/docs/account/login-and-account#sign-in)，登录完成后接着提交。
-5. **CodeDAG 额度够用。** 账号剩余的额度要够运行这次提交的全部任务；额度不足或没有有效的订阅时，提交会被拒绝。
+5. **CodeDAG 额度够用。** 账号剩余的额度要够运行这次提交要执行的全部任务；额度不足，或者账号既没有订阅也没有可用的免费额度时，提交会被拒绝。
 
 提交被拒绝时，按输出中的提示在故障排除的[提交被拒绝](/zh/docs/troubleshooting/troubleshooting#submit-rejected)一节里找到对应的处理方法。
 

@@ -63,5 +63,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }
   }
 
+  // The Japanese disclosure under the Act on Specified Commercial Transactions exists only in Japanese
+  items.push({ url: url('/tokushoho', 'ja'), changeFrequency: 'yearly', priority: 0.3 });
+
   return items;
 }

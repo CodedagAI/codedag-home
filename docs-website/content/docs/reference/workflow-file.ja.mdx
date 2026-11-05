@@ -431,7 +431,7 @@ Codex のタスクの `mode` は、2 通りの書き方のどちらかで書き�
 | `search` | `true`、`false` | `true`：リアルタイムの Web 検索を有効にします。`false`：Web 検索ツールを無効にします。省略した場合は Codex 自身の設定に従い、Codex のデフォルトでは、キャッシュされた検索結果が使われます |
 | `network_access` | `true`、`false` | `workspace-write` サンドボックス内のコマンドに、ネットワークへのアクセスを許可するかどうかを決めます。省略した場合は Codex 自身の設定に従い、Codex のデフォルトでは許可されません |
 
-5 つのキーは、自由に組み合わせられます。追加の条件があるのは `network_access` だけで、これを書く場合は、`sandbox=workspace-write` も必ず明記します。表にないキー名、表にない値、重複したキーは、いずれも `cdg dag validate{:sh}` と `cdg dag submit{:sh}` の段階でエラーになり、そのまま Codex に渡されることはありません。表に挙げているのは、現在のバージョンの Codex が受け付ける値です。Codex の以前の許可ポリシーである `untrusted` と、Codex ですでに非推奨になった `on-failure` は、どちらも含まれていません。これらを書くと、`ask-for-approval must be on-request or never, received 'untrusted'` のようなエラーになります。
+5 つのキーは、自由に組み合わせられます。追加の条件があるのは `network_access` だけで、これを書く場合は、`sandbox=workspace-write` も必ず明記します。表にないキー名、表にない値、重複したキーは、いずれも `cdg dag validate{:sh}` と `cdg dag submit{:sh}` の段階でエラーになり、そのまま Codex に渡されることはありません。
 
 ```yaml title="yaml"
 # タスクのワークスペースへの書き込みだけを許可し、その外に出るときはモデルが許可を求める

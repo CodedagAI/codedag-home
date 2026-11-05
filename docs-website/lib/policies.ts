@@ -5,6 +5,8 @@
  * 正文在 content/policies/ 下（terms.mdx、terms.zh.mdx、terms.ja.mdx），由
  * app/[lang]/(home)/components/policy-page.tsx 读取；
  * 三种语言共用的法定名称、生效日期和联系邮箱只写在这里，页首由它们渲染，正文不重复写日期。
+ * 同一目录下的 tokushoho.ja.mdx 是日本特定商取引法要求的表记页，只有日文，不属于三份政策，
+ * 由同一个组件文件中的 JapanDisclosurePage 渲染；联系邮箱写在正文里（hi）。
  * 页脚（客户端组件）也从这里取法定名称，所以本文件不引用只能在服务端加载的模块。
  * legalName、effectiveDate 与 policyContacts 改动时保持 `key: '值'` 的字面值写法，不改成变量或表达式，
  * 以便直接按字面值核对三语正文是否一致。
@@ -18,7 +20,7 @@ export const policyFacts = {
   /** 运营 CodeDAG 的公司，三份政策与页脚版权行都用这个名称 */
   legalName: 'Zillion AI LLC',
   /** 三份政策共用的生效日期（YYYY-MM-DD） */
-  effectiveDate: '2026-10-16',
+  effectiveDate: '2026-11-05',
 } as const;
 
 /** 每份政策对应的联系邮箱，只写 @ 前面的名字 */

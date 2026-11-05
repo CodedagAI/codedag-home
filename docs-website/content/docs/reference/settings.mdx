@@ -21,7 +21,7 @@ Project settings are split across two files, both in the primary repository's `.
 
 Both files are JSONC, which is standard JSON plus `//` and `/* */` comments. Everything else still has to be valid JSON: the top level must be an object, and there can't be a comma after the last field.
 
-If a file can't be parsed, or one of the five fields described below has an invalid value, every command that needs to read project settings, such as validation and submission, fails instead of falling back to the default configuration and carrying on. The error names the file and gives either the line and column where parsing failed or the reason the value is invalid. Only the first problem in each file is reported.
+If a file can't be parsed, or one of the five fields described below has an invalid value, every command that needs to read project settings, such as validation and submission, fails instead of falling back to the default configuration and carrying on.
 
 A misspelled field name doesn't keep the other fields from taking effect. Field names are case-sensitive, and CodeDAG skips keys it doesn't recognize. `cdg dag validate{:sh}` and the validation at submission give one `unsupported-setting` warning for each file that contains such keys, listing the unrecognized keys and all the supported field names. The warning doesn't fail validation. At submission, you confirm the warning once and the submission continues.
 
@@ -93,7 +93,7 @@ With `none`, the workflows behind this one in the queue don't start until you gi
 
 ### availableAgents [#available-agents]
 
-`availableAgents` lists the agents that this project's workflows can use: `claude` means Claude Code, and `codex` means Codex. At validation and submission, CodeDAG checks agents in two places: the agent each task actually uses (the task's `agent`, or the [default agent](#default-agent) when the task doesn't set one), and the `agent` in [`mergeConflictAgent`](/docs/reference/workflow-file#merge-conflict-agent). All of them have to be on this list, or validation fails. The error says which file the restriction comes from and gives two ways to fix it: add the agent to `availableAgents` in that file, or delete the field.
+`availableAgents` lists the agents that this project's workflows can use: `claude` means Claude Code, and `codex` means Codex. At validation and submission, CodeDAG checks agents in two places: the agent each task actually uses (the task's `agent`, or the [default agent](#default-agent) when the task doesn't set one), and the `agent` in [`mergeConflictAgent`](/docs/reference/workflow-file#merge-conflict-agent). All of them have to be on this list, or validation fails.
 
 Use this field only for a deliberate restriction, for example when the team has agreed that this project uses only Claude Code:
 
@@ -103,7 +103,7 @@ Use this field only for a deliberate restriction, for example when the team has 
 }
 ```
 
-When it's omitted, all supported agents can be used, and a newly installed agent works right away. When you no longer want the restriction, delete the field: an empty array produces the error `availableAgents must list at least one agent; remove the field to allow all supported agents`, and a value other than `claude` or `codex` in the list is an error too.
+When it's omitted, all supported agents can be used, and a newly installed agent works right away. When you no longer want the restriction, delete the field rather than leaving an empty array.
 
 This list has nothing to do with which agents are installed on this computer. Validation and submission run a separate installation check: if the command for an agent that the workflow actually uses isn't on your PATH, they report an `agent-not-installed` error. See [Submission rejected](/docs/troubleshooting/troubleshooting#submit-rejected).
 
@@ -111,7 +111,7 @@ This list has nothing to do with which agents are installed on this computer. Va
 
 `defaultAgent` is the project's default agent. It takes `claude` or `codex`. Tasks that don't set `agent` run with it, and their `mode` is validated against its syntax. When a workflow doesn't set [`mergeConflictAgent`](/docs/reference/workflow-file#merge-conflict-agent), it also resolves any conflict that occurs when the results are merged into the integration branch after all tasks finish.
 
-When neither file sets it, the default agent is `codex`. A value other than `claude` or `codex` is an error. The value itself is case-insensitive, and leading and trailing whitespace is ignored. If the resulting agent isn't in [`availableAgents`](#available-agents), the first item in `availableAgents` is used instead. For example, in a project that allows only `claude`, the default agent is Claude Code when `defaultAgent` isn't set.
+When neither file sets it, the default agent is `codex`. If the resulting agent isn't in [`availableAgents`](#available-agents), the first item in `availableAgents` is used instead. For example, in a project that allows only `claude`, the default agent is Claude Code when `defaultAgent` isn't set.
 
 For how `cdg init{:sh}` determines the default agent and when it writes that agent to the local settings, see [How the default agent is determined](/docs/reference/cli/init#default-agent). To change it later, edit this field in the local settings:
 

@@ -1,6 +1,6 @@
 ---
 title: Sign-In and Account
-description: Why CodeDAG requires you to sign in, how to sign in and out, and what data the CodeDAG service receives from you.
+description: Why CodeDAG requires you to sign in, how to sign in, sign out, and switch accounts, and what data the CodeDAG service receives from you.
 icon: KeyRound
 ---
 
@@ -26,11 +26,11 @@ If you aren't signed in when you run one of these commands, it takes you through
 cdg auth login
 ```
 
-The command opens a browser on this computer. A Google account is currently the only supported way to sign in. The first time you sign in with a given Google account, CodeDAG also creates an account for it, and every new account comes with free credits. For the amount and how long they're valid, see [Free credits](/docs/account/credits-and-subscription#free-credits). If the browser is already signed in to the CodeDAG web console, sign-in uses that account directly.
+The command opens a browser on this computer. A Google account is currently the only supported way to sign in. The first time you sign in with a given Google account, CodeDAG also creates an account for it, and every new account comes with free credits. For the amount and how long they're valid, see [Free credits](/docs/account/credits-and-subscription#free-credits).
 
-### If sign-in doesn't complete [#sign-in-failed]
+### When the browser is already signed in to the web console [#confirm-account]
 
-If sign-in times out, you cancel it in the browser, or the CodeDAG service can't be reached, just run the command again. If `cdg init{:sh}` or `cdg dag submit{:sh}` triggered the sign-in, that command exits too, without creating `.codedag` or adding the workflow to the queue. If sign-in keeps failing, work through the [sign-in problems](/docs/troubleshooting/troubleshooting#sign-in-problems) section of Troubleshooting.
+If your browser is already signed in to the CodeDAG web console, CLI sign-in first asks you to confirm which account to use. You can continue with the account shown on the page, or choose Use a different account to switch to another Google account without rerunning the command.
 
 ### Without a desktop browser [#no-browser]
 
@@ -38,7 +38,7 @@ You currently can't sign in from an SSH remote session, a container, or a server
 
 The reason is how sign-in works. After you complete sign-in in the browser, the browser has to hand the result back to the CLI that's waiting on this computer, so the browser and the CLI must be on the same computer. Neither of these workarounds works:
 
-- **Opening the sign-in link on another computer.** The browser on that computer can't find the CLI that's waiting for the result, so sign-in can't complete.
+- **Opening the sign-in link on another computer.** This includes a URL printed with `--no-browser`. The browser on that computer can't find the CLI that's waiting for the result, so sign-in can't complete.
 - **Signing in on another computer and copying the credentials over.** Once the copied credentials are used, every CLI sign-in for the account is revoked, on all computers.
 
 Support for signing in to and using CodeDAG in environments without a browser, such as remote servers, is planned for a later release.
@@ -59,7 +59,7 @@ Signing out ends only the CLI sign-in on this computer. The CLI and the web cons
 
 You sign in once on each computer, and all computers on the same account share the same credits. You can't share a sign-in between computers by copying credentials. As soon as copied credentials are used again, every CLI sign-in for the account is revoked, on all computers, and you have to sign in again on each one.
 
-To switch to another account, run `cdg auth logout{:sh}`, then run `cdg auth login{:sh}` and choose a different Google account. If the web console in your browser is still signed in to the original account, sign out there first. Otherwise, sign-in uses that account directly.
+To switch to another account, run `cdg auth login{:sh}` and sign in with a different Google account. You don't need to sign out first: once the new sign-in succeeds, it replaces the existing sign-in on this computer. If the web console in your browser is still signed in to the original account, sign-in shows a confirmation page first, where you choose Use a different account. See [When the browser is already signed in to the web console](#confirm-account).
 
 Neither signing out nor switching accounts affects workflows that have already started running. A queued workflow that hasn't started uses this computer's sign-in only when its turn comes. If you aren't signed in at that point, or you're signed in to an account other than the one that submitted it, it stops at `on-hold`. Sign in again or switch back to the original account, then run `cdg dag recover <name>{:sh}` to continue.
 

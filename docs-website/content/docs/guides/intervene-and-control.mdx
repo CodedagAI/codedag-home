@@ -32,7 +32,7 @@ cdg task view 2 -w feature
 
 What you see inside is Claude Code's or Codex's own interface, the same as when you open it directly in a terminal. Your keystrokes go to the agent unchanged, so you work in it the way you always do: type a message, choose an approval option, or press Esc to interrupt what it's doing and then tell it what you want instead. Ctrl+C is the one exception: it isn't passed to the agent, and it takes you out of the session instead.
 
-This command needs a real interactive terminal. In a script or an agent's shell tool, the display is garbled and keys don't respond. In that case, use the alternative described in [Choose how to observe and make changes](#choose-intervention). The task also has to have started running. A task that hasn't started has no session to enter, and the command prints `Task has not started yet.` and exits. For other cases where you can't get in, see [task view can't connect or doesn't respond](/docs/troubleshooting/troubleshooting#task-view-problems). For the command's other arguments and how it locates the session, see the [command reference](/docs/reference/cli/control#task-view).
+This command needs a real interactive terminal. In a script or an agent's shell tool, the display is garbled and keys don't respond. In that case, use the alternative described in [Choose how to observe and make changes](#choose-intervention). The task also has to have started running, because a task that hasn't started has no session to enter. For other cases where you can't get in, see [task view can't connect or doesn't respond](/docs/troubleshooting/troubleshooting#task-view-problems). For the command's other arguments and how it locates the session, see the [command reference](/docs/reference/cli/control#task-view).
 
 Messages you send in the session go straight to the task agent, and CodeDAG doesn't commit the current changes for you first. In isolated-branches mode, the changes made before and after your message are committed together as the task's result when the task ends. If you want a dividing line so that you can later compare what changed before and after the correction, ask the agent in your message to commit first. For example:
 
@@ -40,7 +40,7 @@ Messages you send in the session go straight to the task agent, and CodeDAG does
 First commit the current changes, with the commit message "Progress before changing direction". After that, stop modifying files under src/legacy/ and implement the same functionality in a new module instead.
 ```
 
-Exit promptly when you're done. While you're attached to the session, CodeDAG doesn't consider the task complete. Even if the agent has finished and stopped to wait for input, the task keeps showing `working`, and the downstream tasks that depend on it don't start. The task ends normally only after you press Ctrl+C and leave.
+Exit promptly when you're done. Once the agent has finished and stopped to wait for input, the task isn't auto-accepted as long as you're still attached to its session: it keeps showing `working`, its status line ends with `— Agent stopped; finishing after task view exits`, and the downstream tasks that depend on it don't start. The task ends normally only after you press Ctrl+C to leave.
 
 <Callout type="warn">Press Ctrl+C to leave a session. If you type the agent's own exit command in the session while the task is running (for example, `/exit` in Claude Code), you end the task agent's session itself, and the task stops at `on-hold` right away with the reason `agent-session-ended`. After you reopen the original session with `cdg task recover{:sh}`, the task finishes as usual with its earlier context, and then goes to review or is auto-accepted, depending on its review settings.</Callout>
 
@@ -102,7 +102,9 @@ Tasks that haven't started have no session to interrupt, so `kill` has the same 
 
 `kill` doesn't delete anything. The session's context is still there, and the changes the agent has already written to the workspace stay where they are. They're neither rolled back nor committed. Keep in mind that the interrupted step may be only half done, for example a command stopped midway or a file only partly edited. Before you continue, you can take a look with `git status` and `git diff` in the task's workspace.
 
-If you only want to see where a killed task stopped, read its log with `cdg task logs 2 -w feature{:sh}`. When you use `cdg task view{:sh}` to enter a killed task's session, the command first explains that entering the session requires recovering the task and asks whether to recover it. The task continues only after you confirm, and if you decline, nothing changes. For details, see the [command reference](/docs/reference/cli/control#task-view).
+To see where a killed task stopped, you can read its log with `cdg task logs 2 -w feature{:sh}`, or enter its session with `cdg task view 2 -w feature{:sh}`. Entering the session doesn't by itself make the task continue: if you exit without saying anything, it's still `killed`. Once you give the agent a new instruction in the session, the task is running again, which makes this a good way to change direction after a kill.
+
+If you only ask how far it got, and you exit once it answers and stops, the task is treated as done and, by default, auto-accepted. To keep it going, tell it explicitly before you exit to "carry on with the original task and stop only when it's all done." Once you've done that, you can exit without worry: when it finishes and stops, the task really is done, and being auto-accepted is exactly what you'd expect.
 
 A killed task doesn't continue on its own. As long as a workflow still has stopped tasks, it can't finish, and the workflows behind it in the queue keep waiting too. The same goes for paused tasks. To get the queue moving again, run `recover` on those tasks, or if you no longer need them, end them with the review commands `cancel` or `defer`. See [When a task isn't stopped at a gate](/docs/guides/review-tasks#not-at-gate).
 
@@ -126,10 +128,6 @@ For an `on-hold` task, deal with the cause first. Run `cdg task status 2 -w feat
 ### Why can't other tasks start after I stop a task?
 
 In isolated-branches mode, a task that has started running keeps the workspace and concurrency slot assigned to it until its review is finished. `pause` and `kill` only stop it from working. They don't release what it holds, so other independent tasks don't start any sooner. For a task like this, the command output notes that it still keeps its workspace and slot. To let other tasks run first, let this task finish and then review it, or end it with `cdg task review cancel{:sh}` or `defer`. See [When a task isn't stopped at a gate](/docs/guides/review-tasks#not-at-gate).
-
-### Pausing or killing reports `Workflow startup billing is being committed`
-
-When a workflow's turn to run has just come and CodeDAG is deducting CodeDAG credits for it, `pause` and `kill` are temporarily rejected with this message. The window usually lasts only a few seconds, though on a poor network connection it can last up to about 3 minutes. Try again a little later.
 
 ## Related
 
