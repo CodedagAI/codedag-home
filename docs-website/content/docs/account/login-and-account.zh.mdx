@@ -1,6 +1,6 @@
 ---
 title: 登录与账号
-description: 使用 CodeDAG 为什么需要登录、怎样登录、登出和切换账号，以及 CodeDAG 服务会收到你的哪些数据。
+description: 使用 CodeDAG 为什么需要登录、怎样登录、退出登录和切换账号，以及 CodeDAG 服务会收到你的哪些数据。
 icon: KeyRound
 ---
 
@@ -49,19 +49,19 @@ cdg auth login
 
 失效之后，需要登录的命令会像第一次那样请你登录；排队中还没开始的工作流轮到执行时会停在 `on-hold`，重新登录后执行 `cdg dag recover <名字>{:sh}` 即可继续。
 
-## 登出、多台电脑与切换账号 [#sign-out]
+## 退出登录、多台电脑与切换账号 [#sign-out]
 
 ```bash title="Terminal"
 cdg auth logout
 ```
 
-登出只退出这台电脑上的 CLI 登录。CLI 与网页控制台（app.codedag.com）的登录互相独立：在网页上退出不会让 CLI 退出，CLI 登出也不影响网页和其他电脑。
+退出登录只结束这台电脑上的 CLI 登录。CLI 与网页控制台（app.codedag.com）的登录互相独立：在网页上退出登录不会让 CLI 退出，在 CLI 中退出登录也不影响网页和其他电脑。
 
 每台电脑都要各自登录一次，同一个账号的所有电脑共用一份额度。登录状态不能靠复制凭证在电脑之间共用：复制出去的凭证一旦被再次使用，这个账号在所有电脑上的 CLI 登录都会被作废，需要逐台重新登录。
 
-要换一个账号，运行 `cdg auth login{:sh}` 用另一个 Google 账号登录即可，不必先登出：新的登录成功后会替换这台电脑上原来的登录。浏览器里的网页控制台还登录着原来的账号时，登录会先显示确认页，在那里选 Use a different account，见[浏览器已经登录了网页控制台时](#confirm-account)。
+要换一个账号，运行 `cdg auth login{:sh}` 用另一个 Google 账号登录即可，不必先退出登录：新的登录成功后会替换这台电脑上原来的登录。浏览器里的网页控制台还登录着原来的账号时，登录会先显示确认页，在那里选 Use a different account，见[浏览器已经登录了网页控制台时](#confirm-account)。
 
-登出和切换账号都不影响已经开始执行的工作流。排队中还没开始的工作流，要等轮到执行时才使用这台电脑的登录状态：那时如果没有登录，或者登录的不是提交它的账号，它会停在 `on-hold`；重新登录或切回原账号后，执行 `cdg dag recover <名字>{:sh}` 即可继续。
+退出登录和切换账号都不影响已经开始执行的工作流。排队中还没开始的工作流，要等轮到执行时才使用这台电脑的登录状态：那时如果没有登录，或者登录的不是提交它的账号，它会停在 `on-hold`；重新登录或切回原账号后，执行 `cdg dag recover <名字>{:sh}` 即可继续。
 
 ## 你的数据边界 [#data-boundary]
 
@@ -73,7 +73,7 @@ cdg auth logout
 - 本次要执行的任务 ID；
 - CLI 版本、操作系统和处理器架构。
 
-工作流文件的内容和路径只用来计算这一次的额度，算完立即丢弃，CodeDAG 服务不保存。留在扣费记录里的只有任务 ID、CLI 版本、操作系统和处理器架构，以及文件内容的一段校验值，校验值无法还原出文件内容。
+工作流文件的内容和路径只用来计算这一次的额度，算完立即丢弃，CodeDAG 服务不保存。留在[额度消耗记录](/zh/docs/account/credits-and-subscription#check-usage)里的只有任务 ID、CLI 版本、操作系统和处理器架构，以及文件内容的一段校验值，校验值无法还原出文件内容。
 
 仓库里的代码和其他文件、任务的运行日志、任务 Agent 的会话内容与产出，都留在你的电脑上，不会发给 CodeDAG。任务执行时，Claude Code 或 Codex 会像你平时直接使用它们一样，把代码和上下文发给它们各自连接的模型服务；这部分数据不经过 CodeDAG，按对应服务的条款处理。
 
@@ -85,7 +85,7 @@ CodeDAG 会记录你所用 Google 账号的姓名、邮箱和头像，用来标�
 
 CodeDAG 服务暂时连不上时，不需要登录的命令和已经在执行的工作流通常照常工作；在已经登录的电脑上，`cdg init{:sh}` 也能照常初始化。受影响的是下面几项：
 
-- `cdg auth login{:sh}` 和 `cdg auth status{:sh}` 会失败。
+- `cdg auth login{:sh}` 和 `cdg auth status{:sh}` 会失败。不过连不上也可能是这台电脑自己的网络或代理的问题，先按[登录失败或反复要求登录](/zh/docs/troubleshooting/troubleshooting#sign-in-problems)排查。
 - `cdg dag submit{:sh}` 会失败，工作流不会进入队列，服务恢复后重新提交即可。
 - 排队中的工作流轮到执行时无法扣除额度，会停在 `on-hold`，原因显示为 `startup-gate-blocked`；服务恢复后执行 `cdg dag recover <名字>{:sh}`，它会扣除额度并开始执行。
 

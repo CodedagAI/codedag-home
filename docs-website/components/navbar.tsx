@@ -94,9 +94,7 @@ function NavEntry({
       appUrl={siteConfig.appUrl}
       locale={locale}
       secondaryAction={{ href: start.href, label: start.label, className: NAV_CTA_CLASS }}
-      renderAvatar={({ user, settingsUrl }) => (
-        <AccountMenu user={user} settingsUrl={settingsUrl} locale={locale} />
-      )}
+      renderAvatar={({ user }) => <AccountMenu user={user} locale={locale} />}
     />
   );
 }

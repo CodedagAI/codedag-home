@@ -250,13 +250,13 @@ cdg task review accept 1 -w feature
 cdg dag submit feature
 ```
 
-The downstream handling you choose when reviewing still applies. For the values, see [--downstream](#downstream). It decides whether the downstream tasks that depend on the reviewed task run this time and whether they're charged:
+The downstream handling you choose when reviewing still applies. For the values, see [--downstream](#downstream). It decides whether the downstream tasks that depend on the reviewed task run this time and whether credits are deducted for them:
 
 - **`accept`, or `cancel` or `defer` with `proceed`:** The downstream tasks run as usual and count toward this run.
 - **`cancel` or `defer` with `cascade`:** The downstream tasks get the same decision, so they don't run this time and use no credits.
-- **`cancel` or `defer` with `hold`:** The downstream tasks that depend directly on the reviewed task are put on hold. They don't have a decision yet, so they count toward this run and are charged as usual. After you submit, they stop at `on-hold` with the reason `downstream-hold`. To release them, run `cdg task recover <task-id>... -w <workflow>{:sh}`, and they run as part of the same run.
+- **`cancel` or `defer` with `hold`:** The downstream tasks that depend directly on the reviewed task are put on hold. They don't have a decision yet, so they count toward this run, and credits are deducted for them as usual. After you submit, they stop at `on-hold` with the reason `downstream-hold`. To release them, run `cdg task recover <task-id>... -w <workflow>{:sh}`, and they run as part of the same run.
 
-Once you've submitted, which tasks this run executes and how many credits it costs no longer change. Editing the workflow file afterward doesn't affect it, and if you review its tasks while it's in the queue, the charge is still based on what was submitted.
+Once you've submitted, which tasks this run executes and how many credits it costs no longer change. Editing the workflow file afterward doesn't affect it, and if you review its tasks while it's in the queue, credits are still deducted based on what was submitted.
 
 The result of submitting differs from the above in two cases:
 

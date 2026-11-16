@@ -14,7 +14,9 @@ cdg auth login [--no-browser]
 
 This command signs you in to CodeDAG with a Google account in your browser and saves the sign-in on this computer. The first time you sign in with a given Google account, a CodeDAG account is created for it at the same time, so you don't need to register beforehand.
 
-Sign-in has to be completed in a browser on the same computer that runs the command, so you can't sign in from a remote SSH session, a container, or a server without a graphical interface. See [Without a desktop browser](/docs/account/login-and-account#no-browser). After it opens the browser or prints the sign-in URL, the command waits up to 5 minutes.
+Sign-in has to be completed in a browser on the same computer that runs the command, so you can't sign in from a remote SSH session, a container, or a server without a graphical interface. See [Without a desktop browser](/docs/account/login-and-account#no-browser).
+
+When you run it, your browser opens the sign-in page. Finish signing in within 5 minutes; if you run out of time, run the command again. If the command exits with an error before the browser opens, this computer can't reach CodeDAG. See [Sign-in fails or you keep being asked to sign in](/docs/troubleshooting/troubleshooting#sign-in-problems).
 
 If you run it when you're already signed in, it goes through sign-in again. On success, the new sign-in replaces the existing one on this computer. If the new sign-in doesn't complete, the existing one stays as it is.
 
@@ -24,7 +26,7 @@ You don't normally need to run this command yourself. When `cdg init{:sh}`, `cdg
 
 `cdg auth login --no-browser{:sh}` just prints the sign-in URL and waits, without opening a browser. You can open the URL in any browser on this computer, and the CLI signs in to the account you confirm in that browser. It's useful in two situations:
 
-- **Automated sign-in:** When a script or an agent operates the browser to complete the sign-in, it can take the URL straight from the command's output and open it in the browser it operates.
+- **Automated sign-in:** When a script or an agent operates the browser to complete the sign-in, it can take the URL from the command's standard output and open it in the browser it operates.
 - **Several CodeDAG accounts signed in to different browsers:** Open the URL directly in the browser that's signed in to the account you want, without going through the default browser.
 
 You still have to open the URL on the computer running the CLI. See [Without a desktop browser](/docs/account/login-and-account#no-browser).
@@ -67,5 +69,5 @@ Signing out and switching accounts don't affect workflows that have already star
 ## Related
 
 - [Sign-In and Account](/docs/account/login-and-account): Which commands require sign-in, how long you stay signed in, and what data the CodeDAG service receives.
-- [Credits, Subscription, and Charges](/docs/account/credits-and-subscription): Free credits, subscriptions, and when credits are charged.
+- [Credits and Subscription](/docs/account/credits-and-subscription): Free credits, subscriptions, and when credits are deducted.
 - [Troubleshooting](/docs/troubleshooting/troubleshooting#sign-in-problems): Find the cause by symptom when sign-in fails, when you're asked to sign in again and again, or when you end up in the wrong account after signing in.

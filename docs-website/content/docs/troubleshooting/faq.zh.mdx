@@ -156,9 +156,9 @@ CodeDAG 不会替任务指定权限模式，任务 Agent 沿用它自己的配�
 ## 账号与额度
 
 <Accordions type="single">
-<Accordion title="什么时候扣额度？提交成功后额度为什么没变？" id="when-credits-are-charged">
+<Accordion title="什么时候扣额度？提交成功后额度为什么没变？" id="when-credits-are-deducted">
 
-额度在工作流排到队首、真正开始执行之前扣除，按任务数一次性扣，每个任务 1 点。提交时 CodeDAG 只检查你是否已登录、剩余额度是否足够，并不扣除；排队期间也不扣。所以前面还有工作流在执行时，提交成功后额度暂时不变，要等轮到它开始执行才会减少。完整规则见[什么时候扣除额度](/zh/docs/account/credits-and-subscription#when-charged)。
+额度在工作流排到队首、真正开始执行之前扣除，按任务数一次性扣，每个任务 1 点。提交时 CodeDAG 只检查你是否已登录、剩余额度是否足够，并不扣除；排队期间也不扣。所以前面还有工作流在执行时，提交成功后额度暂时不变，要等轮到它开始执行才会减少。完整规则见[什么时候扣除额度](/zh/docs/account/credits-and-subscription#when-deducted)。
 
 </Accordion>
 <Accordion title="CodeDAG 会上传我的代码吗？" id="data-uploaded">
@@ -168,7 +168,7 @@ CodeDAG 不会替任务指定权限模式，任务 Agent 沿用它自己的配�
 </Accordion>
 <Accordion title="在网页上退出登录后，CLI 为什么还能用？" id="web-sign-out">
 
-因为网页控制台和 CLI 的登录互相独立。在网页上退出只结束浏览器里的会话，CLI 仍然保持登录；要退出这台电脑上的 CLI，运行 `cdg auth logout{:sh}`。见[登出、多台电脑与切换账号](/zh/docs/account/login-and-account#sign-out)。
+因为网页控制台和 CLI 的登录互相独立。在网页上退出只结束浏览器里的会话，CLI 仍然保持登录；要退出这台电脑上的 CLI，运行 `cdg auth logout{:sh}`。见[退出登录、多台电脑与切换账号](/zh/docs/account/login-and-account#sign-out)。
 
 </Accordion>
 <Accordion title="没有浏览器怎么登录？" id="sign-in-without-browser">

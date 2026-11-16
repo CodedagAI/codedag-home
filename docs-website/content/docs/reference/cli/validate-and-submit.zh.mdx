@@ -36,7 +36,7 @@ cdg dag submit [选项] <工作流...>
 
 `cdg dag submit{:sh}` 把工作流排进这个项目的队列。它先重新校验工作流文件，再确认工作流可以入队，全部通过才提交；入队之后命令立即返回，工作流在后台等待执行。工作流的写法与 `cdg dag validate{:sh}` 相同，至少写一个，不能省略；一次写多个时，见[一次提交多个工作流](#multiple)。
 
-提交需要登录 CodeDAG 账号，还没登录时，命令会先带你完成登录，见[为什么需要登录](/zh/docs/account/login-and-account#why-sign-in)。提交时只核对额度是否够用，并不扣除；额度在工作流排到队首、开始执行之前按任务数扣除，每个任务 1 点，见[什么时候扣除额度](/zh/docs/account/credits-and-subscription#when-charged)。提交被拒绝时，按故障排除中[提交被拒绝](/zh/docs/troubleshooting/troubleshooting#submit-rejected)一节对应的提示处理。
+提交需要登录 CodeDAG 账号，还没登录时，命令会先带你完成登录，见[为什么需要登录](/zh/docs/account/login-and-account#why-sign-in)。提交时只核对额度是否够用，并不扣除；额度在工作流排到队首、开始执行之前按任务数扣除，每个任务 1 点，见[什么时候扣除额度](/zh/docs/account/credits-and-subscription#when-deducted)。提交被拒绝时，按故障排除中[提交被拒绝](/zh/docs/troubleshooting/troubleshooting#submit-rejected)一节对应的提示处理。
 
 一个工作流能不能提交，取决于它现在所处的[阶段](/zh/docs/concepts/how-it-works#phases)：只有处在计划中（`planning`）的工作流可以提交。
 

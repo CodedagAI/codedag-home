@@ -282,6 +282,8 @@ function useLanguageSwitch() {
 }
 
 // Language Toggle Component
+// 这里的按钮与下拉是两站语言切换的基准（./shared-nav/README.md 第 3 项）：
+// 改它们的样子时，App 站的语言按钮一起改
 function LanguageToggle({
   children,
   className,
@@ -522,6 +524,7 @@ export function CustomHeader({
   );
 }
 
+// 顶栏的高度、底色、内容宽度与标识的位置，两站保持一致（./shared-nav/README.md 第 1、2 项）
 function HeaderNavigationMenu(props: ComponentProps<'div'>) {
   const [value, setValue] = useState('');
 

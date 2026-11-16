@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { LayoutDashboard, LogOut, Settings } from 'lucide-react';
+import { LayoutDashboard, LogOut } from 'lucide-react';
 import { AuthAvatar, type AuthAreaUser } from './shared-nav/auth-area';
 import { getSharedNavTranslations } from './shared-nav/nav-translations';
 import { useHoverMenu } from './shared-nav/use-hover-menu';
@@ -13,8 +13,10 @@ const focusRing =
   'outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand';
 
 /**
- * 公开站登录后的头像菜单（beta、live 模式），与 App 站控制台的头像菜单同一套行为：
- * 鼠标悬停即展开，点击、Enter 也能展开，方向键选项；菜单项是控制台、账号设置、退出登录。
+ * 公开站登录后的头像菜单（beta、live 模式）。头像的画法、开合方式与用词和 App 站的
+ * 头像菜单相同（约定见 ./shared-nav/README.md 第 5 项）：鼠标悬停即展开，点击、
+ * Enter 也能展开，方向键选项。菜单项通向 App 站：控制台（App 站的首页，登录后落到
+ * 用量页），以及退出登录。
  *
  * 退出不在公开站上直接调 App 的接口（会话 Cookie 属于 App 站，跨站调用要放开 CORS 与
  * 可信来源），而是整页进入 App 的 /logout 页：那里在同站内退出，再按 return_to 回到当前页。
@@ -22,11 +24,9 @@ const focusRing =
  */
 export function AccountMenu({
   user,
-  settingsUrl,
   locale,
 }: {
   user: AuthAreaUser;
-  settingsUrl: string;
   locale: string;
 }) {
   const t = getSharedNavTranslations(locale);
@@ -66,11 +66,8 @@ export function AccountMenu({
             </span>
           </DropdownMenu.Label>
           <DropdownMenu.Separator className="my-1 h-px bg-fd-border" />
-          <MenuLink href={`${appUrl}/dashboard`} icon={LayoutDashboard}>
+          <MenuLink href={`${appUrl}/`} icon={LayoutDashboard}>
             {t.dashboard}
-          </MenuLink>
-          <MenuLink href={settingsUrl} icon={Settings}>
-            {t.settings}
           </MenuLink>
           <DropdownMenu.Separator className="my-1 h-px bg-fd-border" />
           <MenuLink href={signOutHref} icon={LogOut}>

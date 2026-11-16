@@ -25,8 +25,8 @@ CodeDAG runs on your computer. The code in your repository, your run logs and yo
 ## About this repository
 
 > [!NOTE]
-> This repository holds the source of the [codedag.com](https://codedag.com) website and documentation. The CodeDAG CLI isn't developed here, but you can report problems with it here.
+> This repository holds the source of the [codedag.com](https://codedag.com) website and documentation. The CodeDAG CLI isn't developed here, but you can report problems with it here. The CLI's executables are published in this repository's [Releases](https://github.com/CodedagAI/codedag-home/releases). The CLI is proprietary software, and its source code isn't public.
 
 ## License
 
-The documentation, policies and other content under `docs-website/content/` are licensed under [CC BY 4.0](./LICENSE). The rest of this repository, including the website's code, is licensed under the [MIT License](./LICENSE-CODE). The CodeDAG name and logo aren't covered by either license, and third-party files, such as the fonts under `docs-website/public/fonts/`, keep their own licenses.
+The documentation, policies and other content under `docs-website/content/` are licensed under [CC BY 4.0](./LICENSE). The rest of this repository, including the website's code, is licensed under the [MIT License](./LICENSE-CODE). Neither license covers the CodeDAG CLI executables in Releases, which are licensed under the [Terms of Service](https://codedag.com/terms#intellectual-property), or the CodeDAG name and logo. Third-party files, such as the fonts under `docs-website/public/fonts/`, keep their own licenses.

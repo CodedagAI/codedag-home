@@ -73,7 +73,7 @@ Apart from the account information exchanged when you sign in or check your acco
 - The IDs of the tasks to run this time
 - The CLI version, operating system, and processor architecture
 
-The workflow file's contents and path are used only to calculate the credits for this run. They're discarded as soon as the calculation is done, and the CodeDAG service doesn't store them. The charge record keeps only the task IDs, CLI version, operating system, processor architecture, and a checksum of the file contents. The file contents can't be recovered from the checksum.
+The workflow file's contents and path are used only to calculate the credits for this run. They're discarded as soon as the calculation is done, and the CodeDAG service doesn't store them. Your [usage history](/docs/account/credits-and-subscription#check-usage) keeps only the task IDs, CLI version, operating system, processor architecture, and a checksum of the file contents. The file contents can't be recovered from the checksum.
 
 The code and other files in your repository, the tasks' run logs, and the task agents' session content and output all stay on your computer and aren't sent to CodeDAG. While a task runs, Claude Code or Codex sends code and context to the model service it's connected to, just as it does when you use it directly. That data doesn't pass through CodeDAG, and it's handled under that service's terms.
 
@@ -85,7 +85,7 @@ CodeDAG records the name, email address, and profile picture of the Google accou
 
 When the CodeDAG service is temporarily unreachable, commands that don't require sign-in and workflows that are already running usually keep working as normal. On a computer that's already signed in, `cdg init{:sh}` also initializes a project as usual. The following are affected:
 
-- `cdg auth login{:sh}` and `cdg auth status{:sh}` fail.
+- `cdg auth login{:sh}` and `cdg auth status{:sh}` fail. The problem may also be on this computer's side, such as its network or proxy, so check [Sign-in fails or you keep being asked to sign in](/docs/troubleshooting/troubleshooting#sign-in-problems) first.
 - `cdg dag submit{:sh}` fails, and the workflow doesn't enter the queue. Submit it again once the service is back.
 - When a queued workflow's turn comes, its credits can't be deducted, so it stops at `on-hold` with the reason shown as `startup-gate-blocked`. Once the service is back, run `cdg dag recover <name>{:sh}`. The credits are then deducted and the workflow starts running.
 

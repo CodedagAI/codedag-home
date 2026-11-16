@@ -1,5 +1,5 @@
 ---
-title: Credits, Subscription, and Charges
+title: Credits and Subscription
 description: How you get CodeDAG credits, when they're deducted, what to do when you run short, and the subscription's pricing, taxes, and management rules.
 icon: CreditCard
 ---
@@ -40,17 +40,17 @@ Payments aren't available yet in some countries and regions. If you choose one o
 
 Once you have a subscription, the Billing page shows your current billing region, and you can't change it there yourself. To change it, email us at <Email user="hi" />.
 
-## When credits are charged [#when-charged]
+## When credits are deducted [#when-deducted]
 
 Credits are deducted at exactly one moment: when a workflow reaches the head of the queue, right before it actually starts running. The full amount is deducted at once based on the number of tasks this run will execute, at 1 credit per task. Nothing is deducted when you submit or while the workflow waits in the queue, and nothing more is deducted after it starts running.
 
 export const chargeTimelineChart = `%%{init: {"flowchart": {"padding": 10, "nodeSpacing": 30, "rankSpacing": 28}}}%%
 flowchart LR
-  submit["Submit<br/>credits checked,<br/>not charged"] --> queue["Wait in<br/>the queue<br/>not charged"]
+  submit["Submit<br/>credits checked,<br/>not deducted"] --> queue["Wait in<br/>the queue<br/>not deducted"]
   queue --> head{"Its turn<br/>to start<br/>running"}
-  head -->|Enough credits| charge["Charged by<br/>task count<br/>1 credit per task"]
-  charge --> run["Execution<br/>and review<br/>no further charge"]
-  head -->|Not enough credits<br/>or no subscription| hold["Stops at on-hold<br/>not charged"]
+  head -->|Enough credits| charge["Deducted by<br/>task count<br/>1 credit per task"]
+  charge --> run["Execution<br/>and review<br/>not deducted again"]
+  head -->|Not enough credits<br/>or no subscription| hold["Stops at on-hold<br/>not deducted"]
   hold -->|cdg dag recover after<br/>you restore credits| head`;
 
 <Tabs items={['Diagram', 'Code']}>
@@ -69,14 +69,14 @@ flowchart LR
   </Tab>
 </Tabs>
 
-At submission, `cdg dag submit{:sh}` only checks whether your remaining credits are enough. If you submit several workflows at once, it looks at the total number of tasks they'll execute, and if you don't have enough, none of them is submitted. The check neither deducts credits nor reserves them for the workflow. So a workflow that's canceled before it starts running costs nothing. But other workflows may use up the credits while it waits, including workflows the same account runs in other projects or on other computers, so you may still come up short when its turn arrives. For what happens then, see [Not enough credits or no subscription](#insufficient-credits).
+At submission, `cdg dag submit{:sh}` only checks whether your remaining credits are enough. If you submit several workflows at once, it looks at the total number of tasks they'll execute, and if you don't have enough, none of them is submitted. The check neither deducts credits nor reserves them for the workflow. So if a workflow is canceled before it starts running, no credits are deducted. But other workflows may use up the credits while it waits, including workflows the same account runs in other projects or on other computers, so you may still come up short when its turn arrives. For what happens then, see [Not enough credits or no subscription](#insufficient-credits).
 
-The amount is fixed at submission: you're charged 1 credit for each task in the workflow that's set to run at that point. Tasks you reviewed with `cdg task review{:sh}` before submitting keep their review results, don't run this time, and aren't counted. See [Review tasks before you submit](/docs/reference/cli/review#unsubmitted-task-reviews). Once the amount is set, it doesn't depend on how many tasks actually run: tasks that are canceled partway through, and downstream tasks that never run because an upstream task was canceled, are already counted. The flip side is that a run is paid in full the moment it starts. Pausing and unpausing, recovering after a kill, and requesting changes or a rework during review don't cost anything more. A run that's underway also doesn't stop if your credits run out or your subscription expires.
+The amount is fixed at submission: 1 credit is deducted for each task in the workflow that's set to run at that point. Tasks you reviewed with `cdg task review{:sh}` before submitting keep their review results, don't run this time, and aren't counted. See [Review tasks before you submit](/docs/reference/cli/review#unsubmitted-task-reviews). Once the amount is set, it doesn't depend on how many tasks actually run: tasks that are canceled partway through, and downstream tasks that never run because an upstream task was canceled, are already counted. The flip side is that a run's credits are deducted in full the moment it starts. Pausing and unpausing, recovering after a kill, and requesting changes or a rework during review don't use any more credits. A run that's underway also doesn't stop if your credits run out or your subscription expires.
 
-Running the same workflow again is a new run, and it's charged again. If you [clear the review and resubmit](/docs/reference/cli/review#clear-and-resubmit) a workflow whose review is already finished, credits are deducted by task count once more when it starts running. If you write the unfinished tasks into a separate workflow and continue from there, you're charged for the number of tasks in that new workflow.
+Running the same workflow again is a new run, and it uses credits again. If you [clear the review and resubmit](/docs/reference/cli/review#clear-and-resubmit) a workflow whose review is already finished, credits are deducted by task count once more when it starts running. If you write the unfinished tasks into a separate workflow and continue from there, credits are deducted for the number of tasks in that new workflow.
 
 <Callout type="warn">
-Credits that have been deducted aren't refunded automatically. Once a workflow starts running, the deducted credits aren't returned, whether a task fails, you cancel it, or the result isn't what you hoped for. If a problem in CodeDAG itself kept the workflow from running properly, contact us as described in [Collect information to get help](/docs/troubleshooting/troubleshooting#get-help).
+Credits that have been deducted aren't returned automatically. Once a workflow starts running, the deducted credits aren't returned, whether a task fails, you cancel it, or the result isn't what you hoped for. If a problem in CodeDAG itself kept the workflow from running properly, contact us as described in [Collect information to get help](/docs/troubleshooting/troubleshooting#get-help).
 </Callout>
 
 ## Not enough credits or no subscription [#insufficient-credits]
@@ -87,7 +87,7 @@ When a submission is rejected, the terminal explains why. When a queued workflow
 
 | Situation | How to restore your available credits |
 |---|---|
-| Your subscription's credits for the current period are used up | Wait until the reset time shown in the message, or sign up for another account: a new account has its own credits and subscription, which aren't combined with your existing account. There are currently no credit top-up packs to buy, and switching between monthly and yearly billing doesn't give you new credits. |
+| Your subscription's credits for the current period are used up | Wait until the reset time shown in the message. If your monthly credits often aren't enough, you can subscribe again with [another account](/docs/reference/cli/auth#switch-account): each account has its own subscription and credits, which aren't combined with your existing account. There are currently no credit top-up packs to buy, and switching between monthly and yearly billing doesn't give you new credits. |
 | Your subscription is set to cancel at the end of the period, and the credits for its last period are used up | There's no next reset in this case. Restore the subscription on the Billing page. Your credits reset only after the current period ends and the subscription renews. |
 | Your subscription has ended or a renewal payment failed, and the account has neither an active subscription nor any available free credits | Subscribe on the Billing page. If a renewal payment failed, update your payment method and complete the payment. |
 | Your free credits are used up or have expired | Subscribe on the Billing page. If it's your private beta credits for the month that are used up, you can also wait for the reset. For the details, see [After your free credits run out or expire](#free-credits-used-up). |
@@ -98,19 +98,19 @@ After you restore your available credits, a queued workflow that was held back d
 cdg dag recover <name>
 ```
 
-This makes the workflow try to start running again, and credits are deducted only at that point. No matter how many times you recover the same run, it's charged at most once. A workflow that's held back stays at the head of the queue, and the workflows queued behind it wait too, so remember to recover it once you've sorted things out.
+This makes the workflow try to start running again, and credits are deducted only at that point. No matter how many times you recover the same run, they're deducted at most once. A workflow that's held back stays at the head of the queue, and the workflows queued behind it wait too, so remember to recover it once you've sorted things out.
 
 ## Check credits and usage [#check-usage]
 
-On the command line, use `cdg auth status{:sh}` to check the current account's credits. In the web console ([app.codedag.com](https://app.codedag.com)), you can view usage details and manage your subscription. Both show the same data.
+On the command line, use `cdg auth status{:sh}` to check the current account's credits. In the web console ([app.codedag.com](https://app.codedag.com)), you can view your usage history and manage your subscription. Both show the same data.
 
 ```bash title="Terminal"
 cdg auth status
 ```
 
-Both show where your credits come from, how many you've used, how many remain, and when those credits reset or expire. All of these times are in UTC. If the account has neither an active subscription nor available free credits, and its free credits have already ended, both places show when the free credits ended. If the free credits were rolled into a subscription when you subscribed, that time is when they were rolled in, not the date the free period would originally have expired.
+Both show where your credits come from, how many you've used, how many remain, and when those credits reset or expire. The command line shows these times in UTC, and the web console shows them in your computer's local time. If the account has neither an active subscription nor available free credits, and its free credits have already ended, both places show when the free credits ended. If the free credits were rolled into a subscription when you subscribed, that time is when they were rolled in, not the date the free period would originally have expired.
 
-The Usage page of the web console lists the current period's usage and the 20 most recent charge records. Each record corresponds to one workflow that started running, and it lists the time, the task count, and the credits deducted. The task count doesn't include tasks that were reviewed before submission. The workflow column shows the first 12 characters of the hash of the workflow file's contents at submission, not the file name.
+The Usage page of the web console shows the current period's usage and lists your full usage history. Each entry corresponds to one workflow that started running. The credits deducted equal the number of tasks that run was going to execute, which doesn't include tasks that were reviewed before submission. The **Workflow content hash** column shows the first 12 characters of the hash of the workflow file's contents at submission, not the file name.
 
 ## Subscription details [#subscription-details]
 
@@ -130,7 +130,7 @@ If you ask within 14 days of the first payment of your first subscription or of 
 
 ### Failed renewal payments
 
-When a renewal payment fails, the subscription is temporarily unavailable, and the console shows the subscription status as `Past due`. During this time, CodeDAG treats the account as having no subscription: submissions are rejected, and queued workflows stop at `on-hold` when they try to start running. Update your payment method in the customer portal. Once the payment succeeds, the subscription is available again, and you can use `cdg dag recover{:sh}` to continue the workflows that were held back.
+When a renewal payment fails, the subscription is temporarily unavailable, and the Billing page of the web console shows the subscription status as **Past due**. During this time, CodeDAG treats the account as having no subscription: submissions are rejected, and queued workflows stop at `on-hold` when they try to start running. Select **Update payment method** on the Billing page to open the Stripe customer portal, and update your payment method there. Once the payment succeeds, the subscription is available again, and you can use `cdg dag recover{:sh}` to continue the workflows that were held back.
 
 ### Short delay after payment
 
@@ -138,7 +138,7 @@ After you pay, you're taken back to the Billing page. The subscription usually t
 
 ### Invoices
 
-You can view payment records and invoices in the Stripe customer portal.
+The Billing page of the web console lists this account's most recent payments. Select **View** on a payment to open its Stripe invoice page, where you can download the invoice and the receipt. For earlier payments, go to the Stripe customer portal, which you open with **Manage subscription** on the Billing page.
 
 ## Known limitations [#limitations]
 
@@ -146,5 +146,3 @@ You can view payment records and invoices in the Stripe customer portal.
 - **No shared team credits.** Credits belong to a single account, and there's no credit pool shared by a team or organization. When you use the same account on several computers, they share that one account's own credits.
 - **Payments aren't available in some countries and regions.** Accounts there can still use their free credits as usual. See [Tax and billing regions](#tax-and-regions).
 - **Only credit and debit cards are accepted.** Wallets such as Apple Pay and Google Pay aren't supported yet.
-- **The console is in English only.** Dates are shown in UTC.
-- **The Usage page shows only the 20 most recent charge records.** Usage records can't currently be exported.

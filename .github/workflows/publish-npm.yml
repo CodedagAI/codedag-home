@@ -1,0 +1,725 @@
+# npm 交付工作流：把本仓库一个已发布的不可变 Release 上经批准的 npm 包发布到 npm，或修改它们的 dist-tag。
+# 只接受发布 App 发起的 workflow_dispatch；不检出代码、不构建、不重新打包。verify job 核对调用者、公开交付清单的
+# 摘要、每个包的摘要、文件列表与元数据；npm job 在环境 npm 批准之后从同一个 Release 重新下载并重做核对，再写入。
+# run 脚本中不出现表达式，输入一律经环境变量传入；日志只输出包名、版本、摘要与 dist-tag。
+# 临时令牌 NPM_FIRST_PUBLISH_TOKEN 只给 publish 与 dist-tag 的写入步骤；verify-dist-tag 不拿令牌，只能经 OIDC 写入。
+name: publish-npm
+run-name: publish-npm ${{ inputs.action }} ${{ inputs.version }} ${{ inputs.channel }} ${{ inputs.manifest_sha256 }} [${{ inputs.call_id }}]
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to deliver (X.Y.Z); the release v<version> must be published"
+        required: true
+        type: string
+      channel:
+        description: "npm dist-tag to set: next or latest (ignored by verify-dist-tag)"
+        required: true
+        type: string
+      action:
+        description: "publish, dist-tag or verify-dist-tag"
+        required: true
+        type: string
+      manifest_sha256:
+        description: "SHA-256 of delivery-manifest.json on the release"
+        required: true
+        type: string
+      call_id:
+        description: "Call identifier (16 lowercase hex characters)"
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: npm-registry-writes
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  NPM_REGISTRY: https://registry.npmjs.org/
+  NPM_VERSION: "11.21.2"
+  NPM_INTEGRITY: sha512-7HPApk+AflMUavSseL1Pm6CnYqMIHk53x+KmuhqmTDqPkjPMgxIpTPcTqsE91EKNw4gFBJV9fnXiSdGm1DXq9A==
+  RELEASE_APP_BOT: "codedag-release[bot]"
+  PACKAGE_REPOSITORY_URL: git+https://github.com/CodedagAI/codedag-home.git
+  MAIN_PACKAGE_FILES: package/LICENSE.txt package/README.md package/bin/codedag package/package.json
+  PLATFORM_PACKAGE_FILES: package/LICENSE.txt package/README.md package/THIRD_PARTY_NOTICES.txt package/bin/codedag package/package.json
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env: &delivery-inputs
+      DELIVERY_VERSION: ${{ inputs.version }}
+      DELIVERY_CHANNEL: ${{ inputs.channel }}
+      DELIVERY_ACTION: ${{ inputs.action }}
+      DELIVERY_MANIFEST_SHA256: ${{ inputs.manifest_sha256 }}
+      DELIVERY_CALL_ID: ${{ inputs.call_id }}
+    outputs:
+      packages: ${{ steps.check.outputs.packages }}
+      manifest_sha256: ${{ steps.check.outputs.manifest_sha256 }}
+    steps:
+      - name: Check the caller and the inputs
+        run: &check-caller |
+          set -euo pipefail
+          fail() {
+            echo "::error::$1"
+            exit 1
+          }
+          [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] || fail "This workflow only accepts workflow_dispatch."
+          [ "$GITHUB_REF" = "refs/heads/main" ] || fail "This workflow only runs on refs/heads/main."
+          [ "$GITHUB_ACTOR" = "$RELEASE_APP_BOT" ] || fail "The run was not started by $RELEASE_APP_BOT."
+          [ "$GITHUB_TRIGGERING_ACTOR" = "$RELEASE_APP_BOT" ] || fail "The run was not triggered by $RELEASE_APP_BOT; re-run it through the release workflow."
+          version_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          [[ "$DELIVERY_VERSION" =~ $version_pattern ]] || fail "version must be X.Y.Z."
+          [[ "$DELIVERY_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] || fail "manifest_sha256 must be 64 lowercase hex characters."
+          [[ "$DELIVERY_CALL_ID" =~ ^[0-9a-f]{16}$ ]] || fail "call_id must be 16 lowercase hex characters."
+          case "$DELIVERY_ACTION" in
+            publish)
+              [ "$DELIVERY_CHANNEL" = "next" ] || fail "publish only delivers to the next channel." ;;
+            dist-tag)
+              case "$DELIVERY_CHANNEL" in
+                next | latest) ;;
+                *) fail "channel must be next or latest." ;;
+              esac ;;
+            verify-dist-tag) ;;
+            *) fail "action must be publish, dist-tag or verify-dist-tag." ;;
+          esac
+          echo "Call $DELIVERY_CALL_ID: $DELIVERY_ACTION $DELIVERY_VERSION (channel $DELIVERY_CHANNEL)"
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+
+      - name: Download and check the approved packages
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: &check-packages |
+          set -euo pipefail
+          node - <<'EOF'
+          const crypto = require('crypto');
+          const fs = require('fs');
+          const path = require('path');
+          const zlib = require('zlib');
+
+          const env = process.env;
+          const version = env.DELIVERY_VERSION;
+          const action = env.DELIVERY_ACTION;
+          const registry = env.NPM_REGISTRY;
+          const repository = env.GITHUB_REPOSITORY;
+          const workDir = path.join(env.RUNNER_TEMP, 'publish-npm');
+          const packagesDir = path.join(workDir, 'packages');
+          const MAIN = 'codedag';
+          const PLATFORM_PREFIX = '@codedag/cli-';
+          const expectedFiles = {
+            main: env.MAIN_PACKAGE_FILES.split(' ').sort(),
+            platform: env.PLATFORM_PACKAGE_FILES.split(' ').sort(),
+          };
+
+          const fail = (message) => {
+            throw new Error(message);
+          };
+          const sha256 = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex');
+          const integrityOf = (buffer) => `sha512-${crypto.createHash('sha512').update(buffer).digest('base64')}`;
+          const sameList = (a, b) => a.length === b.length && a.every((item, index) => item === b[index]);
+
+          async function github(apiPath, accept) {
+            const response = await fetch(`${env.GITHUB_API_URL}${apiPath}`, {
+              headers: {
+                accept: accept || 'application/vnd.github+json',
+                authorization: `Bearer ${env.GITHUB_TOKEN}`,
+                'user-agent': 'publish-npm',
+                'x-github-api-version': '2022-11-28',
+              },
+            });
+            if (!response.ok) {
+              fail(`GET ${apiPath} returned HTTP ${response.status}.`);
+            }
+            return accept ? Buffer.from(await response.arrayBuffer()) : response.json();
+          }
+
+          async function registryDocument(name) {
+            const response = await fetch(`${registry}${name.replace('/', '%2f')}`, {
+              headers: { accept: 'application/json', 'cache-control': 'no-cache' },
+            });
+            if (response.status === 404) {
+              return null;
+            }
+            if (!response.ok) {
+              fail(`Reading ${name} from the registry returned HTTP ${response.status}.`);
+            }
+            return response.json();
+          }
+
+          /** 只接受普通文件的 tar；拒绝绝对路径、`..`、链接、目录与其他条目 */
+          function readTgz(buffer, label) {
+            const tar = zlib.gunzipSync(buffer);
+            const files = new Map();
+            let offset = 0;
+            while (offset + 512 <= tar.length) {
+              const header = tar.subarray(offset, offset + 512);
+              if (header.every((byte) => byte === 0)) {
+                break;
+              }
+              const field = (start, length) =>
+                header.subarray(start, start + length).toString('utf8').replace(/\0[\s\S]*$/, '');
+              let checksum = 0;
+              header.forEach((byte, index) => {
+                checksum += index >= 148 && index < 156 ? 32 : byte;
+              });
+              if (checksum !== parseInt(field(148, 8).trim(), 8)) {
+                fail(`${label}: a tar header has a bad checksum.`);
+              }
+              const name = field(0, 100);
+              const prefix = field(345, 155);
+              const entryPath = prefix ? `${prefix}/${name}` : name;
+              const type = String.fromCharCode(header[156]);
+              const size = parseInt(field(124, 12).trim() || '0', 8);
+              if (type !== '0' && type !== '\0') {
+                fail(`${label}: ${entryPath} is not a regular file.`);
+              }
+              if (entryPath.startsWith('/') || entryPath.split('/').some((part) => ['', '.', '..'].includes(part))) {
+                fail(`${label}: ${entryPath} is not a safe relative path.`);
+              }
+              if (files.has(entryPath)) {
+                fail(`${label}: ${entryPath} appears twice.`);
+              }
+              const start = offset + 512;
+              if (start + size > tar.length) {
+                fail(`${label}: ${entryPath} is truncated.`);
+              }
+              files.set(entryPath, {
+                mode: parseInt(field(100, 8).trim() || '0', 8),
+                content: tar.subarray(start, start + size),
+              });
+              offset = start + Math.ceil(size / 512) * 512;
+            }
+            return files;
+          }
+
+          (async () => {
+            const release = await github(`/repos/${repository}/releases/tags/v${version}`);
+            if (release.draft !== false) {
+              fail(`The release v${version} is not published.`);
+            }
+            if (release.immutable !== true) {
+              fail(`The release v${version} is not immutable.`);
+            }
+            const assets = await github(`/repos/${repository}/releases/${release.id}/assets?per_page=100`);
+            const download = async (name) => {
+              const asset = assets.find((item) => item.name === name);
+              if (!asset) {
+                fail(`The release v${version} has no asset ${name}.`);
+              }
+              if (asset.state !== 'uploaded') {
+                fail(`The asset ${name} is in state ${asset.state}.`);
+              }
+              return github(`/repos/${repository}/releases/assets/${asset.id}`, 'application/octet-stream');
+            };
+
+            const manifestBytes = await download('delivery-manifest.json');
+            const manifestSha256 = sha256(manifestBytes);
+            if (manifestSha256 !== env.DELIVERY_MANIFEST_SHA256) {
+              fail(`delivery-manifest.json has SHA-256 ${manifestSha256}, expected ${env.DELIVERY_MANIFEST_SHA256}.`);
+            }
+            const manifest = JSON.parse(manifestBytes.toString('utf8'));
+            if (manifest.schema !== 1 || manifest.version !== version) {
+              fail(`delivery-manifest.json is not a schema 1 manifest for ${version}.`);
+            }
+            const targets = Object.keys(manifest.platforms || {});
+            if (targets.length === 0 || targets.some((target) => !/^(darwin|linux)-(arm64|x64)$/.test(target))) {
+              fail('delivery-manifest.json lists unknown platforms.');
+            }
+            const entries = Array.isArray(manifest.npm) ? manifest.npm : fail('delivery-manifest.json has no npm list.');
+            const expectedNames = [...targets.map((target) => `${PLATFORM_PREFIX}${target}`), MAIN].sort();
+            if (!sameList(entries.map((entry) => entry.name).sort(), expectedNames)) {
+              fail(`delivery-manifest.json lists the packages ${entries.map((entry) => entry.name).join(', ')}.`);
+            }
+            // 平台包在前、主包在后
+            const ordered = [...entries.filter((entry) => entry.name !== MAIN), entries.find((entry) => entry.name === MAIN)];
+            for (const entry of ordered) {
+              const kind = entry.name === MAIN ? 'main' : 'platform';
+              const asset = kind === 'main' ? 'npm-codedag.tgz' : `npm-codedag-cli-${entry.name.slice(PLATFORM_PREFIX.length)}.tgz`;
+              const listed = Array.isArray(entry.files) ? [...entry.files].sort() : [];
+              if (
+                entry.version !== version ||
+                entry.asset !== asset ||
+                !/^[0-9a-f]{64}$/.test(entry.sha256) ||
+                !/^sha512-[A-Za-z0-9+/]{86}==$/.test(entry.integrity) ||
+                !sameList(listed, expectedFiles[kind]) ||
+                entry.fileCount !== listed.length
+              ) {
+                fail(`delivery-manifest.json has an unexpected entry for ${entry.name}.`);
+              }
+            }
+
+            const checked = [];
+            if (action === 'publish') {
+              fs.mkdirSync(packagesDir, { recursive: true });
+              for (const entry of ordered) {
+                const kind = entry.name === MAIN ? 'main' : 'platform';
+                const tgz = await download(entry.asset);
+                if (sha256(tgz) !== entry.sha256 || integrityOf(tgz) !== entry.integrity) {
+                  fail(`${entry.asset} does not match the digests in delivery-manifest.json.`);
+                }
+                const files = readTgz(tgz, entry.asset);
+                const paths = [...files.keys()].sort();
+                if (!sameList(paths, expectedFiles[kind])) {
+                  fail(`${entry.asset} contains ${paths.join(', ')}.`);
+                }
+                if ((files.get('package/bin/codedag').mode & 0o111) === 0) {
+                  fail(`${entry.asset}: package/bin/codedag is not executable.`);
+                }
+                const manifestJson = JSON.parse(files.get('package/package.json').content.toString('utf8'));
+                if (manifestJson.name !== entry.name || manifestJson.version !== version) {
+                  fail(`${entry.asset} is ${manifestJson.name}@${manifestJson.version}, expected ${entry.name}@${version}.`);
+                }
+                if (Object.prototype.hasOwnProperty.call(manifestJson, 'scripts')) {
+                  fail(`${entry.asset}: package.json has scripts.`);
+                }
+                if (!manifestJson.repository || manifestJson.repository.url !== env.PACKAGE_REPOSITORY_URL) {
+                  fail(`${entry.asset}: package.json repository.url is not ${env.PACKAGE_REPOSITORY_URL}.`);
+                }
+                if (kind === 'main') {
+                  const optional = manifestJson.optionalDependencies || {};
+                  const platformNames = ordered.filter((item) => item.name !== MAIN).map((item) => item.name).sort();
+                  if (
+                    !sameList(Object.keys(optional).sort(), platformNames) ||
+                    Object.values(optional).some((value) => value !== version)
+                  ) {
+                    fail(`${entry.asset}: optionalDependencies do not match the platform packages of ${version}.`);
+                  }
+                }
+                fs.writeFileSync(path.join(packagesDir, entry.asset), tgz);
+                checked.push({ name: entry.name, asset: entry.asset, sha256: entry.sha256, integrity: entry.integrity, fileCount: entry.fileCount });
+                console.log(`Checked ${entry.name}@${version}: sha256 ${entry.sha256}, ${entry.integrity}, ${paths.length} files`);
+              }
+            } else {
+              for (const entry of ordered) {
+                const document = await registryDocument(entry.name);
+                const published = document && document.versions && document.versions[version];
+                if (!published) {
+                  fail(`${entry.name}@${version} is not on the registry.`);
+                }
+                const dist = published.dist || {};
+                if (dist.integrity !== entry.integrity || (dist.fileCount !== undefined && dist.fileCount !== entry.fileCount)) {
+                  fail(`${entry.name}@${version} on the registry does not match delivery-manifest.json.`);
+                }
+                checked.push({ name: entry.name, asset: entry.asset, sha256: entry.sha256, integrity: entry.integrity, fileCount: entry.fileCount });
+                console.log(`Checked ${entry.name}@${version} on the registry: ${entry.integrity}`);
+              }
+            }
+
+            const names = checked.map((item) => item.name).join(' ');
+            if (env.VERIFIED_PACKAGES !== undefined && env.VERIFIED_PACKAGES !== names) {
+              fail(`The packages differ from the verify job: ${names} instead of ${env.VERIFIED_PACKAGES}.`);
+            }
+            fs.mkdirSync(workDir, { recursive: true });
+            fs.writeFileSync(path.join(workDir, 'checked.json'), `${JSON.stringify({ version, manifestSha256, packages: checked }, null, 2)}\n`);
+            fs.appendFileSync(env.GITHUB_OUTPUT, `packages=${names}\nmanifest_sha256=${manifestSha256}\n`);
+          })().catch((error) => {
+            console.log(`::error::${error.message}`);
+            process.exit(1);
+          });
+          EOF
+
+  npm:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    env: *delivery-inputs
+    steps:
+      - name: Check the caller and the inputs
+        run: *check-caller
+
+      - name: Start the result file
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/publish-npm-result"
+          node - <<'EOF'
+          const fs = require('fs');
+          const path = require('path');
+          const env = process.env;
+          const result = {
+            schema: 1,
+            callId: env.DELIVERY_CALL_ID,
+            action: env.DELIVERY_ACTION,
+            channel: env.DELIVERY_ACTION === 'verify-dist-tag' ? null : env.DELIVERY_CHANNEL,
+            version: env.DELIVERY_VERSION,
+            manifestSha256: env.DELIVERY_MANIFEST_SHA256,
+            result: 'failed',
+            error: 'The npm job stopped before writing to npm.',
+            auth: null,
+            packages: [],
+          };
+          fs.writeFileSync(path.join(env.RUNNER_TEMP, 'publish-npm-result', 'publish-npm-result.json'), `${JSON.stringify(result, null, 2)}\n`);
+          EOF
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          registry-url: ${{ env.NPM_REGISTRY }}
+
+      - name: Install the locked npm
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/locked-npm"
+          mkdir -p "$work"
+          node - "$work/npm-$NPM_VERSION.tgz" <<'EOF'
+          const crypto = require('crypto');
+          const fs = require('fs');
+          const [file] = process.argv.slice(2);
+          const { NPM_REGISTRY, NPM_VERSION, NPM_INTEGRITY } = process.env;
+          (async () => {
+            const response = await fetch(`${NPM_REGISTRY}npm/-/npm-${NPM_VERSION}.tgz`);
+            if (!response.ok) {
+              throw new Error(`Downloading npm-${NPM_VERSION}.tgz returned HTTP ${response.status}.`);
+            }
+            const tarball = Buffer.from(await response.arrayBuffer());
+            const integrity = `sha512-${crypto.createHash('sha512').update(tarball).digest('base64')}`;
+            if (integrity !== NPM_INTEGRITY) {
+              throw new Error(`npm-${NPM_VERSION}.tgz has integrity ${integrity}, expected ${NPM_INTEGRITY}.`);
+            }
+            fs.writeFileSync(file, tarball);
+            console.log(`Downloaded npm-${NPM_VERSION}.tgz (${integrity})`);
+          })().catch((error) => {
+            console.log(`::error::${error.message}`);
+            process.exit(1);
+          });
+          EOF
+          cd "$work"
+          npm install --global "./npm-$NPM_VERSION.tgz" --ignore-scripts --no-audit --no-fund
+          actual="$(npm --version)"
+          if [ "$actual" != "$NPM_VERSION" ]; then
+            echo "::error::npm --version is $actual, expected $NPM_VERSION."
+            exit 1
+          fi
+          echo "Using npm $actual"
+
+      - name: Download and check the approved packages again
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          VERIFIED_PACKAGES: ${{ needs.verify.outputs.packages }}
+        run: *check-packages
+
+      - name: Write to npm
+        if: inputs.action != 'verify-dist-tag'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_FIRST_PUBLISH_TOKEN }}
+        run: &write-npm |
+          set -euo pipefail
+          node - <<'EOF'
+          const fs = require('fs');
+          const path = require('path');
+          const { spawnSync } = require('child_process');
+
+          const env = process.env;
+          const version = env.DELIVERY_VERSION;
+          const action = env.DELIVERY_ACTION;
+          const channel = env.DELIVERY_CHANNEL;
+          const registry = env.NPM_REGISTRY;
+          const workDir = path.join(env.RUNNER_TEMP, 'publish-npm');
+          const packagesDir = path.join(workDir, 'packages');
+          const resultFile = path.join(env.RUNNER_TEMP, 'publish-npm-result', 'publish-npm-result.json');
+          const checked = JSON.parse(fs.readFileSync(path.join(workDir, 'checked.json'), 'utf8'));
+          fs.mkdirSync(packagesDir, { recursive: true });
+          const READBACK_ATTEMPTS = 30;
+          const READBACK_INTERVAL_MS = 10000;
+          // actions/setup-node 在没有令牌时导出的占位值
+          const SETUP_NODE_PLACEHOLDER = 'XXXXX-XXXXX-XXXXX-XXXXX';
+          const OIDC_EVIDENCE = /\bverbose oidc Successfully retrieved and set token\b/;
+
+          const configured = env.NODE_AUTH_TOKEN || '';
+          const auth = {
+            tokenProvided: configured !== '' && configured !== SETUP_NODE_PLACEHOLDER,
+            oidcAvailable: Boolean(env.ACTIONS_ID_TOKEN_REQUEST_URL && env.ACTIONS_ID_TOKEN_REQUEST_TOKEN),
+            actualMethod: 'undetermined',
+          };
+          const writes = [];
+          const packages = checked.packages.map((item) => ({
+            name: item.name,
+            version,
+            status: 'not-started',
+            actions: [],
+            integrity: null,
+            fileCount: null,
+            distTags: null,
+          }));
+
+          const fail = (message) => {
+            throw new Error(message);
+          };
+          const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+          function parseVersion(value) {
+            const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(value);
+            if (!match) {
+              fail(`${value} is not a semantic version.`);
+            }
+            return { core: match.slice(1, 4).map(Number), pre: match[4] ? match[4].split('.') : [] };
+          }
+
+          function compareVersions(a, b) {
+            const left = parseVersion(a);
+            const right = parseVersion(b);
+            for (let index = 0; index < 3; index += 1) {
+              if (left.core[index] !== right.core[index]) {
+                return left.core[index] < right.core[index] ? -1 : 1;
+              }
+            }
+            if (left.pre.length === 0 || right.pre.length === 0) {
+              return left.pre.length === right.pre.length ? 0 : left.pre.length === 0 ? 1 : -1;
+            }
+            for (let index = 0; index < Math.max(left.pre.length, right.pre.length); index += 1) {
+              const x = left.pre[index];
+              const y = right.pre[index];
+              if (x === undefined || y === undefined) {
+                return x === undefined ? -1 : 1;
+              }
+              if (x === y) {
+                continue;
+              }
+              const numeric = /^\d+$/;
+              if (numeric.test(x) && numeric.test(y)) {
+                return Number(x) < Number(y) ? -1 : 1;
+              }
+              if (numeric.test(x) !== numeric.test(y)) {
+                return numeric.test(x) ? -1 : 1;
+              }
+              return x < y ? -1 : 1;
+            }
+            return 0;
+          }
+
+          async function registryDocument(name) {
+            const response = await fetch(`${registry}${name.replace('/', '%2f')}`, {
+              headers: { accept: 'application/json', 'cache-control': 'no-cache' },
+            });
+            if (response.status === 404) {
+              return null;
+            }
+            if (!response.ok) {
+              fail(`Reading ${name} from the registry returned HTTP ${response.status}.`);
+            }
+            return response.json();
+          }
+
+          /** 写入之后读回，直到满足条件；registry 的读取可能有缓存延迟 */
+          async function readBack(name, predicate, description) {
+            for (let attempt = 1; ; attempt += 1) {
+              const document = await registryDocument(name);
+              if (document && predicate(document)) {
+                return document;
+              }
+              if (attempt >= READBACK_ATTEMPTS) {
+                fail(`${name}: ${description} was not visible on the registry.`);
+              }
+              await sleep(READBACK_INTERVAL_MS);
+            }
+          }
+
+          function npm(record, label, args) {
+            const logsDir = path.join(workDir, 'npm-logs', String(writes.length + 1));
+            fs.mkdirSync(logsDir, { recursive: true });
+            const result = spawnSync('npm', [...args, '--registry', registry, '--logs-dir', logsDir], {
+              cwd: packagesDir,
+              encoding: 'utf8',
+              stdio: ['ignore', 'pipe', 'pipe'],
+            });
+            const logText = fs
+              .readdirSync(logsDir)
+              .map((file) => fs.readFileSync(path.join(logsDir, file), 'utf8'))
+              .join('\n');
+            const oidcExchange = OIDC_EVIDENCE.test(logText);
+            writes.push({ package: record.name, command: label, ok: result.status === 0, oidcExchange });
+            record.actions.push(label);
+            if (result.status !== 0) {
+              process.stdout.write(result.stdout || '');
+              process.stdout.write(result.stderr || '');
+              fail(`npm ${label} for ${record.name} exited with ${result.status === null ? result.signal : result.status}.`);
+            }
+            if (action === 'verify-dist-tag' && !oidcExchange) {
+              fail(`npm ${label} for ${record.name} did not authenticate through OIDC.`);
+            }
+            console.log(`${record.name}: npm ${label}`);
+          }
+
+          function settle(record, document) {
+            const dist = (document.versions && document.versions[version] && document.versions[version].dist) || {};
+            record.integrity = dist.integrity || null;
+            record.fileCount = dist.fileCount === undefined ? null : dist.fileCount;
+            record.distTags = document['dist-tags'] || {};
+            record.status = 'done';
+            console.log(`${record.name}@${version}: ${record.integrity}, dist-tags ${JSON.stringify(record.distTags)}`);
+          }
+
+          async function publishPackage(item, record) {
+            let document = await registryDocument(item.name);
+            const existing = document && document.versions && document.versions[version];
+            if (existing) {
+              const dist = existing.dist || {};
+              if (dist.integrity !== item.integrity || (dist.fileCount !== undefined && dist.fileCount !== item.fileCount)) {
+                fail(`${item.name}@${version} is already on the registry with different content.`);
+              }
+            } else {
+              npm(record, 'publish --tag next', ['publish', `./${item.asset}`, '--tag', 'next', '--access', 'public']);
+              document = await readBack(
+                item.name,
+                (doc) => doc.versions && doc.versions[version] && doc.versions[version].dist && doc.versions[version].dist.integrity === item.integrity,
+                `${version} with ${item.integrity}`,
+              );
+              const fileCount = document.versions[version].dist.fileCount;
+              if (fileCount !== undefined && fileCount !== item.fileCount) {
+                fail(`${item.name}@${version} has ${fileCount} files on the registry, expected ${item.fileCount}.`);
+              }
+            }
+            const next = (document['dist-tags'] || {}).next;
+            if (next !== version) {
+              if (next && compareVersions(next, version) > 0) {
+                fail(`${item.name}: next already points to the higher version ${next}.`);
+              }
+              npm(record, 'dist-tag add next', ['dist-tag', 'add', `${item.name}@${version}`, 'next']);
+              document = await readBack(item.name, (doc) => (doc['dist-tags'] || {}).next === version, `next -> ${version}`);
+            }
+            settle(record, document);
+          }
+
+          async function setTag(item, record, tag) {
+            npm(record, `dist-tag add ${tag}`, ['dist-tag', 'add', `${item.name}@${version}`, tag]);
+            return readBack(item.name, (doc) => (doc['dist-tags'] || {})[tag] === version, `${tag} -> ${version}`);
+          }
+
+          async function distTagPackage(item, record) {
+            let document = await registryDocument(item.name);
+            const published = document && document.versions && document.versions[version];
+            if (!published || (published.dist || {}).integrity !== item.integrity) {
+              fail(`${item.name}@${version} on the registry does not match delivery-manifest.json.`);
+            }
+            let tags = document['dist-tags'] || {};
+            if (channel === 'latest') {
+              // 提升与回退 latest：缺失或更低的 next 先补到该版本，更高的 next 保留
+              if (!tags.next || compareVersions(tags.next, version) < 0) {
+                document = await setTag(item, record, 'next');
+                tags = document['dist-tags'] || {};
+              }
+              if (tags.latest !== version) {
+                document = await setTag(item, record, 'latest');
+              }
+            } else if (tags.next !== version) {
+              if (tags.latest && compareVersions(version, tags.latest) < 0) {
+                fail(`${item.name}: next cannot point below latest (${tags.latest}).`);
+              }
+              document = await setTag(item, record, 'next');
+            }
+            settle(record, document);
+          }
+
+          async function verifyDistTag(item, record) {
+            const tag = `verify-${env.DELIVERY_CALL_ID}`;
+            let document = await registryDocument(item.name);
+            if (!document || !document.versions || !document.versions[version]) {
+              fail(`${item.name}@${version} is not on the registry.`);
+            }
+            const removeTag = async () => {
+              npm(record, `dist-tag rm ${tag}`, ['dist-tag', 'rm', item.name, tag]);
+              return readBack(item.name, (doc) => !Object.prototype.hasOwnProperty.call(doc['dist-tags'] || {}, tag), `${tag} removed`);
+            };
+            if (Object.prototype.hasOwnProperty.call(document['dist-tags'] || {}, tag)) {
+              document = await removeTag();
+            }
+            const before = document['dist-tags'] || {};
+            await setTag(item, record, tag);
+            document = await removeTag();
+            const after = document['dist-tags'] || {};
+            if (after.next !== before.next || after.latest !== before.latest) {
+              fail(`${item.name}: next or latest changed during the dist-tag verification.`);
+            }
+            settle(record, document);
+          }
+
+          function writeResult(outcome, error) {
+            const completed = packages.filter((item) => item.status === 'done').map((item) => item.name);
+            if (writes.length > 0 && writes.every((item) => item.oidcExchange)) {
+              auth.actualMethod = 'oidc';
+            }
+            const result = {
+              schema: 1,
+              callId: env.DELIVERY_CALL_ID,
+              action,
+              channel: action === 'verify-dist-tag' ? null : channel,
+              version,
+              manifestSha256: checked.manifestSha256,
+              result: outcome,
+              error: error || null,
+              auth,
+              writes,
+              completed,
+              incomplete: packages.filter((item) => item.status !== 'done').map((item) => item.name),
+              packages,
+            };
+            fs.writeFileSync(resultFile, `${JSON.stringify(result, null, 2)}\n`);
+            const rows = packages.map(
+              (item) => `| ${item.name} | ${item.status} | ${item.integrity || ''} | ${item.distTags ? JSON.stringify(item.distTags) : ''} |`,
+            );
+            fs.appendFileSync(
+              env.GITHUB_STEP_SUMMARY,
+              [`### ${action} ${version}: ${outcome}`, '', '| Package | Status | Integrity | dist-tags |', '| --- | --- | --- | --- |', ...rows, ''].join('\n'),
+            );
+          }
+
+          (async () => {
+            // 临时 dist-tag 验证证明的是可信发布的 OIDC 写权限：这一步不映射临时令牌，每次写入都要有 OIDC 交换的记录
+            if (action === 'verify-dist-tag') {
+              if (auth.tokenProvided) {
+                fail('verify-dist-tag must not run with NODE_AUTH_TOKEN; it only proves the OIDC permission.');
+              }
+              if (!auth.oidcAvailable) {
+                fail('verify-dist-tag needs OIDC (id-token: write), which is not available in this job.');
+              }
+            }
+            for (const [index, item] of checked.packages.entries()) {
+              const record = packages[index];
+              record.status = 'failed';
+              if (action === 'publish') {
+                await publishPackage(item, record);
+              } else if (action === 'dist-tag') {
+                await distTagPackage(item, record);
+              } else {
+                await verifyDistTag(item, record);
+              }
+            }
+            writeResult('success');
+          })().catch((error) => {
+            writeResult('failed', error.message);
+            console.log(`::error::${error.message}`);
+            process.exit(1);
+          });
+          EOF
+
+      # 与上一步是同一份脚本，但不映射 NPM_FIRST_PUBLISH_TOKEN：临时 dist-tag 验证只能经 OIDC 认证，不能回退到临时令牌
+      - name: Verify the dist-tag permission through OIDC
+        if: inputs.action == 'verify-dist-tag'
+        run: *write-npm
+
+      - name: Upload the result
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: publish-npm-result
+          path: ${{ runner.temp }}/publish-npm-result/publish-npm-result.json
+          if-no-files-found: warn
+          retention-days: 30

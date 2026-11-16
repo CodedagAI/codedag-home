@@ -176,15 +176,22 @@ cdg dag submit <工作流>
 | `Startup gate failure:` | 原因 | 处理 |
 |---|---|---|
 | `insufficient_credits` | 本周期剩下的 CodeDAG 额度不够这个工作流开始执行。 | 按 `Action:` 行等到额度重置或者订阅，见[额度不足或无订阅时](/zh/docs/account/credits-and-subscription#insufficient-credits)；用的是免费额度时，见[免费额度用完或到期之后](/zh/docs/account/credits-and-subscription#free-credits-used-up)。 |
-| `no_subscription` | 账号既没有生效的订阅，也没有可用的免费额度。 | 在 Billing 页订阅，见[额度不足或无订阅时](/zh/docs/account/credits-and-subscription#insufficient-credits)。 |
+| `no_subscription` | 账号既没有生效的订阅，也没有可用的免费额度。 | 在账单页订阅，见[额度不足或无订阅时](/zh/docs/account/credits-and-subscription#insufficient-credits)。 |
 | `cli_version_unsupported` | 这台电脑上的 CodeDAG CLI 低于 CodeDAG 服务支持的最低版本。 | 升级 CLI，再用升级后的 CLI 恢复，见[版本相关](#versions)。 |
 | `login_required` | 这台电脑上的 CLI 没有登录。 | 用 `cdg auth login{:sh}` 登录提交这个工作流的账号。 |
-| `account_mismatch` | 当前登录的不是提交这个工作流的账号。 | 切回原来的账号，见[登出、多台电脑与切换账号](/zh/docs/account/login-and-account#sign-out)。 |
+| `account_mismatch` | 当前登录的不是提交这个工作流的账号。 | 切回原来的账号，见[退出登录、多台电脑与切换账号](/zh/docs/account/login-and-account#sign-out)。 |
 | `billing_service_unavailable` | 暂时连不上 CodeDAG 服务。 | 等服务恢复，见[服务不可用时](/zh/docs/account/login-and-account#service-unavailable)。 |
 
 处理之后执行 `cdg dag recover <工作流>{:sh}`，工作流会重新尝试开始，不会重复扣除额度。在阻断解除之前，`cdg task recover{:sh}` 和两个 `unpause` 命令都会拒绝执行，报 `Workflow is blocked by the startup gate. Run 'cdg dag recover' to resolve it before resuming.`；看到这条报错时，先用 `cdg dag status <工作流>{:sh}` 查出失败码，按上表处理后再恢复工作流。
 
-失败码是 `idempotency_replay_expired` 或 `invalid_usage_grant` 时，这次执行的扣费授权已经无法恢复，`cdg dag recover{:sh}` 也会拒绝执行。按 `Action:` 行给出的三条命令结束这次执行并重新提交；重新提交是一次新的执行，开始执行时按任务数扣除额度。
+下面两种失败码不在上表里，`cdg dag recover{:sh}` 会拒绝执行：
+
+- **`idempotency_replay_expired`：** 这个工作流要扣两次额度。这次执行已经扣过一次，但无法恢复；按 `Action:` 行给出的命令结束它并重新提交时，还要再扣一次，先扣的那一次不会自动退回。它很少见：工作流要先扣了额度、却在开始执行之前被拦下（例如刚扣完就连不上 CodeDAG 服务），之后又遇到下面任一情况，才会出现。
+  - **恢复得太晚：** 扣过额度之后，超过期限才恢复。通常有 7 天以上的时间，具体期限写在 `cdg dag status <工作流>{:sh}` 的输出里。
+  - **额度的来源换了：** 例如取消订阅之后又重新订阅。
+
+  所以工作流被拦下之后，处理好原因尽快恢复就能避免此问题。
+- **`invalid_usage_grant`：** 本机保存的这次执行的记录已经损坏，或者与 CodeDAG 服务对不上。同样按 `Action:` 行给出的命令结束这次执行并重新提交；它有没有扣过额度，看 `cdg dag status <工作流>{:sh}` 的输出。
 
 ### 同步仓库不可用 [#mirror-unavailable]
 
@@ -339,10 +346,13 @@ cdg dag recover <工作流>
 
 ## 登录失败或反复要求登录 [#sign-in-problems]
 
-- **提示 `Sign-in failed:`，或者 `cdg auth status{:sh}` 提示 `Failed to show auth status:`，例如超时、在浏览器里拒绝了授权，或者连不上服务。** 重新运行一次即可；由 `cdg init{:sh}` 或 `cdg dag submit{:sh}` 触发的登录失败时，原命令也会退出，需要重新执行。
+- **提示 `Sign-in failed:`，或者 `cdg auth status{:sh}` 提示 `Failed to show auth status:`，例如没有在 5 分钟内完成浏览器里的登录，或者在浏览器里拒绝了授权。** 重新运行一次即可；由 `cdg init{:sh}` 或 `cdg dag submit{:sh}` 触发的登录失败时，原命令也会退出，需要重新执行。
+- **浏览器还没打开就报错，`Sign-in failed:` 或 `Failed to show auth status:` 后面是 `No response from …`、`Could not connect to …` 或 `Unable to reach …`。** 这台电脑连不上 CodeDAG。确认能正常上网之后，按你的网络情况处理，再重新运行原来的命令：
+  - **浏览器能打开网页，`cdg` 却连不上：** 多半是代理只开在了系统设置里，例如在代理客户端里打开了“设置为系统代理”，或者用了自动代理配置。`cdg` 只用 `HTTPS_PROXY`、`HTTP_PROXY`（小写也可以）这两个环境变量里的代理，不读系统设置。在终端里也设置 `HTTPS_PROXY`，值为代理客户端给出的 HTTP 代理地址，例如在 `~/.zshrc` 里写上 `export HTTPS_PROXY=http://127.0.0.1:7890{:sh}`，再新开一个终端；或者在代理客户端里打开 TUN 模式，`cdg` 就不需要另外设置。
+  - **已经设了 `HTTPS_PROXY` 仍然连不上，或者网络有防火墙：** 确认代理或防火墙没有挡住 `app.codedag.com` 的 443 端口；公司网络的防火墙，请网管放行。
 - **提示 `Failed to save credentials to the local secure storage.`** 浏览器里的登录已经完成，但登录凭证没能保存到这台电脑上，这次登录没有生效。确认 CodeDAG 的全局目录（默认是 `~/.codedag`）可写、磁盘空间充足后重新登录。
 - **在 SSH 远程会话、容器或没有图形界面的服务器里无法登录。** 登录必须在运行 `cdg` 的同一台电脑上用浏览器完成，这类环境目前无法登录，见[没有桌面浏览器时](/zh/docs/account/login-and-account#no-browser)。对这类环境的支持已列入后续版本的规划。
-- **过一段时间就要求重新登录。** 登录状态长时间不用会失效；把登录凭证复制到另一台电脑上使用，还会让这个账号在所有电脑上的登录一起作废。见[登录状态能保持多久](/zh/docs/account/login-and-account#credentials)与[登出、多台电脑与切换账号](/zh/docs/account/login-and-account#sign-out)。
+- **过一段时间就要求重新登录。** 登录状态长时间不用会失效；把登录凭证复制到另一台电脑上使用，还会让这个账号在所有电脑上的登录一起作废。见[登录状态能保持多久](/zh/docs/account/login-and-account#credentials)与[退出登录、多台电脑与切换账号](/zh/docs/account/login-and-account#sign-out)。
 - **登录后是另一个账号。** 运行 `cdg auth login{:sh}` 重新登录，在账号确认页选择更换账号，见[浏览器已经登录了网页控制台时](/zh/docs/account/login-and-account#confirm-account)。
 - **排队中的工作流因为登录状态停在 `on-hold`。** 见[账号与额度闸门](#startup-gate)。
 - **CodeDAG 服务暂时不可用。** 见[服务不可用时](/zh/docs/account/login-and-account#service-unavailable)。

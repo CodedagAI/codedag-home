@@ -4,11 +4,12 @@
  * 导航栏登录区（纯 React + Tailwind，不依赖 fumadocs / shadcn）：
  * 挂载后 fetch(appUrl + "/api/public/session", { credentials: "include" })，
  * 未登录显示 Sign in + Get Started，已登录显示头像（img / 首字母 fallback）。
- * 不传 renderAvatar 时头像链接到 session 返回的 settings_url；两站都通过
- * renderAvatar 组合插槽包上头像下拉菜单。
+ * 不传 renderAvatar 时头像链接到 App 站的首页；公开站的导航栏通过
+ * renderAvatar 组合插槽包上头像菜单。App 站的控制台在服务端取得登录状态，不挂载
+ * AuthArea，只用这里的 AuthAvatar 画头像。
  *
  * 颜色只用两站都定义的 brand token（--color-brand*）与中性色 Tailwind
- * 类，深浅主题跟随各站的 .dark class。
+ * 类，深浅主题跟随各站的 .dark class。两站要保持一致的事项见同目录的 README.md。
  */
 "use client";
 
@@ -26,23 +27,19 @@ export interface AuthAreaUser {
 interface PublicSessionState {
   authenticated: boolean;
   user?: AuthAreaUser;
-  settings_url?: string;
   login_url?: string;
 }
 
 export interface AuthAreaProps {
-  /** app 站基地址（公开站传 NEXT_PUBLIC_APP_URL；app 站内传 "" 走同源） */
+  /** app 站基地址（公开站传 NEXT_PUBLIC_APP_URL；与 app 站同源时传 ""） */
   appUrl: string;
   /** 文案语言（en / zh / ja），缺省 en */
   locale?: string;
   /**
-   * 组合插槽：登录后头像的自定义渲染（app 站用它包 DropdownMenu）。
-   * 缺省渲染一个链接到 settingsUrl 的头像。
+   * 组合插槽：登录后头像的自定义渲染（公开站用它包头像菜单）。
+   * 缺省渲染一个链接到 App 站首页的头像。
    */
-  renderAvatar?: (props: {
-    user: AuthAreaUser;
-    settingsUrl: string;
-  }) => ReactNode;
+  renderAvatar?: (props: { user: AuthAreaUser }) => ReactNode;
   /**
    * 替换未登录时第二个按钮的目标、文案与样式（公开站按主页模式传入：
    * 内测时指向 Waitlist，正式开放后指向 App 账号入口；className 让它与
@@ -138,7 +135,7 @@ export function AuthArea({
         className={cls("flex h-8 items-center gap-2", className)}
       >
         {renderAvatar ? (
-          // app 站导航必然已登录，骨架取头像形状
+          // 调用方自己渲染头像时，骨架取头像形状
           <span className="size-8 animate-pulse rounded-full bg-neutral-500/20 motion-reduce:animate-none" />
         ) : (
           <>
@@ -150,16 +147,15 @@ export function AuthArea({
     );
   }
 
-  // 已登录：头像（缺省链接到 settings_url；app 站用 renderAvatar 包下拉）
+  // 已登录：头像（缺省链接到 App 站的首页；公开站用 renderAvatar 包下拉菜单）
   if (session?.authenticated && session.user) {
-    const settingsUrl = session.settings_url ?? `${appUrl}/settings`;
     return (
       <div className={cls("flex h-8 shrink-0 items-center", className)}>
         {renderAvatar ? (
-          renderAvatar({ user: session.user, settingsUrl })
+          renderAvatar({ user: session.user })
         ) : (
           <a
-            href={settingsUrl}
+            href={`${appUrl}/`}
             aria-label={t.account}
             title={session.user.email}
             // shrink-0：img 的 max-width:100% 让它对最小宽度没有贡献，容器一紧头像就会被压扁

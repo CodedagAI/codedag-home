@@ -79,7 +79,7 @@ cdg dag review clear <workflow-name>
 cdg dag submit <workflow-name>
 ```
 
-Resubmitting starts a new run. The run uses the workflow file as it is at the moment you submit, and when it starts running, it uses CodeDAG credits again, based on the number of tasks. For the charging rules, see [When credits are charged](/docs/account/credits-and-subscription#when-charged). You can't clear the review of a workflow that's still in the queue. Give it a workflow-level review decision first. For the steps, see [Modify a submitted workflow](/docs/reference/cli/validate-and-submit#modify-submitted).
+Resubmitting starts a new run. The run uses the workflow file as it is at the moment you submit, and when it starts running, it uses CodeDAG credits again, based on the number of tasks. For the details, see [When credits are deducted](/docs/account/credits-and-subscription#when-deducted). You can't clear the review of a workflow that's still in the queue. Give it a workflow-level review decision first. For the steps, see [Modify a submitted workflow](/docs/reference/cli/validate-and-submit#modify-submitted).
 
 Before you submit, check where the new run will start. Without `baseRef`, it starts from the commit that's checked out in the primary repository at that moment. If the primary repository is still on the previous run's integration branch, or you've already merged the previous results into `main`, the new run builds on the previous results either way, and the tasks work on code that has already been changed. To redo the work from the original code, run `git checkout main` before you merge, or set `baseRef: main` in the workflow file.
 
@@ -96,7 +96,7 @@ cdg dag submit add-notes-20261010
 
 A workflow's name comes from its file name, so the new file is a different workflow. You can submit it before the previous run's review is finished, and if the previous run is still in the queue, the new one waits behind it. The records of each run are kept separately too. You can still check the status and review results of earlier runs with `cdg dag status <workflow-name>{:sh}`, this run's branches are all under `cdg/add-notes-20261010/`, and its logs are written to its own file. The cost is one more workflow file, one more set of branches, and one more log file for every run. For how to clean up the branches and logs, see [Clean up branches and workspaces](#cleanup).
 
-The rules for the base and for charging are the same as when you clear the review and resubmit.
+Where the new run starts and how credits are deducted are the same as when you clear the review and resubmit.
 
 ### Run only a few of the tasks [#continue-remaining]
 

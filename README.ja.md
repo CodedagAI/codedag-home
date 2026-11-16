@@ -25,8 +25,8 @@ CodeDAG はお客様のコンピューター上で動作します。リポジト
 ## このリポジトリについて
 
 > [!NOTE]
-> このリポジトリは [codedag.com](https://codedag.com/ja) のウェブサイトとドキュメントのソースです。CodeDAG CLI はここでは開発していませんが、CLI の問題もここで報告できます。
+> このリポジトリは [codedag.com](https://codedag.com/ja) のウェブサイトとドキュメントのソースです。CodeDAG CLI はここでは開発していませんが、CLI の問題もここで報告できます。CLI のプログラムは、このリポジトリの [Releases](https://github.com/CodedagAI/codedag-home/releases) で公開しています。CLI はプロプライエタリソフトウェアで、ソースコードは公開していません。
 
 ## ライセンス
 
-`docs-website/content/` 以下のドキュメントやポリシーなどのコンテンツは、[CC BY 4.0](./LICENSE) でライセンスされています。それ以外の部分は、ウェブサイトのコードを含めて [MIT ライセンス](./LICENSE-CODE)です。CodeDAG の名称とロゴは、どちらのライセンスの対象にも含まれません。第三者のファイルは、`docs-website/public/fonts/` 以下のフォントなど、それぞれのライセンスに従います。
+`docs-website/content/` 以下のドキュメントやポリシーなどのコンテンツは、[CC BY 4.0](./LICENSE) でライセンスされています。それ以外の部分は、ウェブサイトのコードを含めて [MIT ライセンス](./LICENSE-CODE)です。Releases で公開している CodeDAG CLI のプログラムはどちらのライセンスの対象にも含まれず、[利用規約](https://codedag.com/ja/terms#intellectual-property)に基づいて利用が許諾されます。CodeDAG の名称とロゴも、どちらのライセンスの対象にも含まれません。第三者のファイルは、`docs-website/public/fonts/` 以下のフォントなど、それぞれのライセンスに従います。

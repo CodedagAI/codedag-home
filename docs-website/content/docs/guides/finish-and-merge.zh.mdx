@@ -79,7 +79,7 @@ cdg dag review clear <工作流名>
 cdg dag submit <工作流名>
 ```
 
-重新提交是一次新的执行。它按提交这一刻的工作流文件运行；开始执行时，它按任务数重新消耗 CodeDAG 额度，计费规则见[什么时候扣除额度](/zh/docs/account/credits-and-subscription#when-charged)。还在队列中的工作流不能直接清除，要先给出工作流级的审核结论，步骤见[修改已提交的工作流](/zh/docs/reference/cli/validate-and-submit#modify-submitted)。
+重新提交是一次新的执行。它按提交这一刻的工作流文件运行；开始执行时，它按任务数重新消耗 CodeDAG 额度，具体规则见[什么时候扣除额度](/zh/docs/account/credits-and-subscription#when-deducted)。还在队列中的工作流不能直接清除，要先给出工作流级的审核结论，步骤见[修改已提交的工作流](/zh/docs/reference/cli/validate-and-submit#modify-submitted)。
 
 提交之前，先确认新的执行从哪里开始。没写 `baseRef` 时，它从主仓库此刻检出的提交开始：主仓库还停在上一次的集成分支上，或者你已经把上一次的结果合入了 `main`，新的执行都会在上一次的结果之上进行，任务面对的是已经改过的代码。想基于原来的代码重做，就在合入之前先运行 `git checkout main`，或者在工作流文件里写上 `baseRef: main`。
 
@@ -96,7 +96,7 @@ cdg dag submit add-notes-20261010
 
 工作流的名字来自文件名，所以新文件是另一个工作流。提交它不需要上一次执行审核结束，上一次还在队列中时，它排在后面。各次执行的记录也分开保留：以前各次的状态和审核结果仍然可以用 `cdg dag status <工作流名>{:sh}` 查看，这一次的分支都在 `cdg/add-notes-20261010/` 下，日志写进它自己的文件。代价是每执行一次就多出一个工作流文件、一组分支和一个日志文件，分支和日志的清理见[清理分支与工作区](#cleanup)。
 
-起点和计费的规则与清除审核记录后重新提交相同。
+新的执行从哪里开始、怎样扣除额度，都与清除审核记录后重新提交时相同。
 
 ### 只补做其中几个任务 [#continue-remaining]
 

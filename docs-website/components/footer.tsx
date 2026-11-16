@@ -34,6 +34,8 @@ const themeItemVariants = cva(
   },
 );
 
+// 主题的三种选项、顺序与图标，两站保持一致（./shared-nav/README.md 第 4 项）：
+// App 站的头像菜单里是同一枚三段开关
 function FooterThemeToggle({ className }: { className?: string }) {
   const { setTheme, theme } = useTheme();
   const [mounted, setMounted] = useState(false);

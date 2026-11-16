@@ -25,8 +25,8 @@ CodeDAG 在你的电脑上运行。仓库里的代码、运行日志和 Agent �
 ## 关于本仓库
 
 > [!NOTE]
-> 本仓库是 [codedag.com](https://codedag.com/zh) 官网与文档的源码。CodeDAG CLI 不在这里开发，但 CLI 的问题也可以在这里反馈。
+> 本仓库是 [codedag.com](https://codedag.com/zh) 官网与文档的源码。CodeDAG CLI 不在这里开发，但 CLI 的问题也可以在这里反馈。CLI 的程序在本仓库的 [Releases](https://github.com/CodedagAI/codedag-home/releases) 中发布；CLI 是专有软件，源码不公开。
 
 ## 许可
 
-`docs-website/content/` 下的文档、政策等内容采用 [CC BY 4.0](./LICENSE) 许可。本仓库的其余部分，包括网站代码，采用 [MIT 许可](./LICENSE-CODE)。CodeDAG 的名称和标志不在这两种许可的范围内；第三方文件保留各自的许可，例如 `docs-website/public/fonts/` 下的字体。
+`docs-website/content/` 下的文档、政策等内容采用 [CC BY 4.0](./LICENSE) 许可。本仓库的其余部分，包括网站代码，采用 [MIT 许可](./LICENSE-CODE)。这两种许可都不覆盖 Releases 中的 CodeDAG CLI 程序，它按[服务条款](https://codedag.com/zh/terms#intellectual-property)授权使用；CodeDAG 的名称和标志也不在这两种许可的范围内。第三方文件保留各自的许可，例如 `docs-website/public/fonts/` 下的字体。
