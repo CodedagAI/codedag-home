@@ -314,7 +314,7 @@ metadata:
 
 `model` 指定任务使用的模型。它是可选的非空字符串，原样交给 Agent 的 `--model` 参数；不写时使用 Agent 自身配置的默认模型。CodeDAG 不检查模型名，写错的名字能通过校验，要到任务运行时才会由 Agent 报错。
 
-Claude Code 可以写 `sonnet`、`opus`、`haiku` 这样的别名，也可以写完整的模型名，见 Claude Code 的[模型配置文档](https://code.claude.com/docs/en/model-config)；Codex 写模型名，可用的模型见 Codex 的[模型文档](https://learn.chatgpt.com/docs/models)。
+Claude Code 可以写 `haiku`、`sonnet`、`opus` 这样的别名，也可以写完整的模型名，见 Claude Code 的[模型配置文档](https://code.claude.com/docs/en/model-config)；Codex 写模型名，可用的模型见 Codex 的[模型文档](https://learn.chatgpt.com/docs/models)。
 
 ```yaml title="yaml"
   - id: 3

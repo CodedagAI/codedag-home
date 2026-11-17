@@ -44,7 +44,7 @@ icon: Terminal
 | 文件名 | `feature.json` | 同一目录下有同名、不同扩展名的文件时，用扩展名选定其中一个。 |
 | 以 `.codedag/dags/` 开头的路径 | `.codedag/dags/team/feature.yaml` | 工作流放在子目录中时使用。总是从主仓库的根目录算起，与当前所在目录无关；扩展名同样可以省略。 |
 | 相对当前目录的路径 | `./feature.yaml`、`../.codedag/dags/feature.yaml` | 已经位于 `.codedag/dags/` 或主仓库的某个子目录中，想借助 shell 补全路径时。 |
-| 绝对路径 | `/Users/me/project/.codedag/dags/feature.yaml` | 在脚本中写固定路径时。 |
+| 绝对路径 | `/path/to/project/.codedag/dags/feature.yaml` | 在脚本中写固定路径时。 |
 
 名字和以 `.codedag/dags/` 开头的路径总是从主仓库解析，所以在主仓库、任一已登记的副本工作区，以及它们的任意子目录中执行，效果都相同。其他含有 `/` 的相对写法，包括以 `./`、`../` 开头的，都按当前目录解析。因此在主仓库根目录写 `team/feature` 会被拒绝，子目录中的工作流要写成 `.codedag/dags/team/feature`；在副本工作区中，`./.codedag/dags/feature.yaml` 这样的相对路径指向的是副本自己的目录，同样会被拒绝，这时改用名字或以 `.codedag/dags/` 开头的写法即可。
 

@@ -62,7 +62,7 @@ cdg auth login
 cdg auth status
 ```
 
-浏览器里还登录着原来的账号时，在确认页选择更换账号，见[浏览器已经登录了网页控制台时](/zh/docs/account/login-and-account#confirm-account)。多台电脑怎样共用一个账号，以及退出登录的完整规则，见[退出登录、多台电脑与切换账号](/zh/docs/account/login-and-account#sign-out)。
+多台电脑怎样共用一个账号，以及退出登录的完整规则，见[退出登录、多台电脑与切换账号](/zh/docs/account/login-and-account#sign-out)。
 
 退出和切换账号不影响已经开始执行的工作流。排队中的工作流轮到执行时，这台电脑上的 CLI 必须登录着提交它的账号，否则它会停在 `on-hold`，排在后面的工作流也跟着等待；登录或切回原账号后执行 `cdg dag recover <工作流>{:sh}` 即可继续。
 

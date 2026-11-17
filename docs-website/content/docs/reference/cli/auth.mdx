@@ -62,7 +62,7 @@ cdg auth login
 cdg auth status
 ```
 
-If your browser is still signed in to the original account, choose to switch accounts on the confirmation page. See [When the browser is already signed in to the web console](/docs/account/login-and-account#confirm-account). For how several computers share one account, and for the full rules on signing out, see [Sign out, use multiple computers, and switch accounts](/docs/account/login-and-account#sign-out).
+For how several computers share one account, and for the full rules on signing out, see [Sign out, use multiple computers, and switch accounts](/docs/account/login-and-account#sign-out).
 
 Signing out and switching accounts don't affect workflows that have already started running. When a queued workflow's turn to run comes, the CLI on this computer must be signed in to the account that submitted it. Otherwise the workflow stops at `on-hold`, and the workflows behind it wait too. Sign in, or switch back to the original account, and then run `cdg dag recover <workflow>{:sh}` to continue.
 

@@ -20,7 +20,7 @@ export const policyFacts = {
   /** 运营 CodeDAG 的公司，三份政策与页脚版权行都用这个名称 */
   legalName: 'Zillion AI LLC',
   /** 三份政策共用的生效日期（YYYY-MM-DD） */
-  effectiveDate: '2026-11-05',
+  effectiveDate: '2026-11-17',
 } as const;
 
 /** 每份政策对应的联系邮箱，只写 @ 前面的名字 */

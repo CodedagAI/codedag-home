@@ -25,11 +25,17 @@ export interface PricingTranslations {
     monthly: string;
     yearly: string;
     yearlySaving: string;
+    /** 月付的每月价格；年付时作划线价 */
     priceMonthly: string;
-    priceMonthlyUnit: string;
-    priceYearly: string;
-    priceYearlyUnit: string;
-    yearlyNote: string;
+    /** 年付折合的每月价格，年付时的大号数字 */
+    priceYearlyPerMonth: string;
+    /** 两种周期共用的单位“每月” */
+    perMonth: string;
+    /** 划线价的读屏文字：说明划线的是月付的每月价格 */
+    monthlyPriceSr: string;
+    /** 年付时价格下的一行：每年的总价与按年付款 */
+    yearlyTotal: string;
+    /** 月付时价格下的一行 */
     monthlyNote: string;
     includes: string[];
     modelNote: string;
@@ -68,10 +74,10 @@ const translations: Record<SupportedLocale, PricingTranslations> = {
       yearly: '年付',
       yearlySaving: '省 33%',
       priceMonthly: '$12',
-      priceMonthlyUnit: '/月',
-      priceYearly: '$96',
-      priceYearlyUnit: '/年',
-      yearlyNote: '折合 $8/月，比月付省 33%',
+      priceYearlyPerMonth: '$8',
+      perMonth: '/月',
+      monthlyPriceSr: '（月付为每月 $12）',
+      yearlyTotal: '$96/年，每年付款一次',
       monthlyNote: '按月续费',
       includes: [
         '每月 800 点额度，每月重置一次，当月没用完的不累计',
@@ -210,10 +216,10 @@ const translations: Record<SupportedLocale, PricingTranslations> = {
       yearly: 'Yearly',
       yearlySaving: 'save 33%',
       priceMonthly: '$12',
-      priceMonthlyUnit: '/ month',
-      priceYearly: '$96',
-      priceYearlyUnit: '/ year',
-      yearlyNote: 'Works out to $8 a month, 33% less than monthly',
+      priceYearlyPerMonth: '$8',
+      perMonth: '/ month',
+      monthlyPriceSr: '(monthly billing: $12 a month)',
+      yearlyTotal: '$96/year, billed once a year',
       monthlyNote: 'Renews every month',
       includes: [
         '800 credits each month, reset once a month, with no rollover',
@@ -362,10 +368,10 @@ const translations: Record<SupportedLocale, PricingTranslations> = {
       yearly: '年払い',
       yearlySaving: '33% お得',
       priceMonthly: '$12',
-      priceMonthlyUnit: '/月',
-      priceYearly: '$96',
-      priceYearlyUnit: '/年',
-      yearlyNote: '月あたり $8、月払いより 33% お得',
+      priceYearlyPerMonth: '$8',
+      perMonth: '/月',
+      monthlyPriceSr: '（月払いの場合は月 $12）',
+      yearlyTotal: '$96/年（年 1 回のお支払い）',
       monthlyNote: '毎月更新',
       includes: [
         '毎月 800 クレジット（月に 1 回リセット、繰り越しなし）',
@@ -460,7 +466,7 @@ const translations: Record<SupportedLocale, PricingTranslations> = {
         {
           question: '税金はどうなりますか？',
           answer: [
-            '料金は米ドル建てで、税抜きです。決済時に請求先地域を選んでいただきます。国または地域に加え、米国の場合は ZIP コード、カナダの場合は州または準州を指定します。適用される税金はこれをもとに計算され、お支払いの前に表示されます。詳しくは',
+            '料金は米ドル建てで、税抜きです。決済時に請求先地域を選んでいただきます。国または地域に加え、米国の場合は郵便番号、カナダの場合は州または準州を指定します。適用される税金はこれをもとに計算され、お支払いの前に表示されます。詳しくは',
             { text: '利用規約', href: '/terms#subscription' },
             'をご覧ください。',
           ],

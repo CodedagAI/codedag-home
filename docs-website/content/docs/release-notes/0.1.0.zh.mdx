@@ -1,6 +1,6 @@
 ---
 title: 0.1.0
-description: 发布日期待定
+description: 2026 年 11 月 17 日
 icon: PartyPopper
 ---
 
@@ -59,10 +59,11 @@ CodeDAG Guide 插件让 Claude Code 和 Codex 学会使用 `cdg`。装好之后�
 - **只能用 Google 账号登录，并且需要浏览器。** 登录要在运行 CodeDAG 的这台电脑上通过浏览器完成，没有桌面浏览器的环境目前无法登录，也就无法初始化项目和提交工作流，见[没有桌面浏览器时](/zh/docs/account/login-and-account#no-browser)。对这类环境的支持已列入后续版本的规划。
 - **没有额度补充包。** 免费额度用完或到期后，要订阅才能继续提交工作流；订阅的额度每月重置，当月用完后要等下一次重置，见[额度与订阅](/zh/docs/account/credits-and-subscription)。
 - **公测期间暂不支持 Windows。**
+- **Mac 上暂不提供直接下载。** macOS 版暂未经过 Apple 公证，在 Mac 上请用 Homebrew 或 npm 安装；直接下载的方式在公证版本发布后提供。
 
 ## 平台与安装
 
-0.1.0 支持 macOS 和 Linux，Apple 芯片与 Intel 芯片的 Mac、x64 与 arm64 的 Linux 都有对应的版本，统一通过 Homebrew 安装和升级。CodeDAG 以独立的二进制程序分发，不需要安装 Node.js。
+0.1.0 支持 macOS 和 Linux，Apple 芯片与 Intel 芯片的 Mac、x64 与 arm64 的 Linux 都有对应的版本；Linux 需要 glibc 2.28 或更高版本，不支持 Alpine 这类使用 musl 的发行版。CodeDAG 是独立的可执行程序，可以用 Homebrew、npm 或直接下载三种方式安装，装上的是同一个程序。用 Homebrew 或直接下载安装时不需要 Node.js；用 npm 安装时需要 npm 和它所依赖的 Node.js，装好之后运行 CodeDAG 不再依赖 Node.js。在 Mac 上目前只能用 Homebrew 或 npm 安装，原因见上面的已知限制。
 
 除 CodeDAG 本身之外，你还需要 Git，以及 Claude Code 或 Codex 至少一个。Claude Code 最低要求 2.1.196，0.1.0 验证过的最新版本是 2.1.292。安装、登录和升级的步骤见[安装与登录](/zh/docs/get-started/installation)。
 

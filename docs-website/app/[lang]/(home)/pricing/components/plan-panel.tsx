@@ -10,6 +10,8 @@ import { EntryButton, focusRing, tail } from '../../components/ui';
 /**
  * 订阅计划：付款周期切换、价格、包含的内容和订阅按钮。
  * 按钮的目标与文案由服务端按主页模式算好传入（lib/site-mode.ts）。
+ * 打开时选中年付，用户切换只在当前页面有效。初始周期是常量，不从地址、存储或 Cookie 里取：
+ * 服务端输出的 HTML 与水合时的初始状态相同，首屏就是年付，不闪、不报水合不一致。
  */
 export function PlanPanel({
   t,
@@ -20,7 +22,7 @@ export function PlanPanel({
   entries: Record<BillingCycle, Entry>;
   entryNote: string;
 }) {
-  const [billing, setBilling] = useState<BillingCycle>('monthly');
+  const [billing, setBilling] = useState<BillingCycle>('yearly');
   const yearly = billing === 'yearly';
   const group = useRef<HTMLDivElement>(null);
 
@@ -73,17 +75,28 @@ export function PlanPanel({
         </div>
       </div>
 
-      <p className="mt-8 flex h-14 items-baseline gap-2 text-home-ink" aria-live="polite">
-        <span className="text-[3.25rem] font-semibold leading-none tracking-[-0.03em] tabular-nums">
-          {yearly ? t.priceYearly : t.priceMonthly}
-        </span>
-        <span className="text-lg text-home-muted">
-          {yearly ? t.priceYearlyUnit : t.priceMonthlyUnit}
-        </span>
-      </p>
-      <p className="mt-3 text-[0.9375rem] leading-[1.6] text-home-muted">
-        {yearly ? t.yearlyNote : t.monthlyNote}
-      </p>
+      {/* 两种周期都按每月价格显示。年付时在单位后面跟一个划线的月付价格：放在单位之后，
+          切换时大号数字不挪位置，只是行尾的划线价出现或消失。划线价对读屏隐藏，另用一句
+          读屏文字说明它是月付的价格；切换后读屏软件把价格和下一行一起重读 */}
+      <div className="mt-8" aria-live="polite" aria-atomic="true">
+        <p className="flex h-14 items-baseline gap-2 text-home-ink">
+          <span className="text-[3.25rem] font-semibold leading-none tracking-[-0.03em] tabular-nums">
+            {yearly ? t.priceYearlyPerMonth : t.priceMonthly}
+          </span>
+          <span className="text-lg text-home-muted">{t.perMonth}</span>
+          {yearly ? (
+            <>
+              <s aria-hidden="true" className="text-xl text-home-muted tabular-nums">
+                {t.priceMonthly}
+              </s>
+              <span className="sr-only">{t.monthlyPriceSr}</span>
+            </>
+          ) : null}
+        </p>
+        <p className="mt-3 text-[0.9375rem] leading-[1.6] text-home-muted">
+          {yearly ? t.yearlyTotal : t.monthlyNote}
+        </p>
+      </div>
 
       <EntryButton entry={entries[billing]} className="mt-7 w-full sm:w-auto" />
       {entryNote ? (

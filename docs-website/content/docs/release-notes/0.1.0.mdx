@@ -1,6 +1,6 @@
 ---
 title: 0.1.0
-description: Release date to be determined
+description: November 17, 2026
 icon: PartyPopper
 ---
 
@@ -59,10 +59,11 @@ The CodeDAG Guide plugin teaches Claude Code and Codex how to use `cdg`. Once it
 - **You can sign in only with a Google account, and you need a browser.** Sign-in has to be completed through a browser on the computer that runs CodeDAG. Environments without a desktop browser can't sign in for now, and so can't initialize projects or submit workflows. See [Without a desktop browser](/docs/account/login-and-account#no-browser). Support for these environments is planned for a later release.
 - **No credit top-up packs.** After your free credits run out or expire, you have to subscribe to keep submitting workflows. Subscription credits reset every month, and once you've used up the month's credits, you have to wait for the next reset. See [Credits and Subscription](/docs/account/credits-and-subscription).
 - **Windows isn't supported during the public beta.**
+- **Direct downloads aren't available for Mac yet.** The macOS builds haven't been notarized by Apple yet, so on a Mac, install CodeDAG with Homebrew or npm. Direct downloads will be offered once a notarized version is released.
 
 ## Platforms and installation
 
-0.1.0 supports macOS and Linux, with builds for both Apple silicon and Intel Macs and for both x64 and arm64 Linux. All of them are installed and upgraded through Homebrew. CodeDAG is distributed as a standalone binary, so you don't need to install Node.js.
+0.1.0 supports macOS and Linux, with builds for both Apple silicon and Intel Macs and for both x64 and arm64 Linux. Linux requires glibc 2.28 or later, and distributions that use musl, such as Alpine, aren't supported. CodeDAG is a standalone executable that you can install in three ways: with Homebrew, with npm, or by direct download. All three install the same program. Installing with Homebrew or by direct download doesn't require Node.js. Installing with npm requires npm and the Node.js it depends on, but once it's installed, CodeDAG doesn't need Node.js to run. On a Mac, you can currently install only with Homebrew or npm. For why, see the known limitations above.
 
 Besides CodeDAG itself, you need Git and at least one of Claude Code or Codex. Claude Code must be version 2.1.196 or later, and the latest version verified with 0.1.0 is 2.1.292. For the installation, sign-in, and upgrade steps, see [Installation and Sign-In](/docs/get-started/installation).
 

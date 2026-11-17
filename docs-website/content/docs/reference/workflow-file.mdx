@@ -314,7 +314,7 @@ The syntax of `mode` differs by agent. See [Permission mode syntax](#mode-syntax
 
 `model` sets the model the task uses. It's an optional non-empty string that's passed as is to the agent's `--model` option. When omitted, the task uses the default model configured in the agent itself. CodeDAG doesn't check model names. A misspelled name passes validation, and the agent reports the error only when the task runs.
 
-For Claude Code, you can write an alias such as `sonnet`, `opus`, or `haiku`, or a full model name. See Claude Code's [model configuration documentation](https://code.claude.com/docs/en/model-config). For Codex, write a model name. For the available models, see Codex's [models documentation](https://learn.chatgpt.com/docs/models).
+For Claude Code, you can write an alias such as `haiku`, `sonnet`, or `opus`, or a full model name. See Claude Code's [model configuration documentation](https://code.claude.com/docs/en/model-config). For Codex, write a model name. For the available models, see Codex's [models documentation](https://learn.chatgpt.com/docs/models).
 
 ```yaml title="yaml"
   - id: 3

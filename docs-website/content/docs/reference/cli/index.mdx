@@ -44,7 +44,7 @@ In a command, you can give a workflow as a name or as a path. Either way, it mus
 | File name | `feature.json` | When a directory has files with the same name and different extensions. The extension selects one of them. |
 | Path starting with `.codedag/dags/` | `.codedag/dags/team/feature.yaml` | When the workflow is in a subdirectory. Always resolved from the root of the primary repository, regardless of the current directory. The extension can be omitted here too. |
 | Path relative to the current directory | `./feature.yaml`, `../.codedag/dags/feature.yaml` | When you're already in `.codedag/dags/` or a subdirectory of the primary repository and want shell completion to fill in the path. |
-| Absolute path | `/Users/me/project/.codedag/dags/feature.yaml` | When you write a fixed path in a script. |
+| Absolute path | `/path/to/project/.codedag/dags/feature.yaml` | When you write a fixed path in a script. |
 
 Names and paths that start with `.codedag/dags/` are always resolved from the primary repository, so they work the same whether you run the command in the primary repository, in any registered replica workspace, or in any subdirectory of either. Every other relative form that contains a `/`, including those that start with `./` or `../`, is resolved from the current directory. So `team/feature` is rejected at the root of the primary repository, and a workflow in a subdirectory has to be written as `.codedag/dags/team/feature`. In a replica workspace, a relative path such as `./.codedag/dags/feature.yaml` points into the replica's own directory and is rejected as well. Use the name or the form that starts with `.codedag/dags/` instead.
 

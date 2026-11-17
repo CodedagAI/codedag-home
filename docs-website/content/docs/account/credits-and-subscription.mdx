@@ -30,15 +30,13 @@ On monthly billing, credits reset with each renewal. On yearly billing, you pay 
 
 A subscription doesn't cover third-party AI model costs. CodeDAG drives the Claude Code or Codex you've installed and signed in to yourself, and their usage counts against your own accounts as usual. See [Control Cost](/docs/account/cost-control).
 
-You subscribe on the Billing page of the web console ([app.codedag.com](https://app.codedag.com)) and pay by credit or debit card. The card number field on the payment page is provided by Stripe, so your card number goes straight to Stripe and never passes through CodeDAG's servers. For the rules on switching the billing interval, canceling a subscription, and other changes, see [Subscription details](#subscription-details).
+To subscribe, start from the Billing page of the web console ([app.codedag.com](https://app.codedag.com)) and pay on the checkout page it takes you to. The payment form is provided by Stripe, so your card number goes straight to Stripe and never passes through CodeDAG's servers.
 
 ### Tax and billing regions [#tax-and-regions]
 
-Prices don't include tax. Any applicable tax is calculated and shown on the payment page. Before you pay, you choose your billing region (a country or region). In the US you also enter a ZIP code, and in Canada you also choose a province. CodeDAG uses this to determine whether you can pay and how much tax applies, and renewals use the same billing region.
+Prices don't include tax. Tax is calculated from the billing region on the checkout page, and CodeDAG also uses the billing region to determine whether you can pay. Renewals keep the billing region you subscribed with, and once you've subscribed, you can't change it on the Billing page yourself. To change it, email us at <Email user="hi" />. So before you pay, check the billing region the checkout page has filled in: if you haven't chosen or paid with a region before, it's inferred from your network location and may be wrong if you're using a proxy.
 
-Payments aren't available yet in some countries and regions. If you choose one of them, the payment page says payments aren't open there yet and doesn't show the card number field, so you can't subscribe. Your free credits still work as usual. If you'd like to subscribe from one of these regions, let us know at <Email user="hi" />.
-
-Once you have a subscription, the Billing page shows your current billing region, and you can't change it there yourself. To change it, email us at <Email user="hi" />.
+Payments aren't available yet in some countries and regions. If your billing region is one of them, you can't subscribe, but your free credits still work as usual. If you'd like to subscribe from one of these regions, let us know at <Email user="hi" />.
 
 ## When credits are deducted [#when-deducted]
 
@@ -136,6 +134,10 @@ When a renewal payment fails, the subscription is temporarily unavailable, and t
 
 After you pay, you're taken back to the Billing page. The subscription usually takes effect within a few seconds, and the page updates on its own. Until then, `cdg dag submit{:sh}` and `cdg auth status{:sh}` still see your previous credits: either your free credits or a message that no credits are available. Wait a moment and try again.
 
+### Email language [#email-language]
+
+After you pay, CodeDAG and Stripe send you emails such as the subscription confirmation, receipts, and renewal reminders, and all of them follow the language saved to your account. The language saved to your account follows your most recent choice in the web console's language menu. If you've never chosen one, it's the language the page was shown in when your account was created.
+
 ### Invoices
 
 The Billing page of the web console lists this account's most recent payments. Select **View** on a payment to open its Stripe invoice page, where you can download the invoice and the receipt. For earlier payments, go to the Stripe customer portal, which you open with **Manage subscription** on the Billing page.
@@ -144,5 +146,5 @@ The Billing page of the web console lists this account's most recent payments. S
 
 - **No credit top-up packs.** Once your subscription's credits for the month are used up, this account has to wait for the next reset.
 - **No shared team credits.** Credits belong to a single account, and there's no credit pool shared by a team or organization. When you use the same account on several computers, they share that one account's own credits.
-- **Payments aren't available in some countries and regions.** Accounts there can still use their free credits as usual. See [Tax and billing regions](#tax-and-regions).
+- **Payments aren't available in some countries and regions.** If your billing region is one of them, you can't subscribe, but your free credits still work as usual. See [Tax and billing regions](#tax-and-regions).
 - **Only credit and debit cards are accepted.** Wallets such as Apple Pay and Google Pay aren't supported yet.

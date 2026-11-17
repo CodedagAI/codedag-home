@@ -18,7 +18,7 @@ icon: ShieldCheck
 
 两个字段直接写在任务下面，例如 `model: opus`、`effort: high`，可以填的值由各家 Agent 决定：
 
-- **Claude Code：** `model` 可以写别名 `sonnet`、`opus`、`haiku`，分别指向 Sonnet、Opus、Haiku 系列的模型，也可以写完整的模型名。
+- **Claude Code：** `model` 可以写别名 `haiku`、`sonnet`、`opus`、`fable`，分别指向 Haiku、Sonnet、Opus、Fable 系列的模型，也可以写完整的模型名。
 - **Codex：** `model` 写模型名，例如 `gpt-6.1-sol`，当前可用的模型以 Codex 的 `/model` 菜单为准。
 - **推理力度：** `effort` 哪些档位可用取决于模型。`low`、`medium`、`high` 最常见，更高的 `xhigh`、`max` 等档位只有部分模型支持。
 
@@ -109,9 +109,19 @@ Agent 有几个只在第一次才出现的确认界面，其中要你本人应�
 
 ### 提前接受 Claude Code 的完全授权警告 [#accept-bypass-warning]
 
-Claude Code 任务要以完全授权模式 `bypassPermissions`（含别名 `yolo`）运行，而你在这台电脑上还没有接受过这个模式的警告时，提交之前先在终端里做一次：运行 `claude --permission-mode bypassPermissions{:sh}`，选 “Yes, I accept” 再退出。接受一次之后，这台电脑上的所有目录都不再出现。这个警告要你确认愿意承担跳过权限检查的后果，CodeDAG 不会代你确认。Codex 以完全授权方式运行时没有这一步。
+Claude Code 以完全授权模式 `bypassPermissions` 运行之前，这台电脑上要先接受过这个模式的警告。下面两种情况都会用到这个模式：
 
-没有提前接受也可以事后补上：任务会停在 `on-hold`，原因是 `agent-bypass-permissions-unaccepted`。`cdg task status <任务 ID> -w <工作流>{:sh}` 的诊断会写明在终端接受警告的做法，照着做完，再运行 `cdg task recover <任务 ID> -w <工作流>{:sh}`，任务从头重新启动。
+- **任务的 `mode` 是完全授权：** Claude Code 任务的 `mode` 写的是 `bypassPermissions`，或者它的别名 `yolo`。
+- **由 Claude Code 解决合并冲突：** 隔离分支模式下，自动合并出现冲突时，CodeDAG 另开一个冲突会话来解决。工作流没写 `mergeConflictAgent.mode` 时，冲突会话以完全授权运行（见[`mode` 管到哪些会话](#mode-scope)），所以即使所有任务都不用完全授权，冲突交给 Claude Code 解决时也要用到它。没写 `mergeConflictAgent` 时，冲突由汇聚任务自己的 Agent 或项目的默认 Agent 解决，见[合并冲突交给谁](/zh/docs/guides/mixing-agents#merge-conflicts)。
+
+还没有接受过时，提交之前先在终端里做一次：运行 `claude --permission-mode bypassPermissions{:sh}`，选 “Yes, I accept” 再退出。接受一次之后，这台电脑上以完全授权启动 Claude Code 时都不再出现这个警告；它只是不再询问，不会改变你其他会话的权限模式。这个警告要你确认愿意承担跳过权限检查的后果，CodeDAG 不会代你确认。Codex 以完全授权方式运行时没有这一步。
+
+不想在这台电脑上接受这个警告，又可能遇到合并冲突时，可以用 [`mergeConflictAgent`](/zh/docs/reference/workflow-file#merge-conflict-agent) 把冲突交给 Codex 解决。给冲突会话写一个不是完全授权的 `mode` 也能避开这个警告，但冲突会话一请求批准就会停住。
+
+没有提前接受也可以事后补上。CodeDAG 会让任务或工作流停在 `on-hold`，`cdg task status{:sh}` 或 `cdg dag status{:sh}` 输出的 `Diagnostic:` 行写明在终端接受警告的做法，照着做完再恢复：
+
+- **任务被警告拦住：** 原因是 `agent-bypass-permissions-unaccepted`。接受警告后运行 `cdg task recover <任务 ID> -w <工作流>{:sh}`，任务从头重新启动。
+- **冲突会话被警告拦住：** 冲突发生在汇聚任务开始之前时，这个任务停住，原因是 `merge-conflict`；发生在合并到集成分支时，停住的是工作流，原因是 `integration-merge-conflict`。这时冲突会话还没有开始工作，CodeDAG 已经撤销了这次合并，工作区不需要清理。接受警告后直接恢复：任务停住时运行 `cdg task recover <任务 ID> -w <工作流>{:sh}`，工作流停住时运行 `cdg dag recover <工作流>{:sh}`。CodeDAG 会重新合并，冲突照常交给冲突会话解决。怎样从诊断认出这种情况，见故障排除的[合并冲突](/zh/docs/troubleshooting/troubleshooting#hold-merge-conflict)。
 
 ### 提前允许 Claude Code 读取工作目录以外的文件 [#allow-outside-reads]
 
@@ -130,9 +140,9 @@ Claude Code 任务以 `auto` 模式运行、又要读仓库以外的文件，而
 
 ### CodeDAG 代你应答的询问 [#auto-answered]
 
-**目录信任。** 两家 Agent 第一次在某个目录里启动时，都会先问是否信任这个目录。任务运行在你自己登记的工作区里，所以 CodeDAG 直接替你选择信任，换一个仓库、为并行执行新建副本目录时也一样。这个选择由 Agent 自己记下：Claude Code 按目录记，Codex 按 Git 仓库根记在它的 `config.toml` 里。
+**目录信任。** 两家 Agent 第一次在某个目录里启动时，都会先问是否信任这个目录。任务运行在你自己登记的工作区里，所以 CodeDAG 直接替你选择信任，换一个仓库、为并行执行新建副本目录时也一样。这个选择由 Agent 自己记下：Claude Code 按项目目录记，git worktree 不单独记，与主仓库共用一条；Codex 按 Git 仓库根记在它的 `config.toml` 里。
 
-**外部 CLAUDE.md 导入。** 项目或它的上级目录里的 CLAUDE.md 用 `@` 导入了工作目录以外的文件时，Claude Code 首次启动会问 “Allow external CLAUDE.md file imports?”。导入进来的是你自己为这个项目或这台电脑配置的规则文件，所以 CodeDAG 直接替你选择允许导入。这个选择和目录信任一样按启动目录记录，新仓库、为并行执行新建的副本目录，也都由 CodeDAG 在任务启动时应答。
+**外部 CLAUDE.md 导入。** 项目或它的上级目录里的 CLAUDE.md 用 `@` 导入了工作目录以外的文件时，Claude Code 第一次在这个项目里启动会问 “Allow external CLAUDE.md file imports?”。导入进来的是你自己为这个项目或这台电脑配置的规则文件，所以 CodeDAG 直接替你选择 “Yes, allow external imports”。这个选择与目录信任记在一起，git worktree 同样与主仓库共用一条：主仓库允许过之后，为并行执行新建的 worktree 不再询问；新仓库和 clone 副本各问一次，也都由 CodeDAG 在任务启动时应答。
 
 ## Claude Code 的写法 [#claude-code]
 
@@ -152,7 +162,7 @@ tasks:
 
 `auto` 模式有使用条件：任务所用的模型要支持它，这里的模型指任务的 `model`，没写时是 Claude Code 的默认模型，Haiku 4.5 这类较旧的模型就不支持；组织管理员也可以关闭 auto 模式。条件不满足时，Claude Code 以 Manual 模式（`default`）启动，任务会在第一个需要批准的编辑或命令处停下，见[写了 `auto`，任务却停下来等批准](#auto-unavailable)。改用 `acceptEdits` 时，文件编辑和 `mkdir`、`mv`、`cp` 这类常用的文件命令直接执行，运行测试、构建这类其他命令都要批准，任务停下的次数会多得多。其余模式名和别名见[权限模式语法](/zh/docs/reference/workflow-file#mode-claude-code)。
 
-这两个模式各有一个只在第一次出现、要你本人应答的界面：`bypassPermissions` 启动时的[完全授权警告](#accept-bypass-warning)，和 `auto` 模式下任务第一次读取工作目录以外的文件时的[询问](#allow-outside-reads)。还没应答过的话，任务会停在那里等你，提交之前先在终端里做掉。
+这两个模式各有一个只在第一次出现、要你本人应答的界面：`bypassPermissions` 启动时的[完全授权警告](#accept-bypass-warning)，和 `auto` 模式下任务第一次读取工作目录以外的文件时的[询问](#allow-outside-reads)。还没应答过的话，任务会停在那里等你，提交之前先在终端里做掉。任务都用 `auto` 时也要先接受完全授权警告：隔离分支模式下由 Claude Code 解决合并冲突的会话，默认以完全授权运行。
 
 即使用了 `bypassPermissions`，Claude Code 仍会为少数操作停下来问你，例如权限规则里设为需要询问的工具、Agent 主动向你提出的问题，以及删除根目录或主目录这类关键路径的命令，这时任务同样会停在那里。
 

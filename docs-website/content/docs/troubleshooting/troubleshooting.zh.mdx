@@ -118,15 +118,20 @@ cdg dag submit <工作流>
 
 ### 合并冲突 [#hold-merge-conflict]
 
-原因是 `merge-conflict`（任务）或 `integration-merge-conflict`（工作流）时，CodeDAG 自动合并各任务的结果时出现了冲突，另开的 Agent 会话处理了三轮仍没有解决，需要你在对应的工作区里完成这次合并。自动合并发生在两个位置：汇聚任务开始之前，上游任务的结果合并进它的任务分支；全部任务审核完成之后，各任务的结果合并进集成分支。机制见[汇聚节点的合并与冲突](/zh/docs/concepts/workspaces-and-branches#merge-and-conflicts)。
+原因是 `merge-conflict`（任务）或 `integration-merge-conflict`（工作流）时，CodeDAG 自动合并各任务的结果时出现了冲突，另开的 Agent 会话（冲突会话）没能完成这次合并。自动合并发生在两个位置：汇聚任务开始之前，上游任务的结果合并进它的任务分支；全部任务审核完成之后，各任务的结果合并进集成分支。机制见[汇聚节点的合并与冲突](/zh/docs/concepts/workspaces-and-branches#merge-and-conflicts)。
 
-停下的时候，CodeDAG 已经退出了这次合并：工作区里留着 Agent 改到一半的文件，冲突的文件没有暂存，Git 也不再处于合并状态。这时直接 `git add` 再提交，得到的只是一次普通提交，而不是合并，CodeDAG 恢复时仍会认为上游的结果没有合并进来。可靠的做法是丢掉这些半成品，自己重新做一次合并。
+先看 `Diagnostic:` 行分清是哪一种情况，任务看 `cdg task status <任务 ID> -w <工作流>{:sh}`，工作流看 `cdg dag status <工作流>{:sh}`：
+
+- **冲突会话被启动界面拦住，合并已经撤销：** `Diagnostic:` 以 `The merge conflict session could not start` 开头，并写明合并已经撤销（`The merge was rolled back`）。冲突会话一启动就停在了要人应答的界面上，例如这台电脑还没有接受过 Claude Code 的完全授权警告；CodeDAG 没有再开后面几轮，而是撤销了这次合并，工作区和合并之前一样，不需要清理。按 `Diagnostic:` 的说明处理掉那个界面，它写明了在哪个目录运行什么命令；完全授权警告的做法也可以看[提前接受 Claude Code 的完全授权警告](/zh/docs/guides/agents-and-permission-modes#accept-bypass-warning)。然后直接恢复：任务停住时执行 `cdg task recover <任务 ID> -w <工作流>{:sh}`，工作流停住时执行 `cdg dag recover <工作流>{:sh}`。CodeDAG 会重新合并，冲突照常交给冲突会话解决。
+- **冲突会话处理过仍没有解决，或者合并没有撤销：** 冲突会话处理了三轮仍没有解决，需要你在对应的工作区里完成这次合并，按下面的步骤处理。另有少数情况，`Diagnostic:` 说冲突会话没能启动，却没有写合并已经撤销，而是要你先处理工作区里未完成的合并（`Resolve the Git state`），这时同样按下面的步骤处理；恢复之前先按 `Diagnostic:` 处理掉那个界面，否则之后再有冲突时，冲突会话还会停在那里。
+
+需要你完成合并时，CodeDAG 已经退出了这次合并：工作区里留着带冲突标记的文件，或者 Agent 改到一半的文件，冲突的文件没有暂存，Git 也不再处于合并状态。这时直接 `git add` 再提交，得到的只是一次普通提交，而不是合并，CodeDAG 恢复时仍会认为上游的结果没有合并进来。可靠的做法是丢掉这些半成品，自己重新做一次合并。
 
 任务停在 `merge-conflict` 时：
 
 1. 用 `cdg task logs <任务 ID> -w <工作流>{:sh}` 查看日志末尾：`Incoming source task:` 是正在合并进来的上游任务，`Conflict summary:` 下面列出了冲突的文件。
-2. 用 `cdg task status <任务 ID> -w <工作流>{:sh}` 查到现场：`Workspace:` 行是这个任务的工作区，`Branch:` 行是它的任务分支；对上游任务执行同一条命令，就能拿到要合并进来的那个分支名。
-3. 在那个工作区里丢掉半成品，重新合并上游任务的分支，解决冲突后提交：
+2. 用 `cdg task status <任务 ID> -w <工作流>{:sh}` 查到现场：`Workspace:` 行是这个任务的工作区，`Branch:` 行是它的任务分支；对上游任务执行同一条命令，就能拿到要合并进来的那个分支名，以及执行它的工作区。
+3. 在被搁置任务的工作区里丢掉半成品，重新合并上游任务的分支，解决冲突后提交：
 
    ```bash title="Terminal"
    git reset --hard
@@ -136,7 +141,7 @@ cdg dag submit <工作流>
    git commit
    ```
 
-   自动合并发生在任务开始工作之前，`git reset --hard` 丢掉的只是这次合并留下的半成品。如果 `git merge` 提示未跟踪的文件会被覆盖，说明上一次合并还留下了新建的文件，先用 `git clean -fd` 清掉它们。用 clone 副本时，上游任务的分支只存在于执行它的那个副本里，`codedag-mirror` 远程里也没有它。如果它不在当前工作区，先从执行它的副本取回，例如 `git fetch ../my-app-clone-1 cdg/<工作流名>/t<上游任务 ID>-<标题>{:sh}`，再用 `git merge FETCH_HEAD{:sh}` 代替上面的 `git merge`。
+   自动合并发生在任务开始工作之前，`git reset --hard` 丢掉的只是这次合并留下的半成品。如果 `git merge` 提示未跟踪的文件会被覆盖，说明上一次合并还留下了新建的文件，先用 `git clean -fd` 清掉它们。用 clone 副本时，上游任务的分支只存在于执行它的那个工作区里，可能是主仓库，也可能是某个 clone，`codedag-mirror` 远程里也没有它。如果它不在当前工作区，先从执行它的工作区（第 2 步中上游任务的 `Workspace:` 行）取回，例如 `git fetch ../my-app-clone-1 cdg/<工作流名>/t<上游任务 ID>-<标题>{:sh}`，再用 `git merge FETCH_HEAD{:sh}` 代替上面的 `git merge`。
 4. 确认 `git status` 干净之后，执行 `cdg task recover <任务 ID> -w <工作流>{:sh}`。CodeDAG 会发现这个上游的结果已经在任务分支里，接着合并其余的上游（遇到冲突仍先交给 Agent），然后开始任务本身。如果合并还没提交、仍处于合并状态，任务会继续停在 `on-hold`。
 
 工作流停在 `integration-merge-conflict` 时，做法相同，只是地点换成集成分支所在的工作区，分支换成集成分支；`cdg dag status <工作流>{:sh}` 的 `Integration Workspace:` 与 `Integration Branch:` 两行给出它们。在那里执行 `git reset --hard`，然后把通过审核（`accepted` 或 `auto-accepted`）的任务分支逐个合并进来，直到冲突解决；各任务的审核结果可以在 `cdg dag status <工作流>{:sh}` 里看到。最后执行 `cdg dag recover <工作流>{:sh}`，还没合并的其余结果由 CodeDAG 接着合并。
@@ -151,6 +156,7 @@ cdg dag submit <工作流>
 |---|---|---|
 | `agent-session-ended` | 任务执行期间，它的会话或 CodeDAG 的后台进程意外结束，例如电脑重启。 | 执行 `cdg task recover{:sh}`，CodeDAG 重新打开原来的会话并让它接着做，见[机器重启或进程崩溃之后](#after-restart)。 |
 | `agent-session-input-unavailable` | 会话没能进入可以接收输入的状态，常见的是停在某个要求应答的界面上。 | 用 `cdg task view{:sh}` 进入会话，处理掉这个界面，退出后执行 `cdg task recover{:sh}`。恢复不了时，用 `cdg task kill{:sh}` 停下它。 |
+| `agent-startup-prompt-unconfirmed` | Claude Code 任务启动时，CodeDAG 没能把任务的 prompt 交给它，任务没有开始，例如 Claude Code 停在一个要人应答的选择框上。 | `Diagnostic:` 写出了界面的标题时，先应答那个界面，再执行 `cdg task recover{:sh}`；没有标题时先直接执行 `cdg task recover{:sh}`，再次以同一原因停住时再去处理界面。两种做法见[任务刚启动就停住](#agent-start-failed)。这时的恢复会重新启动任务，不沿用原来的会话。 |
 | `agent-api-error` | 会话因为 API 错误中断，最常见的是用量或速率限制。 | 见[Agent 用量限额或速率限制](#agent-usage-limits)。 |
 | `agent-lifecycle-state-unavailable` | CodeDAG 无法确认会话进行到了哪一步、是否已经完成。 | Codex 任务一启动就停在这里，多半是它还停在登录这类要人应答的启动界面上，见[任务刚启动就停住](#agent-start-failed)。其他情况先执行 `cdg task recover{:sh}` 重试；仍然不行时，用 `cdg task kill{:sh}` 停下任务，检查它的改动，再像审核普通任务一样给出结论。Claude Code 版本高于 CodeDAG 已验证的范围时也可能出现，见[版本相关](#versions)。 |
 | `agent-subagent-incomplete` | Codex 任务派出的子 Agent 没有全部结束。 | 用 `cdg task view{:sh}` 查看后执行 `cdg task recover{:sh}`。`Diagnostic:` 中的子 Agent 标为 `state=unconfirmed` 时，核实没有意外改动和残留进程后，使用 [`--acknowledge-unconfirmed`](/zh/docs/reference/cli/control#acknowledge-unconfirmed)。 |
@@ -231,14 +237,18 @@ cdg dag submit <工作流>
 
 ## 任务刚启动就停住 [#agent-start-failed]
 
-Agent 在开放普通输入之前可能显示一个要人应答的界面，任务启动时没有人在终端前，它就停在那里。目录信任的询问由 CodeDAG 代你选择信任，不会让任务停下，见[CodeDAG 代你应答的询问](/zh/docs/guides/agents-and-permission-modes#auto-answered)。
+Agent 在开放普通输入之前可能显示一个要人应答的界面，任务启动时没有人在终端前，它就停在那里。目录信任和外部 CLAUDE.md 导入的询问由 CodeDAG 代你应答，不会让任务停下，见[CodeDAG 代你应答的询问](/zh/docs/guides/agents-and-permission-modes#auto-answered)。
 
-有两种界面要你本人决定，CodeDAG 只识别它们，不替你按键：
+其他界面要你本人决定。下面几种 CodeDAG 认得出，它不替你按键，而是让任务停下，在 `Diagnostic:` 行说明情况：
 
 - **Claude Code 的完全授权警告。** 以 `bypassPermissions`（CodeDAG 里的别名 `yolo`）运行的任务，在这台电脑上还没接受过这个模式的警告时，任务停在 `[pending] [on-hold]`，原因为 `agent-bypass-permissions-unaccepted`，`Diagnostic:` 行给出在终端接受警告的做法。接受警告与恢复任务的步骤见[提前接受 Claude Code 的完全授权警告](/zh/docs/guides/agents-and-permission-modes#accept-bypass-warning)。
-- **Codex 的登录等其他启动界面。** 还没登录时，Codex 停在登录引导上，任务停在 `[pending] [on-hold]`，原因为 `agent-lifecycle-state-unavailable`，`Diagnostic:` 行附上当前屏幕，便于你认出它停在什么界面。用 `cdg task view <任务 ID> -w <工作流>{:sh}` 进入会话，在里面完成登录，退出后执行 `cdg task recover{:sh}`；也可以先用 `cdg task kill{:sh}` 停下任务，在终端里单独运行 `codex{:sh}` 处理好，再 `cdg task recover{:sh}` 让任务重新启动，不必重新提交。
+- **Claude Code 的其他选择框。** Claude Code 启动时显示的选择框不是 CodeDAG 代答的那两种时，CodeDAG 不按键，也不写入 prompt。启动约 30 秒后，任务停在 `[pending] [on-hold]`，原因为 `agent-startup-prompt-unconfirmed`，`Diagnostic:` 行写出这个界面的标题和任务的工作区。在那个工作区里运行一次 `claude{:sh}`，应答这个界面后退出，再执行 `cdg task recover{:sh}`，任务重新启动。
+- **Codex 的登录等启动界面。** 还没登录时，Codex 停在登录引导上，任务停在 `[pending] [on-hold]`，原因为 `agent-lifecycle-state-unavailable`，`Diagnostic:` 行附上当前屏幕，便于你认出它停在什么界面。用 `cdg task view <任务 ID> -w <工作流>{:sh}` 进入会话，在里面完成登录，退出后执行 `cdg task recover{:sh}`；也可以先用 `cdg task kill{:sh}` 停下任务，在终端里单独运行 `codex{:sh}` 处理好，再 `cdg task recover{:sh}` 让任务重新启动，不必重新提交。
 
-Agent 也可能停在 CodeDAG 不认识的界面上，这时任务不会给出搁置原因。任务停在启动阶段、日志里看不到你的 prompt 时，在那个工作区里手动启动一次这个 Agent，处理掉它显示的确认界面，再执行 `cdg task recover{:sh}`。
+启动时也可能出别的状况，或者 Agent 停在 CodeDAG 认不出的其他界面上，这时任务不一定给出搁置原因或界面的标题：
+
+- **Claude Code 任务以 `agent-startup-prompt-unconfirmed` 搁置，`Diagnostic:` 里没有界面的标题：** 诊断说 prompt 没能交给 Claude Code、任务没有开始，例如启动后 30 秒内一直没有出现输入框。按诊断的建议，先直接执行 `cdg task recover{:sh}`，任务重新启动。再次以同一原因停住时，可能是 Claude Code 停在了一个 CodeDAG 认不出的界面上，按下一条处理。
+- **停在认不出的界面上：** 任务停在启动阶段、日志里看不到你的 prompt 时，在任务的工作区（`cdg task status{:sh}` 的 `Workspace:` 行）里手动启动一次这个 Agent，处理掉它显示的确认界面后退出，再执行 `cdg task recover{:sh}`。
 
 ## Agent 在等你审批或回答 [#approval-waiting]
 
@@ -353,7 +363,7 @@ cdg dag recover <工作流>
 - **提示 `Failed to save credentials to the local secure storage.`** 浏览器里的登录已经完成，但登录凭证没能保存到这台电脑上，这次登录没有生效。确认 CodeDAG 的全局目录（默认是 `~/.codedag`）可写、磁盘空间充足后重新登录。
 - **在 SSH 远程会话、容器或没有图形界面的服务器里无法登录。** 登录必须在运行 `cdg` 的同一台电脑上用浏览器完成，这类环境目前无法登录，见[没有桌面浏览器时](/zh/docs/account/login-and-account#no-browser)。对这类环境的支持已列入后续版本的规划。
 - **过一段时间就要求重新登录。** 登录状态长时间不用会失效；把登录凭证复制到另一台电脑上使用，还会让这个账号在所有电脑上的登录一起作废。见[登录状态能保持多久](/zh/docs/account/login-and-account#credentials)与[退出登录、多台电脑与切换账号](/zh/docs/account/login-and-account#sign-out)。
-- **登录后是另一个账号。** 运行 `cdg auth login{:sh}` 重新登录，在账号确认页选择更换账号，见[浏览器已经登录了网页控制台时](/zh/docs/account/login-and-account#confirm-account)。
+- **登录后是另一个账号。** 直接运行 `cdg auth login{:sh}`，用要用的 Google 账号重新登录，新的登录会替换原来的。
 - **排队中的工作流因为登录状态停在 `on-hold`。** 见[账号与额度闸门](#startup-gate)。
 - **CodeDAG 服务暂时不可用。** 见[服务不可用时](/zh/docs/account/login-and-account#service-unavailable)。
 
@@ -361,9 +371,17 @@ cdg dag recover <工作流>
 
 **CodeDAG CLI 版本过低。** CodeDAG 服务设有 CLI 的最低支持版本，低于它的 CLI 会在查询额度、提交和开始执行工作流时被拦下：`cdg auth status{:sh}` 和 `cdg dag submit{:sh}` 报 `This CodeDAG CLI version (<当前版本>) is no longer supported.`，同一行写明最低支持版本，命令以退出码 1 结束，工作流不会提交；已经在排队的工作流轮到执行时停在 `on-hold`，`Startup gate failure:` 为 `cli_version_unsupported`。已经开始执行的工作流不受影响，查看状态、日志和审核这些不连接服务的命令也照常可用。
 
-处理办法是升级 CLI：用 `brew upgrade codedag{:sh}` 升级，再用 `cdg --version{:sh}` 确认版本不低于提示中的最低支持版本，然后重新执行刚才的命令；安装方式见[安装与登录](/zh/docs/get-started/installation)。停在 `cli_version_unsupported` 的工作流，要用升级后的 CLI 执行 `cdg dag recover <工作流>{:sh}` 恢复，没有升级就恢复，它会再次停下。
+处理办法是升级 CLI，再重新执行刚才的命令。提示里没有给出升级的做法时，按你的安装方式查下表：
 
-**提示建议升级 CLI。** 当前版本仍受支持、但 CodeDAG 服务建议升级时，`cdg auth status{:sh}` 和 `cdg dag submit{:sh}` 的输出最后多一行 `A newer CodeDAG CLI is recommended: <建议版本> (current version: <当前版本>).`。这只是提醒，命令照常完成，方便时用同样的方法升级即可。
+| 安装方式 | 升级的做法 |
+|---|---|
+| Homebrew | 运行 `brew upgrade codedag{:sh}`；装的是 `codedag-next`（新版本成为默认版本之前，先在这里发布）时，运行 `brew upgrade codedag-next{:sh}` |
+| npm 全局安装 | 运行 `npm install -g codedag@latest{:sh}` |
+| 直接下载（目前只有 Linux） | 从 [GitHub Releases 的最新版本](https://github.com/CodedagAI/codedag-home/releases/latest)下载对应平台的压缩包和 `SHA256SUMS`，在下载目录里运行 `sha256sum -c SHA256SUMS --ignore-missing{:sh}` 校验，再解压，用其中的 `codedag` 替换原来的程序文件；`cdg` 链接指向这个文件，不用重建 |
+
+CodeDAG 作为依赖装在某个项目里时（用 npm 安装时没有加 `-g`，或者用 pnpm 等包管理器装进了项目），升级提示给出的也是 `npm install -g codedag@latest{:sh}`，只是建议升级时也一样，但这条命令只会另装一份全局的 CodeDAG，不会更新项目里的那一份。这时改用原来的包管理器，把这个项目的 `codedag` 依赖更新到最新版本。
+
+升级之后，用 `cdg --version{:sh}` 确认版本不低于提示中的最低支持版本。升级时正在执行的工作流不受影响，会由原来的版本执行到结束；停在 `cli_version_unsupported` 的工作流则要用升级后的 CLI 执行 `cdg dag recover <工作流>{:sh}` 恢复，没有升级就恢复，它会再次停下。
 
 **Claude Code 版本过低。** CodeDAG 支持的 Claude Code 最低版本是 2.1.196。检测到本机装有 Claude Code 时，`cdg init{:sh}` 会核对版本，版本过低或取不到版本号时给出警告，初始化照常完成。忽略这个警告的话，问题会在任务执行时暴露：任务停在 `on-hold`，原因为 `agent-version-unsupported`，日志里有 `Claude CLI <版本> is unsupported for reliable lifecycle detection.`。用 `claude update{:sh}` 升级，再执行 `cdg task recover{:sh}`；如果恢复时仍提示版本不受支持，说明当前终端里的 `claude` 还是旧版本。
 
